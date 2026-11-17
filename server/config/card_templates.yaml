@@ -1,0 +1,13 @@
+# Card sentences (server/spec.md §11.4, S5).
+common.v1:
+  with_time_theme: "{요일}요일 {event}({theme} 테마)에 맞춰 집을 준비해 둘게요"
+  with_time:       "{요일}요일 {event}에 맞춰 집을 준비해 둘게요"
+  held:            "{event} 준비를 알아챘어요. 일정을 캘린더에 넣어 두시면 그 시간에 맞춰 준비할게요"
+  # theme: situation.theme. For unclassified with no event, {event} = "이번"
+lines:
+  dropped_note: "준비하지 않았어요"
+  blocked_note: {plan_unconfirmed: "허브가 최신 계획을 확인하지 못해 시작하지 않았어요", offline: "기기가 연결되지 않아 실행하지 못했어요",
+                 in_use_by_person: "사용 중이라 실행하지 않았어요", not_delegated: "맡기지 않은 동작이라 실행하지 않았어요",
+                 quiet_hours: "조용한 시간이라 실행하지 않았어요", default: "실행하지 못했어요"}
+  user_changed_note: "사용자가 {device_name}{을/를} 바꿔 현재 상태를 유지했어요"   # 을 after a final consonant, else 를
+  rejected_note: "허브가 받지 못한 할 일이에요"

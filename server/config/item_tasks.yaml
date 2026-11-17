@@ -1,0 +1,45 @@
+# Per-item tasks. Trigger is always package.brought_in (released by the server, HUB-12).
+# A task is made only if the hub list has a device of `device_type` with `cmd` delegated; otherwise nothing.
+# `name` is the task id name (t_{name}#n). Durations: hours as numbers, or keys of numbers.yaml.
+tasks:
+  - name: fridge                 # care notice on the fridge screen
+    when:
+      any:
+        - {groups: [음·식료품, 농축수산물]}
+        - {group: 화장품, attribute: {key: 보관, value: 냉장}}
+    device_type: fridge
+    cmd: show_notice
+    value: llm_notice            # text from the S4 LLM (fridge_notices); no text -> no task
+    way: notice
+    end: {on: fridge.door_opened, after: notice_after_door_h, or_after: notice_max_h, restore: false}
+  - name: freeze                 # super-freeze for bulk meat / frozen food
+    when:
+      groups: [음·식료품, 농축수산물]
+      type_words: [소고기, 돼지고기, 닭, 목살, 삼겹살, 갈비, 생선, 냉동]
+      bulk: true
+    device_type: fridge
+    cmd: super_freeze
+    way: run
+    end: {on: fridge.super_freeze_done, or_after: 24, restore: false}
+  - name: styler                 # styler course standby for clothes
+    when: {group: 의복}
+    device_type: styler
+    cmd: set_course_standby
+    value: {course: from_material}   # material_courses.yaml, else the device default
+    way: standby
+    end: {on: styler.started, by: user, restore: false}
+  - name: shoes                  # shoe-care standby
+    when: {group: 신발}
+    device_type: shoe_care
+    cmd: set_course_standby
+    way: standby
+    end: {on: shoe_care.started, by: user, restore: false}
+  - name: mattress               # bedroom purifier deodorising for a new mattress
+    when: {group: 가구, type_contains: 매트리스}
+    device_type: purifier
+    room: 침실                    # only if the home has exactly one bedroom or exactly one bedroom purifier
+    cmd: mode
+    value: {mode: deodorize}
+    way: run
+    end: {on: purifier.odor_normal, or_after: 72, restore: true}
+bulk: {min_qty: 3, or_name_kg_at_least: 1}   # "대량"

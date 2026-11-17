@@ -1,0 +1,31 @@
+# S4 user message blocks, in this order (server/spec.md §10.5).
+intent:
+  header: "[의도 {N}]"
+  unclassified_first_line: "이름표가 없는 의도다. 실행 할 일은 만들지 않는다 (대기·안내만)"
+  lines: |-
+    의도: {INTENT_ID} ({NAME})
+    의도 문장: {INTENT_TEXT}
+    상황: event {EVENT} · guests {GUESTS} · activity {ACTIVITY} · theme {THEME}
+    시각: {TIME}
+    물건: {ITEMS}
+  unknown: "모름"
+  time_known: "{WEEKDAY}요일 {START}~{END} ({DAYS}일 뒤)"
+  time_unknown: "모름 (일정이 아직 없음)"
+notice_items:
+  header: "[관리법 문구가 필요한 물건]"
+  line: "- {TYPE} × {QTY} · {GROUP}{BUNDLE}"      # BUNDLE = " · 의도 {N}의 물건" or ""
+home:
+  header: "[이 집]"
+  types: "가구 유형: {TYPES}"
+  rooms: "방: {ROOMS}"
+devices:
+  header: "[이 집 기기]"
+  how: '"id · 종류 · 방 · 동작(값 범위)"이다. 이 목록의 기기와 동작만 쓸 수 있다.'
+  line: "- {ID} · {NAME} · {ROOM} · {COMMANDS}"
+  room_unknown: "방 모름"
+reactions:
+  header: "[이 집이 지난번 같은 의도에서 남긴 반응]"
+  how: "지난번 같은 의도({NAME} · {TAGS})에서 사용자가 남긴 반응이다. 이 반응대로 이번 할 일을 만든다."
+  off: "- 사용자가 꺼 둔 줄이다. 이 목적의 할 일은 만들지 않는다. 같은 목적을 다른 기기로 다시 만들지도 않는다: {LINE} ({ACTIONS})"
+  changed: "- 사용자가 직접 바꾼 것이다. 이번엔 그에 맞춘다: {CHANGE}"
+  changed_how: "  → 값이 바뀐 동작은 사람이 고른 값으로 만든다. 끝 시점을 바꾼 경우는 end_after_start_minutes에 일정 시작 뒤 몇 분에 끝낼지 쓴다"

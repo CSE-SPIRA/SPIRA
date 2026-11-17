@@ -1,0 +1,11 @@
+# Device type -> Korean display name for prompts and card notes (server/spec.md §4.5). Unknown types show the type string.
+cleaner: 로봇청소기
+light: 조명
+display: TV
+cooktop: 인덕션
+oven: 오븐
+fridge: 냉장고
+smart_plug: 스마트 플러그
+purifier: 공기청정기
+styler: 스타일러
+shoe_care: 신발관리기

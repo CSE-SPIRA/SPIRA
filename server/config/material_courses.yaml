@@ -1,0 +1,6 @@
+# Clothing material (S1 attribute 재질) -> styler course (server/spec.md §4.5). Used only if the course is in the device enum.
+울: 울케어
+캐시미어: 울케어
+니트: 울케어
+면: 표준
+가죽: 표준
