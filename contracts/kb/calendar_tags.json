@@ -1,6 +1,6 @@
 {
   "$comment": "Calendar tags (30). Owner: KB (Uijin). The server LLM picks only from these when it receives a calendar; titles are not stored. (KB-09, KB-15)",
-  "source": "CSE-SPIRA/SPIRA_KB config/lists/calendar_tags.yaml @20d569f",
+  "source": "uijinlee-luj/SPIRA_KB config/lists/calendar_tags.yaml @20d569f",
   "version": 1,
   "rules": [
     "Pick a tag only when the title clearly says so; otherwise no tag.",

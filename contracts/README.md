@@ -26,7 +26,7 @@ Version `0.1.0` (also in `enums.json`). Source: the Notion page *SPIRA integrati
 | `generated/` | Data models from the schemas: Python (server, hub) and Dart (app). Do not edit |
 | `check/` | `check.py` (run by CI) and `bad/` (cases that must fail) |
 
-Not here: connection URLs and keys (environment variables only), the embedding function (install the SPIRA_KB package, KB-16: `pip install "spira-kb[embed] @ git+https://github.com/CSE-SPIRA/SPIRA_KB@<kb version>"`), anything internal to one part.
+Not here: connection URLs and keys (environment variables only), the embedding function (install the SPIRA_KB package, KB-16: `pip install "spira-kb[embed] @ git+https://github.com/uijinlee-luj/SPIRA_KB@<kb version>"`), anything internal to one part.
 
 ## Use
 

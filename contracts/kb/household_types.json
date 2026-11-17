@@ -1,6 +1,6 @@
 {
   "$comment": "Household types (20) in 5 axes and the combination rules. Owner: KB (Uijin). The app blocks 'blocked' combinations at onboarding; the server checks them on PUT profile (422 household_types_invalid). (APP-12, KB-09, KB-15)",
-  "source": "CSE-SPIRA/SPIRA_KB config/lists/household.yaml @20d569f",
+  "source": "uijinlee-luj/SPIRA_KB config/lists/household.yaml @20d569f",
   "version": 1,
   "axes": {
     "size": {

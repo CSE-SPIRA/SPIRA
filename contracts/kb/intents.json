@@ -1,6 +1,6 @@
 {
   "$comment": "Intent list (30) + reserved ids. Owner: KB (Uijin). Server reads it at start for S3 labels and S4 holiday lookup (related_tags). Ids never change (KB-14). (KB-08, KB-15)",
-  "source": "CSE-SPIRA/SPIRA_KB config/lists/intents.yaml @20d569f",
+  "source": "uijinlee-luj/SPIRA_KB config/lists/intents.yaml @20d569f",
   "version": 1,
   "reserved": [
     "none",
