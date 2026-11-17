@@ -1,0 +1,43 @@
+{
+  "card_id": "nc_340",
+  "episode_id": "ep_9120",
+  "intent_id": "family_gathering",
+  "template": "common.v1",
+  "text": "토요일 가족 모임에 맞춰 집을 준비해 둘게요",
+  "starts_at": "2026-11-07T18:00:00+09:00",
+  "lines": [
+    {
+      "task_id": "t_clean#1",
+      "text": "손님 오기 전 거실 청소",
+      "checked": true,
+      "when": {
+        "time": "2026-11-07T16:30:00+09:00"
+      },
+      "state": "scheduled",
+      "end_state": null,
+      "note": null
+    },
+    {
+      "task_id": "t_music#1",
+      "text": "가족이 오시면 잔잔한 음악",
+      "checked": true,
+      "when": {
+        "event": "guest_arrived"
+      },
+      "state": "scheduled",
+      "end_state": null,
+      "note": null
+    }
+  ],
+  "summary": {
+    "done": 0,
+    "total": 2,
+    "waiting_for": null
+  },
+  "stopped": false,
+  "buttons": [
+    "stop"
+  ],
+  "notify": true,
+  "updated_at": "2026-11-03T08:02:10+09:00"
+}

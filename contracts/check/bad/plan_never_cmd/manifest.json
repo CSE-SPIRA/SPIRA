@@ -1,0 +1,10 @@
+{
+  "$comment": "oven start is not delegated",
+  "expect": "is in never",
+  "files": {
+    "plan.json": {
+      "schema": "plan.json"
+    }
+  },
+  "devices": "../../../fixtures/ep_9031/devices.json"
+}

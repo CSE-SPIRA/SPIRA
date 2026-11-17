@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "card.json",
+  "title": "Card",
+  "description": "Notice card for one preparation (= one intent, C-6 v2). Server -> app via GET /v1/households/{hid}/cards. Line states follow state-mapping.md. (APP-04, APP-14)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["card_id", "episode_id", "intent_id", "template", "text", "starts_at", "lines", "summary", "stopped", "buttons", "notify", "updated_at"],
+  "properties": {
+    "card_id": {"$ref": "common.json#/$defs/CardId"},
+    "episode_id": {"$ref": "common.json#/$defs/EpisodeId"},
+    "intent_id": {"type": "string", "description": "From kb/intents.json, or unclassified."},
+    "template": {"type": "string", "description": "Text template id, e.g. common.v1."},
+    "text": {"type": "string", "description": "Card sentence (display text)."},
+    "starts_at": {"anyOf": [{"$ref": "common.json#/$defs/DateTime"}, {"type": "null"}], "description": "Start of the linked schedule; null while waiting for a time."},
+    "lines": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"$ref": "#/$defs/Line"}},
+    "summary": {
+      "type": "object", "additionalProperties": false, "required": ["done", "total", "waiting_for"],
+      "properties": {
+        "done": {"type": "integer", "minimum": 0},
+        "total": {"type": "integer", "minimum": 0},
+        "waiting_for": {"anyOf": [{"$ref": "common.json#/$defs/TriggerEvent"}, {"type": "null"}]}
+      }
+    },
+    "stopped": {"type": "boolean"},
+    "buttons": {"type": "array", "items": {"$ref": "common.json#/$defs/CardButton"}, "description": "Empty after stop."},
+    "notify": {"type": "boolean", "description": "true only for a new card or when a held card found its time. Show one local notification per (card_id, updated_at)."},
+    "updated_at": {"$ref": "common.json#/$defs/DateTime"}
+  },
+  "$defs": {
+    "Line": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "text", "checked", "when", "state", "end_state", "note"],
+      "properties": {
+        "task_id": {"$ref": "common.json#/$defs/TaskId"},
+        "text": {"type": "string"},
+        "checked": {"type": "boolean"},
+        "when": {
+          "description": "Planned time or trigger event; null while held.",
+          "anyOf": [
+            {"type": "object", "additionalProperties": false, "required": ["time"], "properties": {"time": {"$ref": "common.json#/$defs/DateTime"}}},
+            {"type": "object", "additionalProperties": false, "required": ["event"], "properties": {"event": {"$ref": "common.json#/$defs/TriggerEvent"}}},
+            {"type": "null"}
+          ]
+        },
+        "state": {"$ref": "common.json#/$defs/LineState"},
+        "end_state": {"anyOf": [{"$ref": "common.json#/$defs/EndState"}, {"type": "null"}]},
+        "note": {"type": ["string", "null"], "description": "Display text, e.g. why a line is blocked."}
+      }
+    }
+  }
+}

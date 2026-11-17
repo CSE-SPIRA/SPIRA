@@ -1,0 +1,34 @@
+{
+  "household_id": "h_042",
+  "intents": [
+    {
+      "intent_id": "kid_birthday_party",
+      "name": "아이 생일 파티",
+      "calendar_tags": [
+        "생일"
+      ],
+      "episodes": [
+        {
+          "case_id": "home_h_042_ep_9031_1",
+          "date": "2026-10-17",
+          "verdict": "match"
+        }
+      ],
+      "off_lines": [
+        {
+          "line": "아이 안전 모드 (인덕션 잠금·전기포트 차단)",
+          "until": "2027-04-14",
+          "case_id": "home_h_042_ep_9031_1"
+        }
+      ],
+      "changed": [
+        {
+          "device_type": "light",
+          "change": "손님 도착 뒤 색온도 2700K로 바꿈",
+          "case_id": "home_h_042_ep_9031_1"
+        }
+      ],
+      "habit_time": null
+    }
+  ]
+}

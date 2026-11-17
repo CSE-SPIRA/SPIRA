@@ -1,0 +1,33 @@
+# Contracts CI: runs on every PR and on pushes to develop/main (no path filter, so it can be a required check).
+# Fails if contracts/ is inconsistent or contracts/generated/ is out of date.
+name: contracts
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: contracts/check/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: pip install -r contracts/check/requirements.txt
+      - name: Check schemas, enums, fixtures, openapi
+        run: python contracts/check/check.py
+      - name: Generated models are up to date
+        run: |
+          bash contracts/codegen/generate.sh
+          if [ -n "$(git status --porcelain -- contracts/generated)" ]; then
+            git status --porcelain -- contracts/generated
+            echo "contracts/generated is out of date: run bash contracts/codegen/generate.sh and commit"
+            exit 1
+          fi

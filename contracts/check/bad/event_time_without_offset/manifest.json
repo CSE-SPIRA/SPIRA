@@ -1,0 +1,9 @@
+{
+  "$comment": "time must be ISO 8601 with offset (COM-02)",
+  "expect": "does not match",
+  "files": {
+    "events.json": {
+      "schema": "event_batch.json"
+    }
+  }
+}

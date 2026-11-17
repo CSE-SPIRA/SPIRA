@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "household_create.json",
+  "title": "HouseholdCreate",
+  "description": "App -> server: POST /v1/households (onboarding). household_types may be empty and set later via profile. (HUB-14, APP-12)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["household_types"],
+  "properties": {"household_types": {"type": "array", "items": {"type": "string"}, "description": "Values from kb/household_types.json."}}
+}

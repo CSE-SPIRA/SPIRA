@@ -1,0 +1,138 @@
+[
+  {
+    "event_id": "ev_9101",
+    "household_id": "h_042",
+    "type": "package.brought_in",
+    "source": "hub",
+    "at": "2026-10-16T18:05:10+09:00",
+    "payload": {
+      "count": 1
+    }
+  },
+  {
+    "event_id": "ev_9102",
+    "household_id": "h_042",
+    "type": "fridge.door_opened",
+    "source": "fridge_01",
+    "at": "2026-10-16T18:07:44+09:00",
+    "payload": {
+      "by": "user"
+    }
+  },
+  {
+    "event_id": "ev_9201",
+    "household_id": "h_042",
+    "type": "cleaner.started",
+    "source": "cleaner_01",
+    "at": "2026-10-17T12:30:04+09:00",
+    "payload": {
+      "by": "spira"
+    }
+  },
+  {
+    "event_id": "ev_9202",
+    "household_id": "h_042",
+    "type": "cleaner.completed",
+    "source": "cleaner_01",
+    "at": "2026-10-17T12:58:31+09:00",
+    "payload": {
+      "by": "spira"
+    }
+  },
+  {
+    "event_id": "ev_9303",
+    "household_id": "h_042",
+    "type": "guest_arrived",
+    "source": "hub",
+    "at": "2026-10-17T13:52:31+09:00",
+    "payload": {
+      "rule": "초인종 + 도어락 열림, 일정 30분 전부터 첫 1회"
+    }
+  },
+  {
+    "event_id": "ev_9304",
+    "household_id": "h_042",
+    "type": "display.changed",
+    "source": "display_01",
+    "at": "2026-10-17T13:52:36+09:00",
+    "payload": {
+      "by": "spira",
+      "property": "play_mood",
+      "from": null,
+      "to": {
+        "scene": "kids_party"
+      }
+    }
+  },
+  {
+    "event_id": "ev_9305",
+    "household_id": "h_042",
+    "type": "light.changed",
+    "source": "light_01",
+    "at": "2026-10-17T13:52:39+09:00",
+    "payload": {
+      "by": "spira",
+      "property": "color",
+      "from": {
+        "kelvin": 3000
+      },
+      "to": {
+        "hue": 330,
+        "saturation": 45,
+        "brightness": 70
+      }
+    }
+  },
+  {
+    "event_id": "ev_9350",
+    "household_id": "h_042",
+    "type": "oven.started",
+    "source": "oven_01",
+    "at": "2026-10-17T14:20:02+09:00",
+    "payload": {
+      "by": "user"
+    }
+  },
+  {
+    "event_id": "ev_9410",
+    "household_id": "h_042",
+    "type": "light.changed",
+    "source": "light_01",
+    "at": "2026-10-17T15:10:05+09:00",
+    "payload": {
+      "by": "user",
+      "property": "color_temp",
+      "from": {
+        "hue": 330,
+        "saturation": 45,
+        "brightness": 70
+      },
+      "to": {
+        "kelvin": 2700
+      }
+    }
+  },
+  {
+    "event_id": "ev_9500",
+    "household_id": "h_042",
+    "type": "event_end",
+    "source": "hub",
+    "at": "2026-10-17T17:50:00+09:00",
+    "payload": {}
+  },
+  {
+    "event_id": "ev_9501",
+    "household_id": "h_042",
+    "type": "display.changed",
+    "source": "display_01",
+    "at": "2026-10-17T17:50:12+09:00",
+    "payload": {
+      "by": "spira",
+      "property": "play_mood",
+      "from": {
+        "scene": "kids_party"
+      },
+      "to": null
+    }
+  }
+]

@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plan.json",
+  "title": "Plan",
+  "description": "Preparation plan for one order (C-1 v3). Server -> hub; the hub runs it without interpreting values.\nSent inside GET /v1/hub/plans. A larger plan_version replaces the older one. (HUB-03, HUB-04)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["plan_id", "household_id", "plan_version", "devices_revision", "sent_at", "tasks", "cancelled"],
+  "properties": {
+    "plan_id": {"$ref": "common.json#/$defs/EpisodeId"},
+    "household_id": {"$ref": "common.json#/$defs/HouseholdId"},
+    "plan_version": {"type": "integer", "minimum": 1},
+    "devices_revision": {"type": "integer", "minimum": 0, "description": "Devices revision the plan was made with. The hub checks at run time that each cmd is still delegated (else blocked: not_delegated)."},
+    "sent_at": {"$ref": "common.json#/$defs/DateTime"},
+    "tasks": {"type": "array", "items": {"$ref": "#/$defs/Task"}, "description": "All live tasks of this version."},
+    "cancelled": {"type": "array", "items": {"$ref": "#/$defs/Cancelled"}, "description": "Every task cancelled so far (cumulative across versions)."}
+  },
+  "$defs": {
+    "Task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "source", "way", "actions", "trigger", "end"],
+      "properties": {
+        "task_id": {"$ref": "common.json#/$defs/TaskId"},
+        "source": {"$ref": "common.json#/$defs/TaskSource"},
+        "way": {"$ref": "common.json#/$defs/Way"},
+        "actions": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/Action"}},
+        "trigger": {"$ref": "#/$defs/Trigger"},
+        "end": {"$ref": "#/$defs/End"}
+      }
+    },
+    "Action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device", "cmd"],
+      "properties": {
+        "device": {"$ref": "common.json#/$defs/DeviceId"},
+        "cmd": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "value": {
+          "description": "Absent when the command has no value_schema. An object of numbers / enum strings for parameter commands; a string only for value_schema 'text' (show_notice).",
+          "oneOf": [
+            {"type": "object", "minProperties": 1, "additionalProperties": {"type": ["number", "string"]}},
+            {"type": "string", "minLength": 1}
+          ]
+        }
+      }
+    },
+    "Trigger": {
+      "oneOf": [
+        {"$ref": "#/$defs/TimeTrigger"},
+        {"$ref": "#/$defs/EventTrigger"}
+      ]
+    },
+    "TimeTrigger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["time"],
+      "properties": {"time": {"$ref": "common.json#/$defs/DateTime"}}
+    },
+    "EventTrigger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event"],
+      "properties": {
+        "event": {"$ref": "common.json#/$defs/TriggerEvent"},
+        "first_only": {"type": "boolean", "description": "Run on the first matching event only."},
+        "window": {
+          "type": "object", "additionalProperties": false, "required": ["from", "to"],
+          "description": "Only events inside this window count.",
+          "properties": {"from": {"$ref": "common.json#/$defs/DateTime"}, "to": {"$ref": "common.json#/$defs/DateTime"}}
+        },
+        "released": {"type": "boolean", "description": "package.brought_in only. false = wait; the server sends a new version with true once it links the delivery to this order (HUB-12)."},
+        "at": {"$ref": "common.json#/$defs/DateTime", "description": "With released true: when the package was brought in."}
+      }
+    },
+    "End": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["restore"],
+      "description": "Exactly one of on / time.",
+      "properties": {
+        "on": {"$ref": "common.json#/$defs/EventName", "description": "End event."},
+        "time": {"$ref": "common.json#/$defs/DateTime", "description": "Absolute end (a household that changed the end point before)."},
+        "by": {"$ref": "common.json#/$defs/By", "description": "Only an end event caused by this actor counts."},
+        "after": {"$ref": "common.json#/$defs/Duration", "description": "End this long after the end event."},
+        "or_time": {"$ref": "common.json#/$defs/DateTime", "description": "End at this time if the end event never comes."},
+        "or_after": {"$ref": "common.json#/$defs/Duration", "description": "End this long after the trigger if the end event never comes."},
+        "restore": {"type": "boolean", "description": "Put devices back to the saved state at the end."}
+      },
+      "oneOf": [{"required": ["on"]}, {"required": ["time"]}],
+      "not": {"required": ["or_time", "or_after"]}
+    },
+    "Cancelled": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "restore"],
+      "properties": {
+        "task_id": {"$ref": "common.json#/$defs/TaskId"},
+        "restore": {"type": "boolean", "description": "true if the task had started: undo it."}
+      }
+    }
+  }
+}

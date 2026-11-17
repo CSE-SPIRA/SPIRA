@@ -1,0 +1,8 @@
+# Tools for check.py and codegen (CI and local).
+jsonschema==4.26.0
+referencing==0.37.0
+PyYAML==6.0.3
+openapi-spec-validator==0.9.0
+datamodel-code-generator==0.97.0
+black==26.10.1
+isort==8.0.1

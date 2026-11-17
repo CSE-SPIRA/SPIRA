@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "profile.json",
+  "title": "Profile",
+  "description": "Household types. App -> server: PUT /v1/households/{hid}/profile (request and response). Blocked combinations (kb/household_types.json) -> 422 household_types_invalid. (APP-12)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["household_types"],
+  "properties": {
+    "household_id": {"$ref": "common.json#/$defs/HouseholdId", "description": "Response only."},
+    "household_types": {"type": "array", "items": {"type": "string"}}
+  }
+}

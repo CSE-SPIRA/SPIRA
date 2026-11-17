@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "calendar_response.json",
+  "title": "CalendarResponse",
+  "description": "Response 202 of PUT /v1/households/{hid}/calendar. Tagging runs in the background. (APP-03)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["accepted"],
+  "properties": {"accepted": {"type": "integer", "minimum": 0}}
+}

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ack.json",
+  "title": "Ack",
+  "description": "Hub -> server after taking a new plan version: POST /v1/hub/plans/{plan_id}/ack. Reject only malformed tasks, never because of house state. (HUB-15)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["plan_version", "status", "rejected_tasks"],
+  "properties": {
+    "plan_version": {"type": "integer", "minimum": 1},
+    "status": {"$ref": "common.json#/$defs/AckStatus", "description": "rejected = the whole plan is unreadable; admitted = some or all tasks taken."},
+    "rejected_tasks": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["task_id", "reason"],
+        "properties": {"task_id": {"$ref": "common.json#/$defs/TaskId"}, "reason": {"$ref": "common.json#/$defs/AckRejectReason"}}
+      }
+    }
+  }
+}

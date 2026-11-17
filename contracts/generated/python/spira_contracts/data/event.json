@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "event.json",
+  "title": "Event",
+  "description": "A home event or device event (C-3). Hub -> server inside POST /v1/hub/events. Device events carry payload.by; '{type}.changed' also carries property / from / to. (HUB-07)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "household_id",
+    "type",
+    "source",
+    "at",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {
+      "$ref": "common.json#/$defs/EventId"
+    },
+    "household_id": {
+      "$ref": "common.json#/$defs/HouseholdId"
+    },
+    "type": {
+      "$ref": "common.json#/$defs/EventName"
+    },
+    "source": {
+      "type": "string",
+      "description": "'hub' for home events, otherwise the device id."
+    },
+    "at": {
+      "$ref": "common.json#/$defs/DateTime"
+    },
+    "payload": {
+      "type": "object",
+      "properties": {
+        "by": {
+          "$ref": "common.json#/$defs/By"
+        },
+        "property": {
+          "type": "string",
+          "description": "Changed command / property, e.g. color_temp."
+        },
+        "from": {
+          "description": "Value before (object or null)."
+        },
+        "to": {
+          "description": "Value after."
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "package.brought_in: number of packages."
+        },
+        "rule": {
+          "type": "string",
+          "description": "guest_arrived / event_end: how the hub decided (display text)."
+        }
+      },
+      "additionalProperties": true,
+      "description": "Event details. Other keys are allowed (e.g. rule of guest_arrived) and are stored, not interpreted."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "$ref": "common.json#/$defs/HomeEvent"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "source": {
+            "const": "hub"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "payload": {
+            "required": [
+              "by"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "pattern": "\\.changed$"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "by",
+              "property",
+              "from",
+              "to"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

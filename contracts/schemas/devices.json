@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "devices.json",
+  "title": "Devices",
+  "description": "Devices the household delegated to SPIRA (C-2). Hub -> server: PUT /v1/hub/households/{hid}/devices at start and whenever devices, rooms or delegation change (revision + 1). (HUB-05, HUB-06, HUB-11)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["household_id", "revision", "updated_at", "devices"],
+  "properties": {
+    "household_id": {"$ref": "common.json#/$defs/HouseholdId"},
+    "revision": {"type": "integer", "minimum": 0},
+    "updated_at": {"$ref": "common.json#/$defs/DateTime"},
+    "devices": {"type": "array", "items": {"$ref": "#/$defs/Device"}}
+  },
+  "$defs": {
+    "Device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "room", "substrate", "commands", "events", "never", "noisy"],
+      "properties": {
+        "id": {"$ref": "common.json#/$defs/DeviceId"},
+        "type": {"$ref": "common.json#/$defs/DeviceType"},
+        "room": {"type": ["string", "null"], "description": "Room name as the user wrote it (e.g. 거실). null = unknown."},
+        "label": {"type": "string", "description": "What a smart plug powers (e.g. 전기포트)."},
+        "substrate": {"$ref": "common.json#/$defs/Substrate"},
+        "commands": {"type": "array", "items": {"$ref": "#/$defs/Command"}, "description": "Delegated commands. The server plans only with these."},
+        "events": {"type": "array", "items": {"$ref": "common.json#/$defs/DeviceEvent"}},
+        "never": {"type": "array", "items": {"type": "string"}, "description": "Commands not delegated (e.g. oven start)."},
+        "noisy": {"type": "boolean", "description": "Noisy devices are not run 22:00-08:00."}
+      }
+    },
+    "Command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cmd"],
+      "properties": {
+        "cmd": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "value_schema": {
+          "description": "Absent = the command takes no value. 'text' = free text (show_notice only). Otherwise one entry per parameter; the server fills every parameter.",
+          "oneOf": [
+            {"const": "text"},
+            {"type": "object", "minProperties": 1, "additionalProperties": {"$ref": "#/$defs/Param"}}
+          ]
+        }
+      }
+    },
+    "Param": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["range", "default"],
+         "properties": {"range": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}, "default": {"type": "number"}}},
+        {"type": "object", "additionalProperties": false, "required": ["enum", "default"],
+         "properties": {"enum": {"type": "array", "items": {"type": "string"}, "minItems": 1}, "default": {"type": "string"}}}
+      ]
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "$comment": "more than 4 lines on one card",
+  "expect": "[maxItems]",
+  "files": {
+    "card.json": {
+      "schema": "card.json"
+    }
+  }
+}

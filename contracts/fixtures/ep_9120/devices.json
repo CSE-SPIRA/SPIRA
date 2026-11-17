@@ -1,0 +1,124 @@
+{
+  "household_id": "h_051",
+  "revision": 1,
+  "updated_at": "2026-11-01T09:00:00+09:00",
+  "devices": [
+    {
+      "id": "cleaner_01",
+      "type": "cleaner",
+      "room": "거실",
+      "substrate": "virtual",
+      "commands": [
+        {
+          "cmd": "clean",
+          "value_schema": {
+            "room": {
+              "enum": [
+                "거실",
+                "주방",
+                "침실"
+              ],
+              "default": "거실"
+            }
+          }
+        }
+      ],
+      "events": [
+        "started",
+        "completed"
+      ],
+      "never": [],
+      "noisy": true
+    },
+    {
+      "id": "speaker_01",
+      "type": "speaker",
+      "room": "거실",
+      "substrate": "virtual",
+      "commands": [
+        {
+          "cmd": "play",
+          "value_schema": {
+            "playlist": {
+              "enum": [
+                "calm",
+                "party",
+                "family"
+              ],
+              "default": "calm"
+            },
+            "volume": {
+              "range": [
+                0,
+                100
+              ],
+              "default": 30
+            }
+          }
+        },
+        {
+          "cmd": "stop"
+        }
+      ],
+      "events": [
+        "changed"
+      ],
+      "never": [
+        "purchase"
+      ],
+      "noisy": true
+    },
+    {
+      "id": "oven_01",
+      "type": "oven",
+      "room": "주방",
+      "substrate": "virtual",
+      "commands": [
+        {
+          "cmd": "set_cook_standby",
+          "value_schema": {
+            "temp_c": {
+              "range": [
+                40,
+                250
+              ],
+              "default": 180
+            },
+            "minutes": {
+              "range": [
+                1,
+                180
+              ],
+              "default": 20
+            }
+          }
+        }
+      ],
+      "events": [
+        "started",
+        "stopped"
+      ],
+      "never": [
+        "start"
+      ],
+      "noisy": false
+    },
+    {
+      "id": "fridge_01",
+      "type": "fridge",
+      "room": "주방",
+      "substrate": "virtual",
+      "commands": [
+        {
+          "cmd": "show_notice",
+          "value_schema": "text"
+        }
+      ],
+      "events": [
+        "door_opened"
+      ],
+      "never": [],
+      "noisy": false
+    }
+  ]
+}

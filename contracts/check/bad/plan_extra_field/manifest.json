@@ -1,0 +1,10 @@
+{
+  "$comment": "target_room was removed in C-1 v3",
+  "expect": "Additional properties",
+  "files": {
+    "plan.json": {
+      "schema": "plan.json"
+    }
+  },
+  "devices": "../../../fixtures/ep_9031/devices.json"
+}

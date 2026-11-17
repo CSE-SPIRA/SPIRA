@@ -1,0 +1,80 @@
+{
+  "$comment": "Scenario ep_9031 (HUB-17): kid birthday, household h_042, 7 devices. Same values as the simulator script; order of events in timeline.md.",
+  "devices": "devices.json",
+  "files": {
+    "household.create.json": {
+      "schema": "household_create.json",
+      "what": "Onboarding request"
+    },
+    "household.created.json": {
+      "schema": "household_created.json",
+      "what": "Onboarding response (key is a placeholder)"
+    },
+    "devices.json": {
+      "schema": "devices.json",
+      "what": "Device list the hub registered (revision 3)"
+    },
+    "calendar.json": {
+      "schema": "calendar.json",
+      "what": "Calendar the app sent; server keeps tags only"
+    },
+    "plan.v1.json": {
+      "schema": "plan.json",
+      "what": "Plan right after judging (card 4 lines + 2 fridge notices waiting for the package)"
+    },
+    "ack.v1.json": {
+      "schema": "ack.json",
+      "what": "Hub took plan v1"
+    },
+    "reactions.json": {
+      "schema": "reaction.json",
+      "array": true,
+      "what": "User switched off the child-safety line"
+    },
+    "plan.v2.json": {
+      "schema": "plan.json",
+      "what": "After the line was switched off"
+    },
+    "plan.v3.json": {
+      "schema": "plan.json",
+      "what": "After the package was brought in (fridge notices released)"
+    },
+    "pull.json": {
+      "schema": "plan_pull.json",
+      "what": "Hub pull response after v3"
+    },
+    "events.json": {
+      "schema": "event_batch.json",
+      "what": "Every event the hub sends, in time order"
+    },
+    "executions.json": {
+      "schema": "execution_result.json",
+      "array": true,
+      "what": "Every execution / restore result, one request each"
+    },
+    "card.v1.json": {
+      "schema": "card.json",
+      "what": "Card when first shown (notify true)"
+    },
+    "card.final.json": {
+      "schema": "card.json",
+      "what": "Card after event_end"
+    },
+    "episode.json": {
+      "schema": "episode.json",
+      "what": "Episode after the observation closed"
+    },
+    "rationale.json": {
+      "schema": "rationale.json",
+      "what": "Rationale screen data after the end"
+    },
+    "case_row.json": {
+      "schema": "case_row.json",
+      "what": "This-home memory row written at the end"
+    },
+    "memory.json": {
+      "schema": "memory.json",
+      "what": "Memory screen data after the end"
+    }
+  }
+}

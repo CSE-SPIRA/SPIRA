@@ -1,0 +1,82 @@
+{
+  "plan_id": "ep_9120",
+  "household_id": "h_051",
+  "plan_version": 2,
+  "devices_revision": 1,
+  "sent_at": "2026-11-03T08:02:10+09:00",
+  "tasks": [
+    {
+      "task_id": "t_clean#1",
+      "source": "situation",
+      "way": "run",
+      "actions": [
+        {
+          "device": "cleaner_01",
+          "cmd": "clean",
+          "value": {
+            "room": "거실"
+          }
+        }
+      ],
+      "trigger": {
+        "time": "2026-11-07T16:30:00+09:00"
+      },
+      "end": {
+        "on": "event_end",
+        "or_time": "2026-11-08T00:00:00+09:00",
+        "restore": false
+      }
+    },
+    {
+      "task_id": "t_music#1",
+      "source": "situation",
+      "way": "run",
+      "actions": [
+        {
+          "device": "speaker_01",
+          "cmd": "play",
+          "value": {
+            "playlist": "family",
+            "volume": 25
+          }
+        }
+      ],
+      "trigger": {
+        "event": "guest_arrived",
+        "first_only": true,
+        "window": {
+          "from": "2026-11-07T17:30:00+09:00",
+          "to": "2026-11-07T21:00:00+09:00"
+        }
+      },
+      "end": {
+        "on": "event_end",
+        "or_time": "2026-11-08T00:00:00+09:00",
+        "restore": true
+      }
+    },
+    {
+      "task_id": "t_fridge#1",
+      "source": "item",
+      "way": "notice",
+      "actions": [
+        {
+          "device": "fridge_01",
+          "cmd": "show_notice",
+          "value": "핏물을 키친타월로 닦고 양념하기 전까지 냉장고 맨 아래 칸에 두세요"
+        }
+      ],
+      "trigger": {
+        "event": "package.brought_in",
+        "released": false
+      },
+      "end": {
+        "on": "fridge.door_opened",
+        "after": "2h",
+        "or_after": "12h",
+        "restore": false
+      }
+    }
+  ],
+  "cancelled": []
+}

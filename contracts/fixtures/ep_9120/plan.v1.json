@@ -1,0 +1,32 @@
+{
+  "plan_id": "ep_9120",
+  "household_id": "h_051",
+  "plan_version": 1,
+  "devices_revision": 1,
+  "sent_at": "2026-11-02T20:11:30+09:00",
+  "tasks": [
+    {
+      "task_id": "t_fridge#1",
+      "source": "item",
+      "way": "notice",
+      "actions": [
+        {
+          "device": "fridge_01",
+          "cmd": "show_notice",
+          "value": "핏물을 키친타월로 닦고 양념하기 전까지 냉장고 맨 아래 칸에 두세요"
+        }
+      ],
+      "trigger": {
+        "event": "package.brought_in",
+        "released": false
+      },
+      "end": {
+        "on": "fridge.door_opened",
+        "after": "2h",
+        "or_after": "12h",
+        "restore": false
+      }
+    }
+  ],
+  "cancelled": []
+}

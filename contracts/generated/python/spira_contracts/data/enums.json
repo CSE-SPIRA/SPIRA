@@ -1,0 +1,127 @@
+{
+  "$comment": "Closed string values shared by server, hub, app and KB. Read them from here (or the generated code); do not hardcode. Not here: IDs (rules.md), room names and display text, intents / calendar tags / household types (kb/). (COM-03)",
+  "version": "0.1.0",
+  "way": {
+    "used_in": ["plan.tasks[].way", "rationale.tasks[].way"],
+    "values": ["run", "standby", "notice"],
+    "notes": {"run": "device acts by itself at the trigger", "standby": "device is set up; a person starts it", "notice": "text on a device screen"}
+  },
+  "task_source": {
+    "used_in": ["plan.tasks[].source"],
+    "values": ["situation", "item"],
+    "notes": {"situation": "preparation for an intent (shown on the card)", "item": "per-item task when a package is brought in (not on the card)"}
+  },
+  "trigger_event": {
+    "used_in": ["plan.tasks[].trigger.event"],
+    "values": ["package.brought_in", "guest_arrived", "event_end"],
+    "notes": {"_": "the fourth trigger kind is an absolute time: trigger.time (HUB-02)"}
+  },
+  "home_event": {
+    "used_in": ["event.type"],
+    "values": ["package.brought_in", "guest_arrived", "event_end"]
+  },
+  "device_event": {
+    "used_in": ["devices.devices[].events"],
+    "open": true,
+    "values": ["started", "stopped", "completed", "changed", "door_opened"],
+    "notes": {"_": "event.type of a device event is '{device type}.{device event}', e.g. oven.started"}
+  },
+  "by": {
+    "used_in": ["event.payload.by", "plan.tasks[].end.by"],
+    "values": ["user", "spira", "unknown"],
+    "notes": {"unknown": "source not known; the server does not count it as a user change"}
+  },
+  "device_type": {
+    "used_in": ["devices.devices[].type"],
+    "open": true,
+    "values": ["cleaner", "light", "display", "cooktop", "oven", "fridge", "smart_plug"],
+    "notes": {"_": "known types. A new type is accepted without changing contracts; the server never branches on type (HUB-06)"}
+  },
+  "substrate": {
+    "used_in": ["devices.devices[].substrate", "execution_result.substrate", "rationale.executions[].substrate"],
+    "values": ["virtual", "physical"]
+  },
+  "ack_status": {
+    "used_in": ["ack.status"],
+    "values": ["admitted", "rejected"]
+  },
+  "ack_reject_reason": {
+    "used_in": ["ack.rejected_tasks[].reason"],
+    "values": ["unknown_device", "unsupported_cmd", "value_out_of_range", "schema"]
+  },
+  "execution_kind": {
+    "used_in": ["execution_result.kind"],
+    "values": ["run", "restore"]
+  },
+  "execution_status": {
+    "used_in": ["execution_result.status", "rationale.executions[].status"],
+    "values": ["completed", "failed", "running", "unverifiable", "unknown", "blocked"],
+    "notes": {"unverifiable": "command accepted but state could not be read back", "blocked": "not started; see reason"}
+  },
+  "blocked_reason": {
+    "used_in": ["execution_result.reason"],
+    "values": ["plan_cancelled", "paused", "not_delegated", "plan_unconfirmed", "offline", "in_use_by_person", "already_done_by_person", "quiet_hours"]
+  },
+  "restore_item_status": {
+    "used_in": ["execution_result.items[].status"],
+    "values": ["restored", "skipped_user_changed", "failed", "unknown", "not_needed"]
+  },
+  "line_state": {
+    "used_in": ["card.lines[].state", "episode.item_tasks[].state", "rationale.tasks[].state"],
+    "values": ["held", "scheduled", "running", "done", "partial", "failed", "unknown", "blocked", "user_changed", "off", "stopped", "cancelled", "dropped"],
+    "notes": {"_": "how each value is derived: state-mapping.md (C-7)"}
+  },
+  "end_state": {
+    "used_in": ["card.lines[].end_state"],
+    "values": ["restored", "kept_user_change", "restore_failed", "none"]
+  },
+  "episode_status": {
+    "used_in": ["episode.status", "episode_list.episodes[].status"],
+    "values": ["received", "reading", "read_failed", "judged", "notified", "held", "closed", "paused_skip"],
+    "notes": {"judged": "judged, no card (no intent or nothing to prepare)", "held": "intent found, waiting for a time (calendar)"}
+  },
+  "reaction": {
+    "used_in": ["reaction.reaction"],
+    "values": ["stop", "line_off", "line_on"]
+  },
+  "card_button": {
+    "used_in": ["card.buttons[]"],
+    "values": ["stop"]
+  },
+  "verdict": {
+    "used_in": ["case_row.verdict", "memory.intents[].episodes[].verdict", "rationale.observations[].verdict"],
+    "values": ["match", "stopped", "unconfirmed"]
+  },
+  "task_feedback": {
+    "used_in": ["case_row.task_feedback[].user"],
+    "values": ["off", "changed", "kept"]
+  },
+  "off_when": {
+    "used_in": ["case_row.task_feedback[].when"],
+    "values": ["before_run", "during_run"]
+  },
+  "notice_kind": {
+    "used_in": ["episode.item_tasks[].kind"],
+    "values": ["prep", "storage"],
+    "notes": {"prep": "handling people often miss (e.g. soaking clams)", "storage": "common storage mistake"}
+  },
+  "unusual_status": {
+    "used_in": ["rationale.evidence.unusual_items.status"],
+    "values": ["insufficient", "all_usual", "list"]
+  },
+  "case_source": {
+    "used_in": ["case_row.source"],
+    "values": ["synthetic", "this_home", "other_home"],
+    "notes": {"other_home": "reserved for an extension; not written now"}
+  },
+  "reserved_intent": {
+    "used_in": ["case_row.intent_id", "rationale.intents[].intent_id"],
+    "values": ["none", "unclassified"],
+    "notes": {"_": "the 30 intent ids are in kb/intents.json"}
+  },
+  "error_code": {
+    "used_in": ["error.code"],
+    "values": ["invalid_request", "invalid_image", "unauthorized", "forbidden", "not_found", "line_started", "stale_revision", "validation_error", "household_types_invalid", "internal"],
+    "notes": {"invalid_request": "400", "invalid_image": "400", "unauthorized": "401", "forbidden": "403 (key or token not for this household)", "not_found": "404", "line_started": "409 (line_on after the task started)", "stale_revision": "409 (devices revision lower than stored)", "validation_error": "422 (body does not match the schema)", "household_types_invalid": "422 (blocked combination, kb/household_types.json)", "internal": "500"}
+  }
+}

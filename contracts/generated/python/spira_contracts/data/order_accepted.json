@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "order_accepted.json",
+  "title": "OrderAccepted",
+  "description": "Response of POST /v1/orders (202 new, 200 same source_id) and PUT /v1/episodes/{id}/order (202). Does not mean a preparation exists yet. (APP-02, APP-07)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["episode_id", "status"],
+  "properties": {
+    "episode_id": {"$ref": "common.json#/$defs/EpisodeId"},
+    "status": {"$ref": "common.json#/$defs/EpisodeStatus"}
+  }
+}

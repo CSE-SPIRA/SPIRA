@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "health.json",
+  "title": "Health",
+  "description": "Response of GET /health (no auth). 200 when ready, 503 otherwise. (COM-08)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status"],
+  "properties": {
+    "status": {"enum": ["ok", "degraded"]},
+    "db": {"type": "boolean"},
+    "embedding": {"type": "boolean"}
+  }
+}

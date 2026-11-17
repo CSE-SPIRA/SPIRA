@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plan_pull.json",
+  "title": "PlanPull",
+  "description": "Response of GET /v1/hub/plans: every unfinished plan of the household (latest version each) + pause state. (HUB-04)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["household_id", "paused", "devices_revision", "plans"],
+  "properties": {
+    "household_id": {"$ref": "common.json#/$defs/HouseholdId"},
+    "paused": {"type": "boolean", "description": "true = start nothing new (APP-10)."},
+    "devices_revision": {"type": "integer", "minimum": 0},
+    "plans": {"type": "array", "items": {"$ref": "plan.json"}}
+  }
+}

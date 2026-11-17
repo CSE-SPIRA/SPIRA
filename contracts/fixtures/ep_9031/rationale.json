@@ -1,0 +1,375 @@
+{
+  "episode_id": "ep_9031",
+  "intents": [
+    {
+      "card_id": "nc_331",
+      "intent_id": "kid_birthday_party",
+      "intent_text": "디즈니 공주 테마로 손님 여럿이 오는 아이 생일 파티를 열고, 컵케이크를 굽고 꾸미려는 준비",
+      "situation": {
+        "event": "생일",
+        "guests": "손님 여러 명",
+        "activity": "컵케이크 굽고 꾸미기",
+        "theme": "디즈니 공주"
+      },
+      "basis": {
+        "intent": [
+          "케이크 토퍼",
+          "고깔모자",
+          "풍선",
+          "가구 유형"
+        ],
+        "event": [
+          "c1",
+          "케이크 토퍼"
+        ],
+        "guests": [
+          "고깔모자",
+          "가구 유형"
+        ],
+        "activity": [
+          "컵케이크 믹스",
+          "아이싱 펜",
+          "휘핑크림"
+        ],
+        "theme": [
+          "케이크 토퍼"
+        ]
+      },
+      "calendar_event_id": "c1",
+      "calendar_tags": [
+        "생일"
+      ]
+    }
+  ],
+  "none_reason": null,
+  "evidence": {
+    "calendar": [
+      {
+        "id": "c1",
+        "days_after": 2,
+        "day": "토",
+        "tags": [
+          "생일"
+        ],
+        "start": "14:00",
+        "end": "17:00"
+      },
+      {
+        "id": "c2",
+        "days_after": 8,
+        "day": "금",
+        "tags": [
+          "가족 모임"
+        ],
+        "start": "19:00",
+        "end": "21:00"
+      }
+    ],
+    "unusual_items": {
+      "status": "list",
+      "items": [
+        {
+          "item": "케이크 토퍼",
+          "why": "이 집이 산 적 없는 종류"
+        },
+        {
+          "item": "고깔모자",
+          "why": "이 집이 산 적 없는 종류"
+        },
+        {
+          "item": "풍선",
+          "why": "이 집이 산 적 없는 종류"
+        },
+        {
+          "item": "아이싱 펜",
+          "why": "이 집이 산 적 없는 종류"
+        },
+        {
+          "item": "컵케이크 믹스",
+          "why": "90일에 1번 산 드문 물건"
+        },
+        {
+          "item": "휘핑크림",
+          "why": "90일에 1번 산 드문 물건"
+        },
+        {
+          "item": "딸기",
+          "why": "평소 1개 → 이번 2개"
+        }
+      ],
+      "usual": [
+        "세탁 세제",
+        "로션"
+      ]
+    },
+    "kb_counts": [
+      {
+        "intent_id": "kid_birthday_party",
+        "name": "아이 생일 파티",
+        "n": 9
+      },
+      {
+        "intent_id": "home_baking",
+        "name": "홈베이킹",
+        "n": 2
+      },
+      {
+        "intent_id": "none",
+        "name": "의도 없음",
+        "n": 1
+      }
+    ],
+    "kb_examples": [
+      {
+        "case_id": "syn_A1-3_0018",
+        "items": [
+          "고깔모자",
+          "답례품 봉투",
+          "딸기",
+          "생일 초",
+          "케이크 토퍼",
+          "풍선"
+        ],
+        "intent_id": "kid_birthday_party",
+        "intent_text": "아이 친구들을 집에 초대해 생일 파티를 여는 준비",
+        "overlap": {
+          "k": 4,
+          "n": 6,
+          "items": [
+            "고깔모자",
+            "딸기",
+            "케이크 토퍼",
+            "풍선"
+          ]
+        }
+      },
+      {
+        "case_id": "syn_B1-2_0002",
+        "items": [
+          "딸기",
+          "버터",
+          "짤주머니",
+          "컵케이크 믹스",
+          "휘핑크림"
+        ],
+        "intent_id": "home_baking",
+        "intent_text": "주말에 컵케이크를 구워 보려는 홈베이킹",
+        "overlap": {
+          "k": 3,
+          "n": 5,
+          "items": [
+            "딸기",
+            "컵케이크 믹스",
+            "휘핑크림"
+          ]
+        }
+      }
+    ],
+    "kb_note": null
+  },
+  "unbundled": [
+    "세탁 세제",
+    "로션"
+  ],
+  "masked_count": 0,
+  "tasks": [
+    {
+      "task_id": "t_clean#1",
+      "card_id": "nc_331",
+      "line": "손님 오기 전 거실 청소",
+      "need": "손님 오기 전 거실 정리",
+      "way": "run",
+      "state": "done",
+      "devices": [
+        {
+          "id": "cleaner_01",
+          "type": "cleaner",
+          "room": "거실"
+        }
+      ]
+    },
+    {
+      "task_id": "t_safe#1",
+      "card_id": "nc_331",
+      "line": "아이 안전 모드 (인덕션 잠금·전기포트 차단)",
+      "need": "파티 동안 아이가 주방 기기에 다치지 않게",
+      "way": "run",
+      "state": "off",
+      "devices": [
+        {
+          "id": "cooktop_01",
+          "type": "cooktop",
+          "room": "주방"
+        },
+        {
+          "id": "plug_kettle",
+          "type": "smart_plug",
+          "room": "주방"
+        }
+      ]
+    },
+    {
+      "task_id": "t_mood#1",
+      "card_id": "nc_331",
+      "line": "손님 오시면 공주 분위기 화면·조명",
+      "need": "손님이 오면 공주 테마 분위기",
+      "way": "run",
+      "state": "user_changed",
+      "devices": [
+        {
+          "id": "display_01",
+          "type": "display",
+          "room": "거실"
+        },
+        {
+          "id": "light_01",
+          "type": "light",
+          "room": "거실"
+        }
+      ]
+    },
+    {
+      "task_id": "t_oven#1",
+      "card_id": "nc_331",
+      "line": "오븐 컵케이크 설정 대기",
+      "need": "파티 중 오븐을 바로 쓰기",
+      "way": "standby",
+      "state": "done",
+      "devices": [
+        {
+          "id": "oven_01",
+          "type": "oven",
+          "room": "주방"
+        }
+      ]
+    }
+  ],
+  "item_tasks": [
+    {
+      "task_id": "t_fridge#1",
+      "item": "딸기",
+      "kind": "storage",
+      "text": "씻지 말고 키친타월을 깔아 냉장 보관하고, 토요일 꾸미기 직전에 씻어 주세요",
+      "state": "done"
+    },
+    {
+      "task_id": "t_fridge#2",
+      "item": "휘핑크림",
+      "kind": "prep",
+      "text": "꾸미기 직전까지 냉장고 안쪽에 두고, 휘핑할 때 볼도 차갑게 해 두면 잘 올라와요",
+      "state": "done"
+    }
+  ],
+  "executions": [
+    {
+      "task_id": "t_fridge#1",
+      "device": "fridge_01",
+      "status": "completed",
+      "substrate": "virtual",
+      "at": "2026-10-16T18:05:20+09:00"
+    },
+    {
+      "task_id": "t_fridge#2",
+      "device": "fridge_01",
+      "status": "completed",
+      "substrate": "virtual",
+      "at": "2026-10-16T18:05:21+09:00"
+    },
+    {
+      "task_id": "t_clean#1",
+      "device": "cleaner_01",
+      "status": "completed",
+      "substrate": "virtual",
+      "at": "2026-10-17T12:58:32+09:00"
+    },
+    {
+      "task_id": "t_mood#1",
+      "device": "display_01",
+      "status": "completed",
+      "substrate": "virtual",
+      "at": "2026-10-17T13:52:37+09:00"
+    },
+    {
+      "task_id": "t_mood#1",
+      "device": "light_01",
+      "status": "completed",
+      "substrate": "physical",
+      "at": "2026-10-17T13:52:40+09:00"
+    },
+    {
+      "task_id": "t_oven#1",
+      "device": "oven_01",
+      "status": "completed",
+      "substrate": "virtual",
+      "at": "2026-10-17T14:00:03+09:00"
+    }
+  ],
+  "observations": [
+    {
+      "card_id": "nc_331",
+      "verdict": "match",
+      "task_feedback": [
+        {
+          "task_id": "t_clean#1",
+          "actions": [
+            [
+              "cleaner",
+              "clean"
+            ]
+          ],
+          "user": "kept"
+        },
+        {
+          "task_id": "t_safe#1",
+          "actions": [
+            [
+              "cooktop",
+              "child_lock"
+            ],
+            [
+              "smart_plug:전기포트",
+              "off"
+            ]
+          ],
+          "user": "off",
+          "when": "before_run",
+          "at": "2026-10-16"
+        },
+        {
+          "task_id": "t_mood#1",
+          "actions": [
+            [
+              "display",
+              "play_mood"
+            ],
+            [
+              "light",
+              "color"
+            ]
+          ],
+          "user": "changed",
+          "changes": [
+            {
+              "device_type": "light",
+              "property": "color_temp",
+              "to": {
+                "kelvin": 2700
+              },
+              "after_start_minutes": 70
+            }
+          ]
+        },
+        {
+          "task_id": "t_oven#1",
+          "actions": [
+            [
+              "oven",
+              "set_cook_standby"
+            ]
+          ],
+          "user": "kept"
+        }
+      ]
+    }
+  ]
+}

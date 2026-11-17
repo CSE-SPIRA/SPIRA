@@ -1,0 +1,181 @@
+# App <-> Server API: onboarding, orders, cards and reactions, rationale, memory.
+# Auth: Authorization: Bearer <demo token>. (APP-01..16, HUB-14)
+openapi: 3.1.0
+info:
+  title: SPIRA App API
+  version: 0.1.0
+  description: Body shapes are in ../schemas; common rules in ../rules.md; card line states in ../state-mapping.md.
+servers:
+  - url: http://localhost:8000
+security:
+  - appToken: []
+paths:
+  /health:
+    get:
+      summary: Readiness. No auth. (COM-08)
+      security: []
+      responses:
+        '200': {description: Ready, content: {application/json: {schema: {$ref: '../schemas/health.json'}}}}
+        '503': {description: Not ready, content: {application/json: {schema: {$ref: '../schemas/health.json'}}}}
+  /v1/households:
+    post:
+      summary: Create the household. Returns the hub API key once; the app hands it to the hub's local setup route. (HUB-14)
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '../schemas/household_create.json'}}}
+      responses:
+        '201': {description: Created, content: {application/json: {schema: {$ref: '../schemas/household_created.json'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /v1/households/{household_id}/profile:
+    put:
+      summary: Set household types (several). Blocked combinations -> 422 household_types_invalid. (APP-12)
+      parameters: [{$ref: '#/components/parameters/HouseholdId'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '../schemas/profile.json'}}}
+      responses:
+        '200': {description: Stored, content: {application/json: {schema: {$ref: '../schemas/profile.json'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /v1/households/{household_id}/calendar:
+    put:
+      summary: Send calendar events (now .. +14 days, full list replaces the stored one). The server tags them and drops titles. (APP-03)
+      parameters: [{$ref: '#/components/parameters/HouseholdId'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '../schemas/calendar.json'}}}
+      responses:
+        '202': {description: Accepted, content: {application/json: {schema: {$ref: '../schemas/calendar_response.json'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /v1/households/{household_id}/pause:
+    post:
+      summary: Pause or resume automatic preparation. (APP-10)
+      parameters: [{$ref: '#/components/parameters/HouseholdId'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '../schemas/pause.json'}}}
+      responses:
+        '200': {description: Current state, content: {application/json: {schema: {$ref: '../schemas/pause.json'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /v1/households/{household_id}/episodes:
+    get:
+      summary: Order history, newest first. (APP-01)
+      parameters:
+        - {$ref: '#/components/parameters/HouseholdId'}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+        - {name: before, in: query, description: next_before of the previous page, schema: {$ref: '../schemas/common.json#/$defs/DateTime'}}
+      responses:
+        '200': {description: Episodes, content: {application/json: {schema: {$ref: '../schemas/episode_list.json'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /v1/households/{household_id}/cards:
+    get:
+      summary: Cards updated after since (poll every 30 s; next since = server_time). Omit since for all open cards. (APP-04, APP-14)
+      parameters:
+        - {$ref: '#/components/parameters/HouseholdId'}
+        - {name: since, in: query, schema: {$ref: '../schemas/common.json#/$defs/DateTime'}}
+      responses:
+        '200': {description: Cards, content: {application/json: {schema: {$ref: '../schemas/cards_response.json'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /v1/households/{household_id}/memory:
+    get:
+      summary: This home's memory grouped by intent. (APP-15)
+      parameters: [{$ref: '#/components/parameters/HouseholdId'}]
+      responses:
+        '200': {description: Memory, content: {application/json: {schema: {$ref: '../schemas/memory.json'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /v1/households/{household_id}/memory/{case_id}:
+    delete:
+      summary: Forget one remembered preparation (its verdict, switched-off lines and changes). (APP-15)
+      parameters:
+        - {$ref: '#/components/parameters/HouseholdId'}
+        - {name: case_id, in: path, required: true, schema: {$ref: '../schemas/common.json#/$defs/CaseId'}}
+      responses:
+        '204': {description: Deleted}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /v1/orders:
+    post:
+      summary: Share order screenshots. 202 = new (or added to the open 8-hour group); 200 = same source_id seen before. A preparation is not ready yet. (APP-02, APP-16)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [household_id, images]
+              properties:
+                household_id: {$ref: '../schemas/common.json#/$defs/HouseholdId'}
+                shared_at: {$ref: '../schemas/common.json#/$defs/DateTime'}
+                source_id: {type: string, description: Share source id for duplicate detection}
+                images:
+                  type: array
+                  minItems: 1
+                  maxItems: 3
+                  description: jpg or png, 5 MB each at most
+                  items: {type: string, contentMediaType: application/octet-stream}
+      responses:
+        '200': {description: Duplicate share, content: {application/json: {schema: {$ref: '../schemas/order_accepted.json'}}}}
+        '202': {description: Accepted, content: {application/json: {schema: {$ref: '../schemas/order_accepted.json'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /v1/episodes/{episode_id}:
+    get:
+      summary: Episode status, items (for the edit screen) and per-item tasks. (APP-07, APP-11)
+      parameters: [{$ref: '#/components/parameters/EpisodeId'}]
+      responses:
+        '200': {description: Episode, content: {application/json: {schema: {$ref: '../schemas/episode.json'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /v1/episodes/{episode_id}/order:
+    put:
+      summary: Replace the item list; the server judges again (only tasks not started change). (APP-07)
+      parameters: [{$ref: '#/components/parameters/EpisodeId'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '../schemas/order_edit.json'}}}
+      responses:
+        '202': {description: Accepted, content: {application/json: {schema: {$ref: '../schemas/order_accepted.json'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /v1/episodes/{episode_id}/rationale:
+    get:
+      summary: Why SPIRA prepared what it did (stored values, no new LLM call). (APP-06)
+      parameters: [{$ref: '#/components/parameters/EpisodeId'}]
+      responses:
+        '200': {description: Rationale, content: {application/json: {schema: {$ref: '../schemas/rationale.json'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /v1/cards/{card_id}/reactions:
+    post:
+      summary: stop / line_off / line_on. Returns the updated card. After stop, reactions are ignored (200). (APP-05)
+      parameters:
+        - {name: card_id, in: path, required: true, schema: {$ref: '../schemas/common.json#/$defs/CardId'}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '../schemas/reaction.json'}}}
+      responses:
+        '200': {description: Updated card, content: {application/json: {schema: {$ref: '../schemas/card.json'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+components:
+  securitySchemes:
+    appToken: {type: http, scheme: bearer}
+  parameters:
+    HouseholdId: {name: household_id, in: path, required: true, schema: {$ref: '../schemas/common.json#/$defs/HouseholdId'}}
+    EpisodeId: {name: episode_id, in: path, required: true, schema: {$ref: '../schemas/common.json#/$defs/EpisodeId'}}
+  responses:
+    Error:
+      description: See error.code (enums.json error_code).
+      content: {application/json: {schema: {$ref: '../schemas/error.json'}}}

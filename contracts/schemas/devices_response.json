@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "devices_response.json",
+  "title": "DevicesResponse",
+  "description": "Response of PUT /v1/hub/households/{hid}/devices: the revision the server stored. (HUB-05)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["revision"],
+  "properties": {"revision": {"type": "integer", "minimum": 0}}
+}

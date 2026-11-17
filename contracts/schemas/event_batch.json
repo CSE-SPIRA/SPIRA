@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "event_batch.json",
+  "title": "EventBatch",
+  "description": "Request body of POST /v1/hub/events: one or more events in time order. (HUB-07)",
+  "type": "array",
+  "minItems": 1,
+  "items": {"$ref": "event.json"}
+}

@@ -1,0 +1,14 @@
+{
+  "$comment": "Scenario ep_9150: household h_042 (devices from ep_9031). Plain groceries -> no intent, no card. Only the clam care notice is planned (most orders look like this).",
+  "devices": "../ep_9031/devices.json",
+  "files": {
+    "plan.v1.json": {
+      "schema": "plan.json",
+      "what": "Item-only plan"
+    },
+    "episode.json": {
+      "schema": "episode.json",
+      "what": "Episode with no card"
+    }
+  }
+}

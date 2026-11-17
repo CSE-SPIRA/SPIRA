@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "event_response.json",
+  "title": "EventResponse",
+  "description": "Response of POST /v1/hub/events. Duplicates count as accepted. plans_changed = pull now. (HUB-04, HUB-07)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["accepted", "rejected", "plans_changed"],
+  "properties": {
+    "accepted": {"type": "array", "items": {"$ref": "common.json#/$defs/EventId"}},
+    "rejected": {
+      "type": "array",
+      "description": "Events not stored (bad shape, unknown device). Fix and resend with the same event_id.",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["event_id", "code", "message"],
+        "properties": {"event_id": {"type": "string"}, "code": {"$ref": "common.json#/$defs/ErrorCode"}, "message": {"type": "string"}}
+      }
+    },
+    "plans_changed": {"type": "boolean"}
+  }
+}
