@@ -50,7 +50,7 @@
       "ran": true
     },
     {
-      "task_id": "t_safe#1",
+      "task_id": "t_safe#2",
       "line": "아이 안전 모드 (인덕션 잠금·전기포트 차단)",
       "way": "run",
       "actions": [
@@ -66,7 +66,7 @@
       "ran": false
     },
     {
-      "task_id": "t_mood#1",
+      "task_id": "t_mood#3",
       "line": "손님 오시면 공주 분위기 화면·조명",
       "way": "run",
       "actions": [
@@ -82,7 +82,7 @@
       "ran": true
     },
     {
-      "task_id": "t_oven#1",
+      "task_id": "t_oven#4",
       "line": "오븐 컵케이크 설정 대기",
       "way": "standby",
       "actions": [
@@ -107,7 +107,7 @@
       "user": "kept"
     },
     {
-      "task_id": "t_safe#1",
+      "task_id": "t_safe#2",
       "actions": [
         [
           "cooktop",
@@ -123,7 +123,7 @@
       "at": "2026-10-16"
     },
     {
-      "task_id": "t_mood#1",
+      "task_id": "t_mood#3",
       "actions": [
         [
           "display",
@@ -147,7 +147,7 @@
       ]
     },
     {
-      "task_id": "t_oven#1",
+      "task_id": "t_oven#4",
       "actions": [
         [
           "oven",

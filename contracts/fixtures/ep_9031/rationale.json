@@ -189,7 +189,7 @@
       ]
     },
     {
-      "task_id": "t_safe#1",
+      "task_id": "t_safe#2",
       "card_id": "nc_331",
       "line": "아이 안전 모드 (인덕션 잠금·전기포트 차단)",
       "need": "파티 동안 아이가 주방 기기에 다치지 않게",
@@ -209,7 +209,7 @@
       ]
     },
     {
-      "task_id": "t_mood#1",
+      "task_id": "t_mood#3",
       "card_id": "nc_331",
       "line": "손님 오시면 공주 분위기 화면·조명",
       "need": "손님이 오면 공주 테마 분위기",
@@ -229,7 +229,7 @@
       ]
     },
     {
-      "task_id": "t_oven#1",
+      "task_id": "t_oven#4",
       "card_id": "nc_331",
       "line": "오븐 컵케이크 설정 대기",
       "need": "파티 중 오븐을 바로 쓰기",
@@ -246,14 +246,14 @@
   ],
   "item_tasks": [
     {
-      "task_id": "t_fridge#1",
+      "task_id": "t_fridge#5",
       "item": "딸기",
       "kind": "storage",
       "text": "씻지 말고 키친타월을 깔아 냉장 보관하고, 토요일 꾸미기 직전에 씻어 주세요",
       "state": "done"
     },
     {
-      "task_id": "t_fridge#2",
+      "task_id": "t_fridge#6",
       "item": "휘핑크림",
       "kind": "prep",
       "text": "꾸미기 직전까지 냉장고 안쪽에 두고, 휘핑할 때 볼도 차갑게 해 두면 잘 올라와요",
@@ -262,14 +262,14 @@
   ],
   "executions": [
     {
-      "task_id": "t_fridge#1",
+      "task_id": "t_fridge#5",
       "device": "fridge_01",
       "status": "completed",
       "substrate": "virtual",
       "at": "2026-10-16T18:05:20+09:00"
     },
     {
-      "task_id": "t_fridge#2",
+      "task_id": "t_fridge#6",
       "device": "fridge_01",
       "status": "completed",
       "substrate": "virtual",
@@ -283,21 +283,21 @@
       "at": "2026-10-17T12:58:32+09:00"
     },
     {
-      "task_id": "t_mood#1",
+      "task_id": "t_mood#3",
       "device": "display_01",
       "status": "completed",
       "substrate": "virtual",
       "at": "2026-10-17T13:52:37+09:00"
     },
     {
-      "task_id": "t_mood#1",
+      "task_id": "t_mood#3",
       "device": "light_01",
       "status": "completed",
       "substrate": "physical",
       "at": "2026-10-17T13:52:40+09:00"
     },
     {
-      "task_id": "t_oven#1",
+      "task_id": "t_oven#4",
       "device": "oven_01",
       "status": "completed",
       "substrate": "virtual",
@@ -320,7 +320,7 @@
           "user": "kept"
         },
         {
-          "task_id": "t_safe#1",
+          "task_id": "t_safe#2",
           "actions": [
             [
               "cooktop",
@@ -336,7 +336,7 @@
           "at": "2026-10-16"
         },
         {
-          "task_id": "t_mood#1",
+          "task_id": "t_mood#3",
           "actions": [
             [
               "display",
@@ -360,7 +360,7 @@
           ]
         },
         {
-          "task_id": "t_oven#1",
+          "task_id": "t_oven#4",
           "actions": [
             [
               "oven",

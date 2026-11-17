@@ -18,7 +18,7 @@
       "note": null
     },
     {
-      "task_id": "t_safe#1",
+      "task_id": "t_safe#2",
       "text": "아이 안전 모드 (인덕션 잠금·전기포트 차단)",
       "checked": false,
       "when": {
@@ -29,7 +29,7 @@
       "note": null
     },
     {
-      "task_id": "t_mood#1",
+      "task_id": "t_mood#3",
       "text": "손님 오시면 공주 분위기 화면·조명",
       "checked": true,
       "when": {
@@ -40,7 +40,7 @@
       "note": "사용자가 조명을 바꿔 현재 상태를 유지했어요"
     },
     {
-      "task_id": "t_oven#1",
+      "task_id": "t_oven#4",
       "text": "오븐 컵케이크 설정 대기",
       "checked": true,
       "when": {
