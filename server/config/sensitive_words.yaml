@@ -1,3 +1,4 @@
-# Safety net for masking (server/spec.md §4.5, S1): substring of the raw product name, case-insensitive.
-# Never add daily supplements or hygiene goods (비타민, 유산균, 휴지, 치약, 샴푸, 생리대).
-words: [약, 연고, 수면유도, 피임, 콘돔, 윤활, 임신테스트, 배란, 혈당, 성인용 기저귀, 요실금, 탈모, 보청기, 성인용품, 다이어트 약]
+# Safety net for masking (server/spec.md §4.5, S1). Match = case-insensitive substring of the raw product name
+# after removing every `exempt` word. No single-syllable words. Never add daily supplements or hygiene goods.
+words: [의약품, 상비약, 감기약, 소화제, 진통제, 연고, 수면유도, 피임, 콘돔, 윤활, 임신테스트, 배란, 혈당, 성인용 기저귀, 요실금, 탈모, 보청기, 성인용품, 다이어트 약]
+exempt: [치약, 약산성, 약알칼리, 약콩]

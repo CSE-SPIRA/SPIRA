@@ -142,20 +142,27 @@ Hub ──GET plans (15 s)─ S6 pull            Hub ──ack / events / execut
 S7 window closes ─▶ verdict + task feedback ─▶ cases (this_home) ─▶ used by the next S4
 ```
 
-Pipeline steps run in background tasks (FastAPI `BackgroundTasks` or the scheduler); API calls return immediately. One episode is processed by one worker at a time (row lock on the episode, `SELECT … FOR UPDATE`).
+Pipeline steps run in background tasks (FastAPI `BackgroundTasks` or the scheduler); API calls return immediately. Locking and transactions: §2.4.
 
 ### 2.3 Scheduled jobs (APScheduler, in-process)
 
 | Job | When | What |
 | --- | --- | --- |
-| `quiet_timer` | per episode, `QUIET` after the last capture | S1 read + S2–S5 (§7) |
-| `close_windows` | every 10 min | Close observation windows past their end (§13) |
-| `end_item_tasks` | every 10 min | Mark per-item tasks ended by their end rule (for card/episode state) |
-| `expire_held` | daily 04:10 | Drop held tasks older than `HOLD_DAYS` (§11.6) |
+| `quiet_timer` | per episode, at `episodes.quiet_due` | S1 read + S2–S5 (§7) |
+| `close_windows` | every 10 min | Open / close observation windows, write pending memory rows (§13) |
+| `end_tasks` | every 10 min | End tasks by their end rule and expiry (§11.8) |
+| `expire_held` | daily 04:10 | Drop held tasks older than `hold_d` (§11.6) |
 | `purge` | daily 04:00 | Delete device-state events older than 14 days, temp images older than 1 day |
-| `close_episodes` | every 10 min | Close episodes whose plan has ended (§11.7) |
+| `close_episodes` | every 10 min | Close finished episodes (§11.8) |
 
-Jobs are idempotent; on restart, `quiet_timer` jobs are rebuilt from episodes in `received` with pending images.
+Every job takes the locks of §2.4 and is safe to run twice. On start: re-schedule `quiet_timer` for every episode with unread images (any status) at `max(quiet_due, now)`; resume every episode whose `stage` is not `done` from its last committed stage (§2.4).
+
+### 2.4 Transactions and locks
+
+- **Lock order.** Anything that decides for the whole household (grouping a capture, package linking, pause, calendar replace, S5 confirm and publish, reactions) first takes `SELECT … FROM households WHERE id = … FOR UPDATE`, then the episode rows it touches in `id` order. Never the other way round.
+- **One transaction per input.** An event, an execution result, an ack, a reaction or a capture is stored **together with every effect** (task status, line states, new plan version, `care_notices_shown`, window changes) in one transaction. Duplicates are found by the unique key (`event_id`, `result_id`, (`household_id`, `source_id`)) with `INSERT … ON CONFLICT DO NOTHING`; a conflict means the whole input was already applied, so nothing else runs. A crash before commit leaves nothing, and the resend is processed normally.
+- **Long steps.** LLM and KB calls never run inside a transaction. A pipeline run reads its inputs, calls outside any lock, then commits each stage's result and `episodes.stage` (`s1` items stored → `s2` context stored → `s5` plan published → `done`). A stage is re-run from its stored inputs after a crash. S5 re-reads the household state under the lock before confirming, so a result computed on stale state is merged, never blindly written.
+- **Hub and app replies** are built from the committed state.
 
 ---
 
@@ -182,6 +189,7 @@ Set in `server/.env` (never committed; template `server/.env.example`). No URL o
 | `OTHER_HOME` | no | `off` (only value; extension 1) |
 | `DEMO_MODE` | no | `0` (default) / `1`: shortened starting values (§4, `contracts/rules.md`) |
 | `IMAGE_DIR` | no | Temp screenshot folder, default `/tmp/spira-images` (deployment may use S3 with a 1-day lifecycle, DEP-06) |
+| `CALENDAR_HMAC_KEY` | yes | Secret for calendar change fingerprints (§8.5); any random 32+ bytes |
 | `TZ` | no | `Asia/Seoul` |
 
 ### 3.2 Dependencies (`server/pyproject.toml`)
@@ -227,13 +235,14 @@ Tables and starting values live in `server/config/*.yaml`, not in code (so new i
 | `device_names.yaml` | Device type → Korean display name for prompts | S4 |
 | `card_templates.yaml` | Card sentences with fallbacks | S5 |
 | `material_courses.yaml` | Clothing material → styler course | S4 |
+| `command_policy.yaml` | Commands the server allows per `way` (safety, §11.1) | S5 |
 
 ### 4.1 `numbers.yaml`
 
 | Key | Value | DEMO | Meaning |
 | --- | --- | --- | --- |
 | `group_window_h` | 8 | 8 | Captures within this many hours of the first capture form one episode |
-| `quiet_min` | 10 | 0.5 | Judge after this long without a new capture |
+| `quiet_s` | 600 | 30 | Judge after this many seconds without a new capture |
 | `max_images_per_call` | 10 | 10 | S1 images per LLM call |
 | `image_max_mb` / `images_per_request` | 5 / 3 | | Request limits |
 | `calendar_window_d` | 14 | 14 | Calendar events used, from `shared_at` |
@@ -255,15 +264,21 @@ Tables and starting values live in `server/config/*.yaml`, not in code (so new i
 | `line_off_d` | 180 | 180 | Switched-off actions left out |
 | `habit_min` | 2 | 2 | `match` runs in the same slot → habit time |
 | `habit_slot_h` | 1 | 1 | Same slot = same weekday, start within ± this |
-| `before_start_default_min` | 90 | 3 | Cleaning before the schedule (used by examples and tests) |
+| `before_start_default_min` | 90 | 3 | Cleaning lead time in examples. With `DEMO_MODE=1` every `before_start` minutes from S4 is replaced by this demo value (§10.4) |
 | `guest_window_before_min` | 30 | 1 | Guest-arrival window opens this long before the schedule |
-| `end_fallback_h` | 3 | 0.17 | `or_time` = schedule end + this |
-| `notice_after_door_h` | 2 | 0.033 | Fridge notice ends this long after the first door opening |
-| `notice_max_h` | 12 | 12 | … or this long after arrival |
+| `end_fallback_min` | 180 | 10 | `or_time` = schedule end + this |
+| `after_event_end_min` | 60 | 5 | A task triggered by `event_end` ends this long after it starts (§10.4) |
+| `notice_after_door_min` | 120 | 2 | Fridge notice ends this long after the first door opening |
+| `notice_max_min` | 720 | 720 | … or this long after arrival |
+| `standby_max_min` | 1440 | 60 | A standby task triggered by the package ends unused after this long (§11.8) |
+| `late_grace_min` | 10 | 1 | A trigger time already this far in the past when published → task dropped `late` (§11.1) |
+| `ack_timeout_min` | 30 | 2 | No ack of a version this long after publish → its new lines `failed` (§12.2) |
 | `notice_repeat_max` / `notices_per_screen` | 2 / 3 | | Fridge notices |
 | `quiet_hours` | `[22, 8]` | | Noisy devices are not run between these hours |
 | `llm_timeout_s` | 60 | 60 | Every LLM call |
 | `device_event_keep_d` | 14 | 14 | Device-state events kept |
+
+Every duration is an integer in the unit its key names (`_s`, `_min`, `_h`, `_d`), so demo values are exact (`contracts/rules.md` demo table).
 
 ### 4.2 `label_table.yaml`
 
@@ -298,7 +313,8 @@ default: clue           # group null or unknown
 
 ```yaml
 # Per-item tasks. Trigger is always package.brought_in (released by the server, HUB-12).
-# A task is made only if the hub list has a device of `device_type` with `cmd` delegated; otherwise nothing.
+# A task is made only if the hub list has exactly one device of `device_type` with `cmd` delegated
+# (and in `room` when set). None or several -> no task (skip ambiguous targets).
 # `name` is the task id name (t_{name}#n). Durations: hours as numbers, or keys of numbers.yaml.
 tasks:
   - name: fridge                 # care notice on the fridge screen
@@ -310,7 +326,7 @@ tasks:
     cmd: show_notice
     value: llm_notice            # text from the S4 LLM (fridge_notices); no text -> no task
     way: notice
-    end: {on: fridge.door_opened, after: notice_after_door_h, or_after: notice_max_h, restore: false}
+    end: {on: fridge.door_opened, after: notice_after_door_min, or_after: notice_max_min, restore: false}
   - name: freeze                 # super-freeze for bulk meat / frozen food
     when:
       groups: [음·식료품, 농축수산물]
@@ -336,7 +352,7 @@ tasks:
   - name: mattress               # bedroom purifier deodorising for a new mattress
     when: {group: 가구, type_contains: 매트리스}
     device_type: purifier
-    room: 침실                    # only if the home has exactly one bedroom or exactly one bedroom purifier
+    room: 침실                    # exactly one purifier in a room named 침실
     cmd: mode
     value: {mode: deodorize}
     way: run
@@ -359,11 +375,12 @@ Only tags with dates fixed for everyone. Birthdays and anniversaries are persona
 어버이날:  {days: [2027-05-08], window: ["18:00", "20:00"]}
 ```
 
-A holiday matches a bundle when the tag is one of the intent's `related_tags` (`contracts/kb/intents.json`); the first day within 14 days of `shared_at` wins. Extend the list each year.
+A holiday matches a bundle when the tag is one of the intent's `related_tags` (`contracts/kb/intents.json`); the first day whose window **starts after `now`** and within 14 days of `shared_at` wins (dates in Asia/Seoul). Extend the list each year.
 
 ### 4.5 Other files
 
-- `sensitive_words.yaml`: starting list `[약, 연고, 수면유도, 피임, 콘돔, 윤활, 임신테스트, 배란, 혈당, 성인용 기저귀, 요실금, 탈모, 보청기, 성인용품, 다이어트 약]`. Case-insensitive substring of the raw product name. Daily supplements and hygiene goods (비타민, 유산균, 휴지, 치약, 샴푸, 생리대) are never added.
+- `sensitive_words.yaml`: `words` (starting list `[의약품, 상비약, 감기약, 소화제, 진통제, 연고, 수면유도, 피임, 콘돔, 윤활, 임신테스트, 배란, 혈당, 성인용 기저귀, 요실금, 탈모, 보청기, 성인용품, 다이어트 약]`) and `exempt` (`[치약, 약산성, 약알칼리, 약콩]`). Match = case-insensitive substring of the raw product name after removing every `exempt` word. No single-syllable words. Daily supplements and hygiene goods (비타민, 유산균, 휴지, 치약, 샴푸, 생리대) are never added. Test cases: 치약 → not masked, 감기약 → masked (T6).
+- `command_policy.yaml`: server-side command allow list (§11.1). `run` = commands S4 may run; `standby` = preset commands (`set_*_standby`); `notice` = `show_notice`. A command in none of them is dropped `unsafe_cmd`, whatever the LLM wrote; `deny_words` (`start`, `ignite`, `heat`, `unlock`, `open`, `buy`, `order`, `pay`, `delete`, `reset`) block a command even if listed.
 - `device_names.yaml`: `cleaner: 로봇청소기, light: 조명, display: TV, cooktop: 인덕션, oven: 오븐, fridge: 냉장고, smart_plug: 스마트 플러그, purifier: 공기청정기, styler: 스타일러, shoe_care: 신발관리기`. Unknown types show the type string.
 - `material_courses.yaml`: `{울: 울케어, 캐시미어: 울케어, 니트: 울케어, 면: 표준, 가죽: 표준}`; used only if the course is in the device's enum.
 - `card_templates.yaml`: §11.4.
@@ -380,18 +397,20 @@ Column types are binding; extra internal columns are allowed.
 | --- | --- | --- |
 | `households` | `id text pk`, `household_types text[]`, `paused bool`, `hub_key_hash text`, `created_at`, `updated_at` | Hub key stored as SHA-256 hex |
 | `device_lists` | `household_id pk`, `revision int`, `body jsonb` (C-2), `updated_at` | Latest list only. The device catalog is derived from `body` |
-| `calendar_events` | `household_id`, `id`, `start timestamptz`, `end timestamptz`, `tags text[]`, `tagged bool`, `updated_at`; pk (`household_id`, `id`) | Titles are never stored |
-| `episodes` | `id text pk`, `household_id`, `status` (§5.2), `shared_at`, `received_at`, `source_ids text[]`, `judged bool`, `plan_version int`, `context jsonb` (S2), `intent jsonb` (S3), `error jsonb`, `closed_at`, `created_at`, `updated_at` | Index (`household_id`, `status`), (`household_id`, `shared_at`) |
-| `episode_images` | `id`, `episode_id`, `path`, `read bool`, `created_at` | Deleted after reading (≤ 1 day) |
+| `calendar_events` | `household_id`, `id`, `start timestamptz`, `end timestamptz`, `tags text[]`, `tagged bool`, `fingerprint text`, `updated_at`; pk (`household_id`, `id`) | Titles are never stored. `fingerprint` = HMAC-SHA256(server secret, title + start + end), used only to detect changes |
+| `calendar_revisions` | `household_id pk`, `revision int` | +1 on every calendar PUT (§8.5) |
+| `episode_sources` | `household_id`, `source_id`, `episode_id`; pk (`household_id`, `source_id`) | Idempotency of `POST /v1/orders`, also while paused |
+| `episodes` | `id text pk`, `household_id`, `status` (§5.2), `shared_at`, `received_at`, `source_ids text[]`, `judged bool`, `stage` (`s1`/`s2`/`s5`/`done`, last committed step, §2.4), `quiet_due null`, `plan_version int`, `context jsonb` (S2), `intent jsonb` (S3), `error jsonb`, `closed_at`, `created_at`, `updated_at` | Index (`household_id`, `status`), (`household_id`, `shared_at`) |
+| `episode_images` | `id`, `episode_id`, `path`, `read bool`, `created_at` | Deleted after the extraction of its pass is committed (≤ 1 day) |
 | `orders` | `episode_id`, `order_no text null`, `mall text null`, `eta_text text null` | eta is stored only |
 | `order_items` | `id text pk` (`it_…`), `episode_id`, `order_no null`, `name null`, `type null`, `grp null`, `label`, `qty int null`, `deal null`, `attributes jsonb`, `masked bool`, `created_at` | Masked rows: name/type/attributes null |
 | `tasks` | `episode_id`, `task_id`, `card_id null`, `source`, `way`, `status` (§5.2), `need`, `line`, `actions jsonb`, `trigger jsonb`, `end jsonb`, `target_room null`, `end_after_start_minutes null`, `meta jsonb` (item, kind, point, intent_change, rule ids), `started_at null`, `ended_at null`, `drop_reason null`; pk (`episode_id`, `task_id`) | One row per task; values in contract form |
-| `plans` | `episode_id`, `version int`, `body jsonb` (C-1), `devices_revision`, `created_at`, `ack jsonb null`; pk (`episode_id`, `version`) | Every published version |
-| `cards` | `id text pk`, `episode_id`, `bundle_index int`, `intent_id`, `template`, `text`, `starts_at null`, `stopped bool`, `notify bool`, `updated_at` | |
+| `plans` | `episode_id`, `version int`, `body jsonb` (C-1), `devices_revision`, `created_at`, `ack jsonb null`, `acked_at null`; pk (`episode_id`, `version`) | Every published version; `plan_id` → episode → household for hub auth (§12.1) |
+| `cards` | `id text pk`, `episode_id`, `bundle_index int`, `ordinal int` (1, 2, 3 … per episode, never reused), `intent_id`, `template`, `text`, `starts_at null`, `stopped bool`, `archived bool`, `notify bool`, `updated_at`, `seq bigint` | At most 2 non-archived cards per episode (§14). `seq` from a household sequence, set on every write (§12.2 cards) |
 | `card_lines` | `card_id`, `task_id`, `position int`, `checked bool`, `checked_changed_at`, `state`, `end_state null`, `note null`; pk (`card_id`, `task_id`) | State per §11.5 |
 | `events` | `event_id text pk`, `household_id`, `type`, `source`, `at`, `payload jsonb`, `received_at` | Device-state rows purged after 14 days |
 | `executions` | `result_id text pk`, `kind`, `operation_id null`, `plan_id`, `plan_version`, `task_id`, `device null`, `cmd null`, `substrate null`, `status null`, `reason null`, `body jsonb`, `at`, `received_at` | |
-| `windows` | `id text pk` (`ow_…`), `episode_id`, `card_id`, `start_at`, `end_due`, `end_at null`, `end_reason null`, `status` (`open`/`closed`), `verdict null`, `task_feedback jsonb null`, `checks jsonb` | One per card (Q6) |
+| `windows` | `id text pk` (`ow_…`), `episode_id`, `card_id unique`, `start_at null`, `scheduled_start null`, `end_due null`, `end_at null`, `end_reason null`, `status` (`pending`/`open`/`closed`), `memory` (`pending`/`written`/`ineligible`), `verdict null`, `task_feedback jsonb null`, `checks jsonb` | Created with the card (§13.1) |
 | `care_notices_shown` | `household_id`, `item_type`, `kind`, `count`; pk all but count | Fridge notice repetition |
 | `llm_calls` | `id`, `episode_id null`, `stage` (`s1`/`cal`/`s3`/`s4`/`retype`), `provider`, `model`, `input_tokens`, `output_tokens`, `latency_ms`, `attempts`, `outcome` (`ok`/`format_fail`/`timeout`/`error`), `created_at` | §15 |
 | `cases` | from migration `0001` (do not change columns) | `this_home` rows written by S7; `synthetic` rows only in the KB DB |
@@ -399,7 +418,8 @@ Column types are binding; extra internal columns are allowed.
 ### 5.2 Status values
 
 - `episodes.status`: the APP-11 values in `contracts/enums.json` (`received`, `reading`, `read_failed`, `judged`, `notified`, `held`, `closed`, `paused_skip`). Internally S2–S5 run while the status is `reading`; a failure in S2 or S3 ends as `judged` with `error` set.
-- `tasks.status`: `held` (no time, not sent), `live` (in the current plan), `cancelled`, `dropped` (held expired, or removed by the safety net), `ended`. `started_at` is set from the first execution result.
+- `tasks.status`: `held` (no time, not sent), `live` (in the current plan), `cancelled`, `dropped` (held expired, removed by the safety net, late, or rejected), `ended`. Drafts from S4 live in memory until S5 and are never stored (no `draft` status).
+- `tasks.started_at` is set by the first execution result with status `running` or `completed` (a confirmed start). `blocked` never sets it; `failed` / `unknown` / `unverifiable` without an earlier `running` set `start_uncertain = true` in `meta` instead. Restore (§11.3), `line_on` (§11.7) and feedback (§13.4) treat a start as `started_at is not null or start_uncertain`.
 
 ### 5.3 Migrations
 
@@ -417,12 +437,13 @@ Column types are binding; extra internal columns are allowed.
 ```python
 class LLM(Protocol):
     def structured(self, *, stage: str, system: str, user: str, schema: type[BaseModel],
-                   images: list[bytes] = (), episode_id: str | None = None) -> BaseModel: ...
+                   images: list[bytes] = (), episode_id: str | None = None, raw: bool = False) -> BaseModel | dict: ...
 ```
 
 - One implementation per provider (`anthropic`, `openai`, `gemini`) using that provider's structured-output / tool-call feature with the Pydantic JSON schema. `LLM_PROVIDER` / `LLM_MODEL` choose; nothing else changes (model choice is made later by the evaluation plan).
 - Default for development: `anthropic` with Claude Opus 5.5 until model selection.
 - Temperature: provider default (not set).
+- `raw=True` (S1 only): the schema is still sent to the provider, but the parsed JSON is returned without model validation; the stage validates parts itself (§7.3). Other stages validate the whole answer.
 - `mock`: returns recorded outputs from `server/tests/llm_fixtures/{stage}/{key}.json` where `key` is a stable hash of (system, user, image hashes). Unknown key → raises (tests must record outputs explicitly).
 
 ### 6.2 Call rule (every stage)
@@ -475,21 +496,22 @@ The exact texts are in those files; each stage section below gives the schema, t
 ### 7.1 Receive
 
 1. Validate images (count, type, size). Bad → `400 invalid_image`, no episode.
-2. If `source_id` was seen for this household → `200 {episode_id, status}` of that episode; nothing else (no LLM).
-3. `shared_at = request.shared_at or now()`; `received_at = now()`.
-4. If the household is paused → create an episode with status `paused_skip`, store nothing else, `202`.
-5. Find the household's open group: an episode whose first capture is within `group_window_h` (8 h) of this `shared_at`. None → create a new episode (`ep_…`, status `received`, `shared_at` = this capture).
-6. Store images in `IMAGE_DIR` (`episode_images`, `read=false`), append `source_id`.
-7. (Re)schedule `quiet_timer(episode)` at `now + quiet_min` (each capture restarts the 10 minutes). Return `202`.
+2. Lock the household (§2.4). If (`household_id`, `source_id`) is in `episode_sources` → `200 {episode_id, status}` of that episode; nothing else (no LLM).
+3. `shared_at = request.shared_at or now()`, then clamped to [`now − 1 d`, `now`]; `received_at = now()`. All date arithmetic is in Asia/Seoul.
+4. If the household is paused → create an episode with status `paused_skip` and its `episode_sources` row; images are not stored (nothing will read them); `202`. A resend returns the same episode (step 2). Resuming does not judge paused episodes.
+5. Find the household's open group: an episode not `closed` / `paused_skip` whose first capture is within `group_window_h` (8 h) of this `shared_at`; several → the newest. None → create a new episode (`ep_…`, status `received`, `shared_at` = this capture).
+6. Store images in `IMAGE_DIR` (`episode_images`, `read=false`), insert `episode_sources`, append `source_id`.
+7. Set `episodes.quiet_due = now + quiet_s` and (re)schedule `quiet_timer` (each capture restarts the wait). Commit, return `202`.
 
 ### 7.2 On quiet (`quiet_timer`)
 
-1. Status → `reading`. Take unread images, up to `max_images_per_call` (10); the rest run in a second pass right after.
-2. LLM call `s1` (§7.3) with those images. Mark them read and delete the files.
-3. Post-process every returned item (§7.4). Store orders (order_no, mall, eta text).
-4. Merge into the episode: dedupe by (`order_no`, `name`); if `order_no` is null, by exact `name`. If an `order_no` already belongs to another open episode of the household, merge into that one instead (APP-07).
+1. Under the episode lock: if `quiet_due > now` (a capture arrived meanwhile) → stop; the newer timer runs. Else status → `reading`, take unread images, up to `max_images_per_call` (10); the rest run in a second pass right after. Commit.
+2. LLM call `s1` (§7.3) with those images, outside any lock.
+3. Post-process every returned item (§7.4) and dedupe **inside this pass** by (`order_no`, `name`) or exact `name` — before masking drops the name.
+4. Lock the household, then the episode (§2.4). Merge into the episode: unmasked items dedupe against stored items by (`order_no`, `type`) or exact `type`; masked items are never merged across passes (a masked item seen in two passes counts twice, known limit). If an `order_no` already belongs to another open episode of the household, merge into that one instead (APP-07). Store orders (order_no, mall, eta text), set `stage = s1`, mark the images read. Commit. **Then** delete the image files.
 5. If the episode has no items at all (this and earlier passes) → status `read_failed`, card-less notification flag for the app (APP-14), stop.
-6. Not judged yet → run S2 → S5 now (do not wait 8 h). Already judged and new items were added → re-run from S2 (§14).
+6. If every item is masked → no S2–S5; status `judged`, `intent = {bundles: [], none_reason: "all_masked"}`; the app shows only `masked_count`.
+7. Not judged yet → run S2 → S5 now (do not wait 8 h). Already judged and new items were added → re-run from S2 (§14).
 
 ### 7.3 LLM call (S1)
 
@@ -509,7 +531,7 @@ class Order(BaseModel): order_no: str | None; mall: str | None; eta: str | None
 class OrderExtraction(BaseModel): items: list[Item]; orders: list[Order] = []
 ```
 
-- Format check: schema only. An item that fails is dropped alone (not the whole answer). If every item fails → retry once with `s1_retry.txt` listing the errors (e.g. `- 물건 3의 group "파티용품"은 상품군 목록에 없다`). Still nothing → no items from this pass.
+- Validation is two-step (S1 only): the provider is asked for `OrderExtraction`, but the server parses the raw JSON envelope `{items: [...], orders: [...]}` and validates `orders` and **each item on its own** with `Item`. An item that fails is dropped alone (not the whole answer). If no item survives (and the envelope was not `items: []`) → retry once with `s1_retry.txt` listing the errors (e.g. `- 물건 3의 group "파티용품"은 상품군 목록에 없다`). Still nothing → no items from this pass. `LLM.structured` therefore has a `raw=True` mode returning the parsed JSON (§6.1).
 - Default (refusal / timeout twice): no items from this pass.
 - **Prompt summary.** Read only ordered and paid items (no recommendations, ads, cart, cancelled, fees); same item across overlapping images once; `type` is a 2–3 word plain name without brand/size; `qty` null if not visible (never 1 by default); `deal` copied, never multiplied; attributes only from the product name/options with the exact `source` text; flag five sensitive categories, when unsure pick the closest (mask); daily supplements and hygiene goods are not sensitive.
 
@@ -519,9 +541,9 @@ For each item:
 1. `name` empty → drop the item.
 2. `type` empty → `core_noun(name)`: drop tokens containing digits or units (g, kg, ml, L, 개, 매, 입, 팩), bracketed text and known brand markers; take the last remaining token.
 3. Drop attributes whose `source` is not a substring of `name`.
-4. `deal` "1+1" → `qty = 2 × (qty or 1)`; "2+1" → `qty = 3 × ((qty or 1) // 2)` if qty given, else 3.
+4. `qty` counts packs as shown on the order line. `deal` "1+1" → `qty = 2 × (qty or 1)`; "2+1" → `qty = 3 × (qty or 1)`; other deals → `qty` unchanged. Result clamped to [1, 999].
 5. `label` from `label_table.yaml` by `group` (null → `clue`), then the two attribute rules (mattress, refrigerated cosmetics → `care`).
-6. `masked = sensitive_kind is not None or sensitive_words hit on name`. Masked: store only `grp`, `qty`, `masked=true`; `name`, `type`, `attributes` null; the category itself is not stored.
+6. `masked = sensitive_kind is not None or sensitive_words hit on name` (§4.5). Masked: store only `grp`, `qty`, `masked=true`; `name`, `type`, `attributes` null; the category itself is not stored.
 7. Store as `order_items` with `item_id = it_{n}`.
 
 Masked items never reach S2 embedding, S3, S4, notices, rationale or the order edit screen; they appear only as `masked_count`.
@@ -596,12 +618,11 @@ On pgvector 0.7 (no iterative scan) use `LIMIT 1000` and keep the first 200 rows
 ### 8.5 Calendar intake and tagging
 
 `PUT /v1/households/{hid}/calendar` (APP-03) carries the full list for now .. +14 days.
-1. Events missing from the list are deleted; new ones or ones whose title, start or end changed are re-tagged; unchanged ones keep their tags.
+1. Lock the household; `calendar_revisions.revision += 1` (= `r`). Events missing from the list are deleted; for each event `fp = HMAC-SHA256(server secret, title + start + end)`; new ones or ones whose `fp` differs are to be tagged; unchanged ones keep their tags. Store `start`, `end`, `fingerprint` now (tags of changed events cleared, `tagged=false`). Commit, respond `202 {accepted: n}`.
 2. One LLM call (`cal`) for all events to tag: system `cal_system.txt`, user `cal_user.txt` with lines `- {id} · {M}월 {D}일 ({요일}) {HH:MM}~{HH:MM} · {title}`.
 3. Schema: `EventTags{id: Literal[ids], tags: list[Literal[30 tags]] (max 3)}`, `CalendarTagging{events: list[EventTags]}`. Missing ids → no tags.
-4. Store `start`, `end`, `tags`; **drop the title**. Respond `202 {accepted: n}` before tagging finishes.
-5. Default on failure: tags empty for those events (`tagged=false`); they are retried at the next calendar PUT.
-6. Then run calendar re-runs (§14).
+4. Lock the household. If `calendar_revisions.revision` is still `r` → store `tags` (`tagged=true`) and run calendar re-runs (§14). Else discard the result (a newer PUT owns the calendar). **Titles are never stored**; they live only in this request's memory. The HMAC secret is a server setting (`CALENDAR_HMAC_KEY`, §3.1).
+5. Default on failure: tags empty for those events (`tagged=false`); they are retried at the next calendar PUT (their `fp` is unchanged, so `tagged=false` is what marks them).
 
 **Prompt summary.** Tag only when the title clearly says so; health events get no tag; up to 3 tags; "손님 방문" only when someone comes to this home; do not tag from the date alone; never output the title.
 
@@ -691,6 +712,7 @@ def build_schema(item_types, cal_ids, intent_ids):
 ### 9.5 Format check (retry on any of these)
 
 - an item in two bundles;
+- two bundles with the same `intent_id` (except `unclassified`);
 - bundles empty and `none_reason` empty, or bundles present and `none_reason` set;
 - a filled situation field whose key word is not in `intent_text` (key word = the value itself, or for multi-word values its longest word);
 - (schema already rejects unknown labels, items, calendar ids).
@@ -719,7 +741,7 @@ def build_schema(item_types, cal_ids, intent_ids):
 ### 10.1 Steps
 
 1. `catalog` = devices from the hub list with only delegated commands (`never` removed). No list → no LLM call, per-item tasks only (none needing a device either); log a warning.
-2. Drop bundles whose intent was **stopped** before in this home (§10.2); `unclassified` bundles skip memory lookups.
+2. Drop bundles whose intent was **stopped** before in this home (§10.2), or whose intent has a **stopped card in this episode** (a re-run never brings back a stopped card's work, §14); `unclassified` bundles skip memory lookups. Household paused → no S4 at all.
 3. `when = find_time(bundle)` for each remaining bundle (§10.3).
 4. Per-item tasks from `item_tasks.yaml` (§4.3) for unmasked `care` items.
 5. `notice_items` = items that need a fridge notice text (fridge notice rule matched and the household has a fridge with `show_notice`).
@@ -734,7 +756,7 @@ def build_schema(item_types, cal_ids, intent_ids):
 
 - **Same intent** = same `intent_id` and (both tag lists empty, or they share a tag).
 - **Stopped before**: among same-intent rows, the latest with verdict `stopped` or `match` (skip `unconfirmed`) is `stopped` → no situation tasks for this bundle (per-item tasks still made). A later `match` lifts it.
-- **Switched-off actions**: action keys of lines with `user = off` in same-intent rows within `line_off_d` (180) days → given to the LLM and removed in code.
+- **Switched-off actions**: action keys of lines with `user = off` in same-intent rows within `line_off_d` (180) days, **plus** action keys of lines currently `checked: false` on this episode's card of the same intent (re-runs) → given to the LLM and removed in code.
 - **Changed**: `changes` of the most recent same-intent row that has any → given to the LLM (value to use, or `end_after_start_minutes`).
 - Action key: device `type`, except `smart_plug` → `smart_plug:{label}`; paired with `cmd`.
 - DB error → retry once; failing → no situation tasks for this episode (do not act without checking).
@@ -743,8 +765,10 @@ def build_schema(item_types, cal_ids, intent_ids):
 
 1. `use_window` (calendar) → it.
 2. Holiday calendar: a holiday whose tag is in the intent's `related_tags`, date within 14 days of `shared_at` → that date with the holiday's default window.
-3. Habit: same-intent rows with verdict `match`; their `when.executed_at` grouped by weekday and start time within ± `habit_slot_h` (1 h). A group with ≥ `habit_min` (2) rows → next occurrence of that weekday within 14 days at the group's median start; window end = start + 3 h.
+3. Habit: same-intent rows with verdict `match`; for each, the **occasion start** = `windows.scheduled_start` of the window that wrote the row (found by episode and card `ordinal` from `case_id`; rows without it are skipped), never `when.executed_at` (that is the first preparation run, earlier than the occasion). Sort by (weekday, minute of day); a slot = a run of rows on the same weekday whose starts are within ± `habit_slot_h` (1 h) of the slot's first row. A slot with ≥ `habit_min` (2) rows → candidate at the slot's median start (lower median for even counts). Several candidates → most rows, then most recent row, then earliest weekday. Next occurrence of that weekday at that time that is after `now` and within 14 days of `shared_at`; window end = start + 3 h. Starts are never near midnight in practice; a slot does not wrap across days.
 4. Otherwise `None` → run tasks become **held**.
+
+Every `when` satisfies `start > now` and `end > start`; a window that fails is skipped and the next step is tried.
 
 `unclassified` bundles use step 1 and 2 only.
 
@@ -752,15 +776,16 @@ def build_schema(item_types, cal_ids, intent_ids):
 
 | Field | Rule |
 | --- | --- |
-| `task_id` | `t_{slug}#{n}`; `slug` from the LLM (lowercase `[a-z][a-z0-9_]*`, made unique by suffix `_2`); `n` = next number in the episode (never reused) |
+| `task_id` | `t_{slug}#{n}`; `slug` from the LLM (lowercase `[a-z][a-z0-9_]*`, made unique by suffix `_2`); `n` = next number in the episode (never reused), assigned in this order: situation tasks by bundle then `needs` order, then per-item tasks in `item_tasks.yaml` order then item order. Per-item tasks use `name` from `item_tasks.yaml` as slug |
 | `source` | `situation` |
-| `way = run` | needs `when`; none → status `held` (kept, not sent). `before_start: m` → `time = when.start − m min`. `guest_arrived` → `{event, first_only: true, window: {from: when.start − guest_window_before_min, to: when.end}}`. `event_end` → `{event: event_end, first_only: true, window: same}` |
-| `way = standby` | `when` → `{time: when.start}`; no `when` → `{event: package.brought_in, released: false}` |
+| `way = run` | needs `when`; none → status `held` (kept, not sent). `before_start: m` (`minutes` required; `DEMO_MODE=1` → `m = before_start_default_min` demo value) → `time = when.start − m min`. `guest_arrived` → `{event, first_only: true, window: {from: when.start − guest_window_before_min, to: when.end}}`. `event_end` → `{event: event_end, first_only: true, window: {from: when.start, to: when.end + end_fallback_min}}` |
+| `way = standby` | one device only (several → drop the task); `when` → `{time: when.start}`; no `when` → `{event: package.brought_in, released: false}` (released with the package, §12.4) |
 | `way = notice` | `{event: package.brought_in, released: false}` |
-| `end` (run) | `{on: event_end, or_time: when.end + end_fallback_h, restore: true}`; cleaning-type tasks (no state to undo: every action's device type is `cleaner`) use `restore: false`. With `end_after_start_minutes` from memory: `{time: when.start + m, restore: true}` |
-| `end` (standby) | `{on: "{device type}.started", by: user, restore: false}` |
+| `end` (run, time or `guest_arrived` trigger) | `{on: event_end, or_time: when.end + end_fallback_min, restore: true}`; cleaning-type tasks (no state to undo: every action's device type is `cleaner`) use `restore: false`. With `end_after_start_minutes` from memory: `{time: when.start + m, restore: true}` |
+| `end` (run, `event_end` trigger) | `{on: event_end, after: "{after_event_end_min}m", restore: true}` — the triggering `event_end` itself starts the `after` countdown, so the task runs that long and then restores (no contract change) |
+| `end` (standby) | `{on: "{device type}.started", by: user, or_time: when.end (or release + standby_max_min), restore: false}` |
 | `end` (notice) | from `item_tasks.yaml` |
-| values | every parameter of the command's `value_schema`: item attribute value if it maps (e.g. 포장 count) > LLM value > device default; clamp to range; enum must match else default |
+| values | every parameter of the command's `value_schema`: item attribute value if it maps (e.g. 포장 count) > LLM value. The LLM value already passed the strict schema (§10.6), so no clamping; parameters the LLM may omit (not in the schema as required) take the device default. Per-item tasks (code) use their `item_tasks.yaml` value or the device default |
 | switched-off | remove actions whose key is switched off; a task left with no action is dropped |
 | `target_room` | kept for S5 |
 
@@ -794,7 +819,7 @@ def build_task_schema(catalog, bundle_ids, notice_items):
 
 ### 10.7 Format check (retry once with `s4_retry.txt`)
 
-`need_id` not in needs; `from` empty; `way` standby/notice with a trigger; `way` run without a trigger; `guest_arrived` when the bundle's guests is empty; `fridge_notices.item` outside `notice_items`; duplicate slug. More than 4 tasks per bundle is not an error (cut in step 11). After the retry, tasks still breaking a rule are dropped one by one.
+`need_id` not in needs; `from` empty; `way` standby/notice with a trigger; `way` run without a trigger; `before_start` without `minutes`; `standby` with more than one device; `guest_arrived` when the bundle's guests is empty; `fridge_notices.item` outside `notice_items`; duplicate slug. More than 4 tasks per bundle is not an error (cut in step 11). After the retry, tasks still breaking a rule are dropped one by one.
 
 ### 10.8 Prompt summary (`s4_system.txt`)
 
@@ -807,7 +832,7 @@ Needs first, then tasks only where a listed device fulfils a need, then notice t
 | Reactions lookup fails | Retry once → no situation tasks |
 | Format error twice / timeout | No situation tasks; per-item tasks without notice text are not created |
 | Need-less task / unknown trigger | Drop that task |
-| Value out of range / missing / trigger rules after retry | Drop that task (S5 checks again) |
+| Value out of range / missing / trigger rules after retry | Drop that task (no clamping; S5 checks again) |
 | More than 4 per intent | First 4 in needs order |
 | Run task, no time | Held (§11.6) |
 | Device room empty | Keep; S5 drops room-specific tasks |
@@ -825,16 +850,21 @@ Needs first, then tasks only where a listed device fulfils a need, then notice t
 
 ### 11.1 Confirm (`finalize(episode)`)
 
+Runs under the household lock (§2.4) on the state as it is now. Household paused → every not-started task `cancelled`, nothing new goes live.
+
 1. **Safety net** (drop the task, record `drop_reason`):
+   - a command not allowed by `command_policy.yaml` for the task's `way` (run → `run` list; standby → `standby_pattern`; notice → `notice`), or containing a `deny_words` word → `unsafe_cmd`. Applied to situation and per-item tasks; an unknown command is unsafe (fail closed);
    - device or cmd not in the current hub list / in `never` → `not_delegated`;
    - a value outside `value_schema` → `value_out_of_range`;
    - `target_room` set and ≠ every chosen device's room, or the device room is null for a room-specific task → `room_mismatch`;
-   - a noisy device whose `time` trigger falls in `quiet_hours` (22:00–08:00) → `quiet_hours` (event triggers are guarded by the hub, `blocked: quiet_hours`).
-2. **Merge with the home's live tasks** (other episodes): same device and overlapping active period (trigger time … end `or_time`) → keep one by priority **per-item > already confirmed plan > new plan**; the other is dropped (`overlap`). Same device + same cmd + same value → keep the existing one.
+   - a noisy device whose `time` trigger falls in `quiet_hours` (22:00–08:00) → `quiet_hours` (event triggers are guarded by the hub, `blocked: quiet_hours`);
+   - a `time` trigger earlier than `now − late_grace_min`, or an event window whose `to` is in the past → `late` (re-runs, restart recovery and late packages all use this rule);
+   - an end time not after its trigger time → `late`.
+2. **Merge with the home's live tasks** (all episodes of the household, including this one's started tasks). Each task gets an interval for overlap: time trigger → [time, end `time` / `or_time`]; event trigger with window → [`from`, end `or_time` or `to`]; unreleased package trigger → [now, now + `standby_max_min`] (a reservation, since the arrival time is unknown); a missing end → + `end_fallback_min`. Same device and overlapping intervals → keep one by priority **started > per-item > already confirmed plan > new plan**; ties → the earlier trigger, then the lower `task_id`. The loser is dropped (`overlap`) if it is a draft, or **cancelled in its own episode** (and that episode publishes a version in the same transaction) if it was live. Same device + same cmd + same value → keep the existing one. `fridge.show_notice` tasks never conflict with each other (step 3 limits them).
 3. **Fridge notices**: drop notices with no text; drop a notice whose (`item_type`, `kind`) was shown `notice_repeat_max` (2) times in this home (`care_notices_shown`), unless it has `intent_change`; order intent-wording first, then `prep`, then `storage`; keep `notices_per_screen` (3). Increment `care_notices_shown` when the notice is released.
-4. **Cards**: one card per bundle that has situation tasks (held or live). Lines = that bundle's situation tasks in `needs` order (≤ 4), all `checked`. Per-item tasks are never on a card.
+4. **Cards**: one card per bundle that has situation tasks (held or live). Lines = that bundle's situation tasks in `needs` order (≤ 4), all `checked` (re-runs keep the existing state, §14). Per-item tasks are never on a card. A new card gets the next `ordinal` and a `windows` row in `pending` (§13.1).
 5. **Store**: tasks with time or event triggers → `live`; held → `held` (kept `hold_d` days).
-6. **Publish** (§11.3) if any `live` task exists.
+6. **Publish** (§11.3) if the plan changed (a task became live, was cancelled, or was released).
 7. Episode status: any card with a live line → `notified`; cards with held lines only → `held`; no card → `judged`.
 
 ### 11.2 Card creation and update
@@ -854,7 +884,11 @@ body = {plan_id, household_id, plan_version: version, devices_revision: current 
 store plans(version, body); episode.plan_version = version
 ```
 
-`line`, `need`, `target_room`, `meta` are never sent. Held tasks are not sent. `restore` of a cancelled task = it had started (`started_at` set) and its end has `restore: true`. The hub picks it up on its next pull; responses to hub events set `plans_changed: true` when a version was created while handling them.
+`line`, `need`, `target_room`, `meta` are never sent. Held tasks are not sent. `tasks` and `cancelled` never share a `task_id`.
+
+**Restore of a cancelled task** = it had started (§5.2: `started_at` or `start_uncertain`) and its end has `restore: true`; otherwise false. When an execution result arrives for a task that is already cancelled with `restore: false` and the result shows a start (`running` / `completed`, or `failed` / `unknown` after dispatch), the server sets its restore to true and publishes a new version in the same transaction; a duplicate of that result changes nothing (§2.4).
+
+**Which versions the hub gets** (pull, §12.2): the latest version of an episode is pulled while any of these holds — a task is live; a cancelled task with `restore: true` has no restore result yet; or the latest version is not acked yet (so a version made only of cancellations still reaches the hub). The hub picks it up on its next pull; responses to hub events set `plans_changed: true` when a version was created while handling them.
 
 ### 11.4 Card text (`card_templates.yaml`, template `common.v1`)
 
@@ -880,7 +914,7 @@ lines:
 Recompute a line whenever an ack, execution result, user event or reaction for its task arrives:
 
 1. `off` if unchecked; `stopped` if the card is stopped; `cancelled` / `dropped` from the task status; `held` if held.
-2. Else from the task's run results of the latest operation per device: all `completed` → `done`; some `completed` → `partial`; none completed: any `failed` → `failed`, any `blocked` → `blocked` (note from `blocked_note`), any `unknown`/`unverifiable` → `unknown`; a `running` result and nothing final → `running`; nothing yet → `scheduled`. Ack rejection of the task → `failed` + `rejected_note`.
+2. Else from the task's **expected actions** (each (device, cmd) in the published task). For each action take its latest result of the latest operation (by `at`, then `received_at`); a final result (`completed`, `failed`, `blocked`, `unknown`, `unverifiable`) is never replaced by a later `running`. An action with no result is pending. Then: every action `completed` → `done`; some `completed` and every other action final → `partial`; some `completed` and others pending/running → `running`; none completed and every action final: any `failed` → `failed`, any `blocked` → `blocked` (note from `blocked_note`), else `unknown`; any `running` → `running`; nothing yet → `scheduled`. Ack rejection of the task, or no ack within `ack_timeout_min` → `failed` + `rejected_note` (§12.2).
 3. `user_changed` overrides `done`/`partial` when, after the task's first `completed` result and before the window closes, an event `{type}.changed` with `by: user` arrives for one of the line's devices.
 4. Priority when several apply: off, stopped > user_changed > done, partial > running > failed, unknown, blocked > scheduled.
 5. `end_state` from the task's restore result: all `restored`/`not_needed` → `restored`; any `skipped_user_changed` → `kept_user_change`; any `failed`/`unknown` → `restore_failed`; task with `restore: false` that ended → `none`; otherwise null.
@@ -898,13 +932,25 @@ Recompute a line whenever an ack, execution result, user event or reaction for i
 | any, card already stopped | `200`, ignored, return the card |
 | `stop` | Every situation task of this card: not started → cancelled (restore false); started → cancelled (restore true). Card `stopped: true`, lines `stopped`, buttons `[]`. Per-item tasks untouched. Publish. Verdict will be `stopped` (§13) |
 | `line_off` (task_id) | That task cancelled (restore = started). Line `checked: false`, `off`. Publish |
-| `line_on` (task_id) | Started → `409 line_started`. Else re-live the task (status live, or held if it was held), `checked: true`. Publish |
+| `line_on` (task_id) | Started (§5.2) → `409 line_started`. Else the task gets a **new id** (`t_{slug}#{next n}`, same actions, trigger and end; the old id stays in `cancelled`); the line now points to the new id, `checked: true`; status live, or held if the card is held. Publish |
 
 Each change records `checked_changed_at`. Switching every line off is not stop. Return the updated card.
 
-### 11.8 Episode end
+### 11.8 Task and episode end
 
-`close_episodes` (every 10 min): an episode is `closed` when every task is ended / cancelled / dropped and every window is closed (or there is no window). Item tasks end by their end rule (event seen, or `or_after` passed from the release time); a per-item task never released ends 14 days after judging.
+`end_tasks` (every 10 min) sets `ended` (live tasks only) when:
+
+| Task | Ends when |
+| --- | --- |
+| Any task with an end event | the end event arrives (with `by` if set), plus `after` if set |
+| Time end | `end.time` passed |
+| Fallback | `or_time` passed, or `or_after` passed since the trigger fired (package release time for package tasks) |
+| Trigger never fired | the trigger window's `to` (event trigger) passed with no matching event, or `time` trigger + `end_fallback_min` passed with no run result — line ends `scheduled` → shown as `dropped` with `dropped_note` |
+| Standby never used | `or_time` / `standby_max_min` after release passed (the line stays `scheduled` until then, then `done` if the preset was set, else as above) |
+| Per-item task never released | 14 days after judging |
+| Rejected by ack / ack timeout | immediately `dropped` (`rejected`), line `failed` |
+
+A task that must restore stays live until its restore result arrives (or 24 h, then `restore_failed`). `close_episodes` (every 10 min): an episode is `closed` when every task is ended / cancelled / dropped, every cancelled task with `restore: true` has a restore result, every card's window is `closed`, and every window's `memory` is `written` or `ineligible`.
 
 ### 11.9 Failure handling
 
@@ -912,7 +958,7 @@ Each change records `checked_changed_at`. Switching every line off is not stop. 
 | --- | --- |
 | Safety net hit | Drop that task with `drop_reason` (shown in rationale) |
 | No situation tasks | No card; per-item tasks still published; none at all → no plan, episode `judged` |
-| Hub does not pull | Nothing resent; the hub catches up on its next pull; lines stay `scheduled` |
+| Hub does not pull / ack | The version stays in the pull (§11.3); after `ack_timeout_min` its new lines are `failed` (`rejected_note`) |
 | Reaction after the trigger | Cancelled with restore true in a new version (stop works while running) |
 | Duplicate stop | First wins; later ones 200 |
 | `line_on` on a started line | 409 |
@@ -925,8 +971,8 @@ The API surface, paths, bodies and status codes are in `contracts/openapi/app.ya
 
 ### 12.1 Common
 
-- **Auth.** App routes: `Authorization: Bearer {APP_DEMO_TOKEN}` → else 401. Hub routes: `X-API-Key` → household by key hash → else 401; a path or body household that is not the key's → 403 `forbidden`. `/health` has no auth.
-- **Errors.** Every 4xx/5xx body is `contracts/schemas/error.json`. Body validation failure (models or `validate`) → 422 `validation_error` with `details.path`. Unknown id → 404 `not_found`.
+- **Auth.** App routes: `Authorization: Bearer {APP_DEMO_TOKEN}` → else 401. Hub routes: `X-API-Key` → household by key hash → else 401. Then every household the request names must be the key's, else 403 `forbidden`: the path or body `household_id`, the `household` query of the pull, the owner of `plan_id` (plan → episode → `household_id`) for acks and execution results, and the device ids (must be in that household's list). Checked before anything is read or written. `/health` has no auth.
+- **Errors.** Every 4xx/5xx body is `contracts/schemas/error.json`, except `/health` 503, which returns `health.json` (`{"status": "degraded", …}`) as the OpenAPI files say. Body validation failure (models or `validate`) → 422 `validation_error` with `details.path`. Unknown id → 404 `not_found`.
 - **Time.** Store `timestamptz`; serialise with `+09:00`.
 - **Idempotency.** `event_id`, `result_id`, `source_id` (`contracts/rules.md`).
 
@@ -937,20 +983,20 @@ The API surface, paths, bodies and status codes are in `contracts/openapi/app.ya
 | `POST /v1/households` | Create `h_…`, random 32-byte hex key (`hk_` + 64 hex), store its SHA-256; validate household types (§12.3) |
 | `PUT …/profile` | Validate types (§12.3) → 422 `household_types_invalid` if blocked; store; affects later orders only |
 | `PUT …/calendar` | §8.5 |
-| `POST …/pause` | true: cancel not-started tasks of every open episode (publish each), new orders stored as `paused_skip`. false: later orders judged again. Return the state |
+| `POST …/pause` | Household lock. true: cancel not-started tasks of every open episode (publish each, same transaction); later orders become `paused_skip` (§7.1); re-runs and S5 add nothing while paused (§11.1). false: later orders judged again. Return the state |
 | `GET …/episodes` | Newest first by `shared_at`, `limit` (≤ 100), `before` cursor |
-| `GET …/cards?since=` | Cards with `updated_at > since` (or all cards of open episodes), `server_time = now` |
+| `GET …/cards?since=` | Every card write takes the household lock and sets `updated_at = now()` and `seq` inside it; this read takes the same lock (shared), so no write can commit with an `updated_at` at or before the returned `server_time`. Return cards with `updated_at > since` (or all non-archived cards of open episodes), `server_time` = the time read under the lock. Archived cards are returned once more with their final state, then never |
 | `GET …/memory`, `DELETE …/memory/{case_id}` | §13.5 |
 | `POST /v1/orders` | §7.1 |
-| `GET /v1/episodes/{id}` | Items (unmasked), `item_count`, `masked_count`, item tasks with state, card ids |
+| `GET /v1/episodes/{id}` | Items (unmasked), `item_count`, `masked_count`, item tasks with state, `card_ids` = non-archived cards (≤ 2, `episode.json`) |
 | `PUT /v1/episodes/{id}/order` | §14 (order edit) → 202 |
 | `GET /v1/episodes/{id}/rationale` | Assemble from stored values only (no LLM): intents (+card ids, basis), evidence from `context`, unbundled, masked count, tasks (+devices with type and room), item tasks, executions (latest final result per task and device), observations (verdict and feedback per card) |
 | `POST /v1/cards/{id}/reactions` | §11.7 |
 | `PUT /v1/hub/households/{hid}/devices` | Revision lower than stored → 409 `stale_revision`; equal → 200 no change; higher → store. Plans already published keep their `devices_revision` (the hub checks delegation at run time) |
-| `GET /v1/hub/plans?household=` | Latest version of every episode whose plan is not finished (any task live, or a cancelled task with `restore: true` not yet restored) + `paused` + `devices_revision` |
-| `POST /v1/hub/plans/{plan_id}/ack` | Store; rejected tasks → line `failed` with `rejected_note`, never re-planned |
-| `POST /v1/hub/events` | Per event: duplicate → accepted, skip; invalid (schema or unknown device) → `rejected` with code; else store, then `package.brought_in` → §12.4, others → S7 (§13). `plans_changed` = a new version was published while handling the batch |
-| `POST /v1/hub/executions` | Duplicate `result_id` → `{duplicate: true}`. Else store; set `tasks.started_at` on the first run result; recompute the line (§11.5); pass to S7. A result for an older `plan_version` is stored and used for observation but does not change the current plan |
+| `GET /v1/hub/plans?household=` | Latest version of every episode that §11.3 says is still pulled + `paused` + `devices_revision` |
+| `POST /v1/hub/plans/{plan_id}/ack` | Same `plan_version` already acked with the same body → 200, nothing else. `plan_version` older than the latest → stored on that version only; never changes tasks of a newer version. Unknown task ids in `rejected_tasks` → 422. `status: rejected` (whole plan unreadable) → every task of that version that is new in it fails; otherwise only the listed tasks fail. A failed task → `dropped` (`rejected`), line `failed` with `rejected_note`, never re-planned. An ack arriving after `ack_timeout_min` for the latest version: lines failed only by the timeout and whose trigger is still ahead go back to `live` |
+| `POST /v1/hub/events` | The outer body is validated as an object with an `events` array (else 422). **Each element is validated on its own** with `event.json` + `validate` (no whole-body model): invalid (schema, unknown device, other household) → `rejected` with code (an element without a usable `event_id` is reported by its array index); valid → one transaction per event (§2.4): duplicate → accepted, skip; else store, then `package.brought_in` → §12.4, others → S7 (§13). `plans_changed` = a new version was published while handling the batch |
+| `POST /v1/hub/executions` | Duplicate `result_id` → `{duplicate: true}`. Else, in one transaction: store; `task_id` must be a task of that `plan_version` and `device`/`cmd` one of its actions, else 422; set `started_at` / `start_uncertain` (§5.2); late start of a cancelled task → restore true and a new version (§11.3); recompute the line (§11.5); pass to S7. A result for an older `plan_version` updates its task's state and observation the same way (results are per task, not per version); it never re-lives a cancelled task |
 
 ### 12.3 Household type check
 
@@ -978,9 +1024,9 @@ Also 422 when a value is not one of the 20 types or a "pick one" axis (size, lif
 
 ### 12.4 Package brought in (HUB-12)
 
-1. Find the household's most recent episode with a per-item task still `released: false`.
+1. Household lock. Find the household's most recent episode (by `shared_at`) with any **live** task whose trigger is `{event: package.brought_in, released: false}` — per-item tasks and situation standby / notice tasks alike. Cancelled, dropped and held tasks do not count.
 2. None → store the event only.
-3. Else set every unreleased per-item task of that episode to `{event: package.brought_in, released: true, at: event.at}`; publish a version; `plans_changed: true`.
+3. Else set every such live task of that episode to `{event: package.brought_in, released: true, at: event.at}`; increment `care_notices_shown` for released fridge notices; publish a version; `plans_changed: true` — all in the event's transaction.
 4. Several packages of one order group: everything is released at the first one (known limit).
 
 ---
@@ -991,10 +1037,14 @@ Also 422 when a value is not one of the 20 types or a "pick one" axis (size, lif
 
 ### 13.1 Windows (one per card, Q6)
 
-- Open at the first run result (`running` or `completed`) of any situation task of the card; `start_at` = that time.
-- `end_due` = `event_end` of the household within the bundle window, else schedule end + `end_fallback_h`. If every line of the card was switched off or nothing ever ran, the window is created at schedule start and closes at `end_due` (so feedback is still written).
-- Events in the window are linked only if their source device is one of the card's devices (same room). If two windows of the household overlap in time, events in the overlap are linked to neither (known limit).
-- `close_windows` closes windows whose `end_due` passed, and any window when `event_end` arrives.
+- **Created with the card** (§11.1) as `pending`, so every card gets feedback. `scheduled_start` / `end_due` are set when the card has a time (`end_due` = schedule end + `end_fallback_min`) and updated by re-runs.
+- `pending` → `open` at the first confirmed start (`running` / `completed`) of a situation task of the card (`start_at` = that time), or at `scheduled_start` if nothing ran (`start_at` = `scheduled_start`).
+- **Closes** (`close_windows`, and right away on the events below), first match:
+  - card stopped and no task of the card is running → close now (also for held cards: verdict `stopped`, feedback from the lines as they are);
+  - an `event_end` of the household between `scheduled_start` and `end_due` → close at that event;
+  - `end_due` passed;
+  - held card whose tasks were all dropped (expiry) → close with verdict `unconfirmed`, memory `ineligible`.
+- **Linking events to a window**: device events only if the source device is one of the card's devices; home events (`guest_arrived`, `event_end`, source `hub`) by household and time within [`scheduled_start − guest_window_before_min`, `end_due`]. If two windows of the household overlap in time, events in the overlap are linked to neither (known limit). An `event_end` closes only the windows whose bounds contain it.
 
 ### 13.2 Confirmation signals (from the plan, by code)
 
@@ -1024,15 +1074,15 @@ Lines switched off are skipped.
 
 ### 13.5 This-home memory
 
-At close of each window, if the card had situation lines and the intent is not `unclassified`, insert one `cases` row (server DB):
+At close of each window, if the card had situation lines and the intent is not `unclassified`, insert one `cases` row (server DB) and set `windows.memory = written` in the same transaction; otherwise `memory = ineligible`:
 
 | Column | Value |
 | --- | --- |
-| `case_id` | `home_{household_id}_{episode_id}_{n}` (n = card order 1/2) |
+| `case_id` | `home_{household_id}_{episode_id}_{n}` (n = card `ordinal`, never reused) |
 | `source` | `this_home` |
 | `items` | every unmasked item type of the order, sorted (가나다), no quantities |
 | `intent_id`, `intent_text`, `situation` | from S3 |
-| `when` | `{weekday of executed_at, calendar_tags, executed_at}`; `executed_at` = window `start_at` (schedule start if nothing ran) |
+| `when` | `{weekday of executed_at, calendar_tags, executed_at}`; `executed_at` = window `start_at` (schedule start if nothing ran). Contract shape unchanged; the occasion start used for habits stays in `windows.scheduled_start` (§10.3) |
 | `household` | `{types: household_types}` |
 | `basket_emb` | `embed_basket(items)` (column is NOT NULL) |
 | `kb_version` | null |
@@ -1040,9 +1090,9 @@ At close of each window, if the card had situation lines and the intent is not `
 
 Shape: `contracts/schemas/case_row.json`, example `contracts/fixtures/ep_9031/case_row.json`.
 
-`GET /v1/households/{hid}/memory` groups rows by same intent (intent id + tag set): `episodes` (case id, date, verdict), `off_lines` (line, `until` = off date + 180 days, case id), `changed` (device type, display text, case id), `habit_time` (weekday and median time when ≥ 2 `match` rows share a slot, else null). `DELETE …/memory/{case_id}` deletes that row (and with it its stop, off lines and changes).
+`GET /v1/households/{hid}/memory` groups rows by same intent (intent id + tag set): `episodes` (case id, date, verdict), `off_lines` (line, `until` = off date + 180 days, case id), `changed` (device type, display text, case id), `habit_time` (the §10.3 habit result, else null). `DELETE …/memory/{case_id}` deletes that row (and with it its stop, off lines and changes).
 
-Per-item tasks are never written to memory. Writing fails → keep the window `closed` with `memory_pending`, retry in the next run.
+Per-item tasks are never written to memory. Writing fails (e.g. embedding error) → window `closed` with `memory = pending`; `close_windows` retries every pending row, and the episode stays open until it succeeds (§11.8).
 
 ### 13.6 Example
 
@@ -1052,7 +1102,7 @@ Per-item tasks are never written to memory. Writing fails → keep the window `c
 
 ## 14. Re-run rules
 
-A re-run judges the episode again from S2 with the current items, calendar and devices. Only tasks **not started yet** change; started tasks keep running.
+A re-run judges the episode again from S2 with the current items, calendar and devices. Only tasks **not started yet** change; started tasks keep running, keep their ids and lines, and are part of the result.
 
 | Trigger | Episodes re-run | Steps | Card |
 | --- | --- | --- | --- |
@@ -1063,12 +1113,17 @@ A re-run judges the episode again from S2 with the current items, calendar and d
 | Pause (APP-10) | every open episode | cancel not-started tasks; no re-run | lines `cancelled` |
 
 Re-run procedure:
-1. Lock the episode; cancel every not-started situation and per-item task (they will be re-created if still valid).
-2. Run S2 → S5. New tasks get new numbers `n` (ids are never reused); a task equal to a cancelled one in device, cmd, value and trigger keeps the old id instead and is revived.
-3. Map bundles to existing cards by `intent_id`: same intent → same card (lines replaced, checked state kept for kept ids); new intent → new card (`notify: true`); intent gone → card lines `cancelled`.
-4. Publish one version with the result.
+1. Household paused → no re-run.
+2. Run S2 → S4 outside the lock (§2.4). Exclusions given to S4 (§10.1–10.2): intents of stopped cards of this episode; actions of lines currently `checked: false` on the same-intent card.
+3. Lock the household and the episode. **Keep** every started task (§5.2) with its id and line. A new draft equal to a kept task (same device, cmd, value) is discarded. Every not-started live or held task is replaced: if a new draft equals it in device, cmd, value and trigger, the existing task stays as it is (same id, no change); otherwise the old task is cancelled and the draft becomes a new task with a new number `n`. A cancelled id never comes back (§11.3).
+4. Map bundles to cards by `intent_id`:
+   - same intent → same card; lines = kept started lines first, then new lines in `needs` order, ≤ `max_lines` in total; a line whose action keys equal an unchecked line keeps `checked: false` (and its task is not sent);
+   - intent gone → the card's not-started lines `cancelled`; if it still has started tasks it stays controllable (Stop works) until they end, then `archived`; otherwise `archived` now;
+   - new intent → new card (`notify: true`) only while the episode has fewer than 2 non-archived cards; otherwise the new bundle with the lowest number of items is not carded (its situation tasks are dropped `card_limit`).
+   - a stopped card never gets new lines.
+5. S5 (§11.1) and publish one version with the result.
 
-Order edit: items with `item_id` keep their id; a changed `name` or a new item gets type, group and sensitivity from one LLM call (`retype`, schema `{items: [{name, type, group, sensitive_kind}]}`; failure → `core_noun`, group null); `qty` from the request; label and masking as §7.4. Items missing from the request are deleted.
+Order edit: items with `item_id` keep their id; a changed `name` or a new item gets type, group and sensitivity from one LLM call (`retype`, schema `{items: [{name, type, group, sensitive_kind}]}`, `sensitive_kind` with the same five categories and definitions as S1 — `retype_system.txt` includes them). Failure or timeout → that item is stored **masked** (name/type null) and leaves S2–S4, the app shows it in `masked_count`; the user can edit it again. The `sensitive_words` net runs on every edited name. `qty` from the request; label and masking as §7.4. Items missing from the request are deleted.
 
 ---
 
@@ -1096,7 +1151,7 @@ For the evaluation (separate plan, not part of this spec) the server also:
 
 | Change | Where |
 | --- | --- |
-| New device type | Nothing in code. Hub sends it in the device list; add a display name to `device_names.yaml`; per-item rules in `item_tasks.yaml` if needed |
+| New device type | Nothing in code. Hub sends it in the device list; add a display name to `device_names.yaml`, its safe commands to `command_policy.yaml` (otherwise they are dropped `unsafe_cmd`); per-item rules in `item_tasks.yaml` if needed |
 | New per-item task | `item_tasks.yaml` (+ `label_table.yaml` if a group becomes `care`) |
 | New intent | KB list (`contracts/kb/intents.json`, KB-14 rules); prompts read it at start |
 | New holiday | `holiday_calendar.yaml` |
@@ -1124,8 +1179,8 @@ pytest, LLM `mock` (§6.1), DB = Postgres with pgvector (docker compose service 
 | T2 | S1: two captures 64 s apart, same household | same `episode_id`; one LLM call after 10 quiet minutes |
 | T3 | S1: same `source_id` twice | 200, same episode, no LLM call |
 | T4 | S1: mocked output of `ep_9031` | 9 items; labels 딸기/휘핑크림 care, 로션 clue; 고깔모자 qty 6 |
-| T5 | S1: 1+1 deal, qty 1 | qty 2 |
-| T6 | S1: sensitive item (LLM kind, and word list only) | masked, name/type null, `masked_count` 1, absent from S3 message |
+| T5 | S1: 1+1 qty 1 / 2+1 qty 1 / 2+1 qty 2 / no deal | 2 / 3 / 6 / unchanged |
+| T6 | S1: sensitive item (LLM kind, and word list only); 치약 | masked, name/type null, `masked_count` 1, absent from S3 message; 치약 not masked, 감기약 masked |
 | T7 | S1: zero items | `read_failed` |
 | T8 | S2: < 10 past orders / all usual / list | the three statuses |
 | T9 | S2: KB < 5 similar | `note` only, S3 message has the "거의 없다" line |
@@ -1136,7 +1191,7 @@ pytest, LLM `mock` (§6.1), DB = Postgres with pgvector (docker compose service 
 | T14 | S3 format errors (item in two bundles; field missing from text) | one retry; second failure → no intent |
 | T15 | S3 field without basis | that field null, no retry |
 | T16 | S4 `find_time`: calendar / holiday / habit (2 matches same slot) / none | window or held |
-| T17 | S4 for `ep_9031` (mock) | tasks equal `ep_9031/plan.v1.json` tasks (ids, triggers, ends, values) |
+| T17 | S4 for `ep_9031` (mock) | tasks equal `ep_9031/plan.v1.json` tasks (ids per §10.4 numbering, triggers, ends, values; needs the fixture renumbering in `contracts/`) |
 | T18 | S4 second birthday after `ep_9031` memory | no child-safety task (switched off), light uses color_temp 2700 |
 | T19 | S4 stopped before / later match | no situation tasks / tasks again |
 | T20 | S4 unclassified bundle | no run tasks |
@@ -1148,7 +1203,7 @@ pytest, LLM `mock` (§6.1), DB = Postgres with pgvector (docker compose service 
 | T26 | Reactions: line_on after start | 409 |
 | T27 | Reactions: stop while running | cancelled restore true; later reactions 200 ignored |
 | T28 | Hub pull after package event | `plans_changed: true`; pull equals `ep_9031/pull.json` |
-| T29 | Executions and events of `ep_9031` in order | final card equals `ep_9031/card.final.json` |
+| T29 | Executions and events of `ep_9031` in order, and in a shuffled order (late `running` after `completed`) | final card equals `ep_9031/card.final.json` both times |
 | T30 | Duplicate event / result | accepted once / `duplicate: true` |
 | T31 | Ack with a rejected task | line failed, not re-planned |
 | T32 | Window close for `ep_9031` | verdict match, feedback and row equal `ep_9031/case_row.json` (except `basket_emb`, `created_at`) |
@@ -1161,7 +1216,26 @@ pytest, LLM `mock` (§6.1), DB = Postgres with pgvector (docker compose service 
 | T39 | Household types | blocked combination 422; rare accepted; equals SPIRA_KB `rule_level` on all sampled combinations when SPIRA_KB is importable |
 | T40 | Every response body | validates with `spira_contracts.validate` |
 | T41 | Auth | missing token 401, other household's key 403 |
-| T42 | `DEMO_MODE=1` | quiet 30 s, cleaning 3 min before, fallback +10 min |
+| T42 | `DEMO_MODE=1` | quiet exactly 30 s, cleaning exactly 3 min before (even if S4 wrote 90), fallback exactly +10 min, notice after door exactly 2 min |
+| T43 | Crash after an event insert but before commit; then resend | effects applied once |
+| T44 | Restart during S1 (images read, items not stored) and during S2–S5 | episode resumes from its last stage; no image lost before items are stored |
+| T45 | Stop the last not-started task | a cancellation-only version is pulled until acked |
+| T46 | Stop, then a late `running` result of that task | new version with `restore: true`; a duplicate of the result changes nothing |
+| T47 | Re-run after line off / Stop / pause | off line stays off, stopped card gets no tasks, paused home gets nothing |
+| T48 | Re-run with a started task | task kept with its id and line; no duplicate task |
+| T49 | Two episodes of one household confirmed at the same time, same device | one task wins by priority; the loser cancelled in its own episode |
+| T50 | Stale ack (older version), whole-plan rejection, repeated ack | as §12.2 |
+| T51 | Two actions, one `completed`, one without result | line `running`, not `done` |
+| T52 | No ack within `ack_timeout_min`; standby never used | lines `failed`; standby ends at its `or_time` |
+| T53 | Memory write fails at window close | `memory = pending`, retried, episode not closed meanwhile |
+| T54 | Two calendar PUTs, the first tagging finishes last | first result discarded |
+| T55 | All items masked | no S3 call, episode `judged`, `masked_count` only |
+| T56 | Order edit, `retype` timeout | edited item masked, not in S3 |
+| T57 | KB DB timeout | `judged` with `error.stage = s2`, nothing prepared |
+| T58 | Trigger already past by more than `late_grace_min` (re-run, late package); holiday window earlier today | task dropped `late`; next holiday occurrence used |
+| T59 | LLM proposes `oven.start` as standby | dropped `unsafe_cmd` |
+| T60 | Ack / execution with another household's `plan_id`; events batch with one bad element | 403; valid events accepted, bad one in `rejected` |
+| T61 | Paused household, same `source_id` twice | same `paused_skip` episode |
 
 ---
 
@@ -1187,7 +1261,7 @@ pytest, LLM `mock` (§6.1), DB = Postgres with pgvector (docker compose service 
 
 ## Appendix B. Decisions made in this spec
 
-Not yet in the Notion server spec (synchronised in one pass later).
+Not yet in the Notion server spec (synchronised in one pass later). B.2 lists the decisions from the external review.
 
 | # | Decision | Where |
 | --- | --- | --- |
@@ -1216,3 +1290,25 @@ Not yet in the Notion server spec (synchronised in one pass later).
 | D5 | Per-item tasks assume command names `super_freeze`, `set_course_standby` (styler, shoe care), `mode: deodorize` and events `fridge.super_freeze_done`, `purifier.odor_normal`; used only if a hub registers such devices (not in the fixtures; to agree with the hub owner when needed) | §4.3 |
 | D6 | Cleaning-only tasks end with `restore: false`; other run tasks `restore: true` | §10.4 |
 | D7 | `LLM` call log table `llm_calls`; `judge_from_context` for evaluation | §15 |
+
+### B.2 From the external review (11-17)
+
+| # | Decision | Where |
+| --- | --- | --- |
+| R1 | A version made only of cancellations stays in the pull until acked; a late start of a cancelled task republishes it with `restore: true` | §11.3 |
+| R2 | Re-runs keep started tasks (ids, lines), keep unchecked lines off, never revive stopped cards; at most 2 non-archived cards, extra bundles not carded | §14 |
+| R3 | Server-side command allow list per `way` (`command_policy.yaml`), fail closed | §4.5, §11.1 |
+| R4 | Hub auth resolves `plan_id` to its household | §12.1 |
+| R5 | One transaction per input; household lock before episode locks; stages committed and resumable | §2.4 |
+| R6 | Line-on gives the task a **new id**; `tasks` and `cancelled` never share an id (open question 1) | §11.7 |
+| R7 | Unused standby ends at its `or_time` / `standby_max_min`; no ack within `ack_timeout_min` → line failed (open question 2) | §11.8, §12.2 |
+| R8 | Per-item tasks only when exactly one matching device; standby targets one device (open question 3) | §4.3, §10.4 |
+| R9 | Triggers more than `late_grace_min` in the past are dropped `late` (open question 4) | §11.1 |
+| R10 | Intent change on re-run: the old card stays controllable while its tasks run (open question 5) | §14 |
+| R11 | `started` means a `running` / `completed` result; `blocked` never | §5.2 |
+| R12 | Durations are integers with unit suffixes; demo values exact; demo replaces `before_start` minutes | §4.1, §10.4 |
+| R13 | Calendar: HMAC fingerprint for change detection, revision guard for async tagging | §8.5 |
+| R14 | Habit time from the occasion start (`windows.scheduled_start`), not the first run | §10.3 |
+| R15 | Windows created with the card; home events linked by time bounds; memory retried until written | §13 |
+| R16 | Masking before cross-pass dedupe; all-masked orders skip S2–S5; failed retype → masked | §7.2, §14 |
+| R17 | Event batches validated per element; `/health` 503 uses `health.json` | §12 |

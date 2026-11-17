@@ -1,5 +1,6 @@
 # Per-item tasks. Trigger is always package.brought_in (released by the server, HUB-12).
-# A task is made only if the hub list has a device of `device_type` with `cmd` delegated; otherwise nothing.
+# A task is made only if the hub list has exactly one device of `device_type` with `cmd` delegated
+# (and in `room` when set). None or several -> no task (skip ambiguous targets).
 # `name` is the task id name (t_{name}#n). Durations: hours as numbers, or keys of numbers.yaml.
 tasks:
   - name: fridge                 # care notice on the fridge screen
@@ -11,7 +12,7 @@ tasks:
     cmd: show_notice
     value: llm_notice            # text from the S4 LLM (fridge_notices); no text -> no task
     way: notice
-    end: {on: fridge.door_opened, after: notice_after_door_h, or_after: notice_max_h, restore: false}
+    end: {on: fridge.door_opened, after: notice_after_door_min, or_after: notice_max_min, restore: false}
   - name: freeze                 # super-freeze for bulk meat / frozen food
     when:
       groups: [음·식료품, 농축수산물]
@@ -37,7 +38,7 @@ tasks:
   - name: mattress               # bedroom purifier deodorising for a new mattress
     when: {group: 가구, type_contains: 매트리스}
     device_type: purifier
-    room: 침실                    # only if the home has exactly one bedroom or exactly one bedroom purifier
+    room: 침실                    # exactly one purifier in a room named 침실
     cmd: mode
     value: {mode: deodorize}
     way: run
