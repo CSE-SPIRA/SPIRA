@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pause.json",
+  "title": "Pause",
+  "description": "App -> server: POST /v1/households/{hid}/pause (request and response). true cancels tasks not started yet and stores new orders without judging; running effects continue. (APP-10)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["paused"],
+  "properties": {
+    "household_id": {"$ref": "common.json#/$defs/HouseholdId", "description": "Response only."},
+    "paused": {"type": "boolean"}
+  }
+}

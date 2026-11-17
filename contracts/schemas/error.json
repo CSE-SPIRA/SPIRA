@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "error.json",
+  "title": "Error",
+  "description": "Body of every 4xx / 5xx response. (COM-05)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["code", "message"],
+  "properties": {
+    "code": {"$ref": "common.json#/$defs/ErrorCode"},
+    "message": {"type": "string"},
+    "details": {"type": "object", "description": "validation_error: {\"path\": \"tasks[0].way\", \"reason\": \"...\"}."}
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "$comment": "Old intent id -> new intent id, used only if intents are merged or split (KB-14). Empty while the list is fixed this semester.",
+  "merged": {},
+  "split": {}
+}

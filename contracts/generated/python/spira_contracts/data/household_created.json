@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "household_created.json",
+  "title": "HouseholdCreated",
+  "description": "Response 201 of POST /v1/households. The app passes hub_api_key once to the hub's local setup route; it is never shown again. (HUB-14)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["household_id", "hub_api_key"],
+  "properties": {
+    "household_id": {"$ref": "common.json#/$defs/HouseholdId"},
+    "hub_api_key": {"type": "string", "minLength": 32}
+  }
+}

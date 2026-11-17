@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "episode.json",
+  "title": "Episode",
+  "description": "One shared order (all captures within 8 h). Server -> app: GET /v1/episodes/{id}. items feed the order edit screen; masked items appear only as masked_count. (APP-07, APP-11)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["episode_id", "household_id", "status", "shared_at", "item_count", "masked_count", "items", "item_tasks", "card_ids"],
+  "properties": {
+    "episode_id": {"$ref": "common.json#/$defs/EpisodeId"},
+    "household_id": {"$ref": "common.json#/$defs/HouseholdId"},
+    "status": {"$ref": "common.json#/$defs/EpisodeStatus"},
+    "shared_at": {"$ref": "common.json#/$defs/DateTime", "description": "First capture."},
+    "item_count": {"type": "integer", "minimum": 0, "description": "Items read, masked included."},
+    "masked_count": {"type": "integer", "minimum": 0},
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["item_id", "name", "type", "qty"],
+        "properties": {
+          "item_id": {"$ref": "common.json#/$defs/ItemId"},
+          "name": {"type": "string", "description": "Product name as shown."},
+          "type": {"type": "string", "description": "Plain item name (e.g. 딸기)."},
+          "qty": {"type": ["integer", "null"], "minimum": 1}
+        }
+      }
+    },
+    "item_tasks": {"type": "array", "items": {"$ref": "#/$defs/ItemTask"}, "description": "Per-item tasks (care notices etc.). Not on the card."},
+    "card_ids": {"type": "array", "items": {"$ref": "common.json#/$defs/CardId"}, "maxItems": 2}
+  },
+  "$defs": {
+    "ItemTask": {
+      "type": "object", "additionalProperties": false, "required": ["task_id", "item", "kind", "text", "state"],
+      "properties": {
+        "task_id": {"$ref": "common.json#/$defs/TaskId"},
+        "item": {"type": "string"},
+        "kind": {"anyOf": [{"$ref": "common.json#/$defs/NoticeKind"}, {"type": "null"}]},
+        "text": {"type": ["string", "null"]},
+        "state": {"$ref": "common.json#/$defs/LineState"}
+      }
+    }
+  }
+}

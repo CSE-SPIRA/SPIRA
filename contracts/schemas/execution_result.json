@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "execution_result.json",
+  "title": "ExecutionResult",
+  "description": "Result of one action (one device) or of one restore (C-4). Hub -> server: POST /v1/hub/executions, one result per request. completed needs a fresh read-back, not just an ACK. (HUB-08)",
+  "oneOf": [{"$ref": "#/$defs/RunResult"}, {"$ref": "#/$defs/RestoreResult"}],
+  "$defs": {
+    "RunResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["result_id", "kind", "operation_id", "plan_id", "plan_version", "task_id", "device", "cmd", "substrate", "status", "reason", "at"],
+      "properties": {
+        "result_id": {"$ref": "common.json#/$defs/ResultId"},
+        "kind": {"const": "run"},
+        "operation_id": {"$ref": "common.json#/$defs/OperationId", "description": "Same for every result of one dispatch (e.g. running then completed)."},
+        "plan_id": {"$ref": "common.json#/$defs/EpisodeId"},
+        "plan_version": {"type": "integer", "minimum": 1},
+        "task_id": {"$ref": "common.json#/$defs/TaskId"},
+        "device": {"$ref": "common.json#/$defs/DeviceId"},
+        "cmd": {"type": "string"},
+        "substrate": {"$ref": "common.json#/$defs/Substrate"},
+        "status": {"$ref": "common.json#/$defs/ExecutionStatus"},
+        "reason": {"anyOf": [{"$ref": "common.json#/$defs/BlockedReason"}, {"type": "null"}], "description": "Required (non-null) when status is blocked."},
+        "saved_state": {"type": "object", "description": "State before the action, used for restore."},
+        "observed": {"type": "object", "description": "State read back after the action."},
+        "at": {"$ref": "common.json#/$defs/DateTime"}
+      },
+      "if": {"properties": {"status": {"const": "blocked"}}},
+      "then": {"properties": {"reason": {"$ref": "common.json#/$defs/BlockedReason"}}},
+      "else": {"properties": {"reason": {"type": "null"}}}
+    },
+    "RestoreResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["result_id", "kind", "plan_id", "plan_version", "task_id", "items", "at"],
+      "properties": {
+        "result_id": {"$ref": "common.json#/$defs/ResultId"},
+        "kind": {"const": "restore"},
+        "plan_id": {"$ref": "common.json#/$defs/EpisodeId"},
+        "plan_version": {"type": "integer", "minimum": 1},
+        "task_id": {"$ref": "common.json#/$defs/TaskId"},
+        "items": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["device", "status"],
+            "properties": {"device": {"$ref": "common.json#/$defs/DeviceId"}, "status": {"$ref": "common.json#/$defs/RestoreItemStatus"}}
+          }
+        },
+        "at": {"$ref": "common.json#/$defs/DateTime"}
+      }
+    }
+  }
+}

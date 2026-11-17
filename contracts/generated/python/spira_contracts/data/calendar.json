@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "calendar.json",
+  "title": "Calendar",
+  "description": "App -> server: PUT /v1/households/{hid}/calendar. The full list for now .. +14 days replaces what the server had. The server keeps only tags and drops titles. (APP-03)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["events"],
+  "properties": {
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["id", "title", "start", "end"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1, "description": "Calendar event id from the app (stable)."},
+          "title": {"type": "string"},
+          "start": {"$ref": "common.json#/$defs/DateTime"},
+          "end": {"$ref": "common.json#/$defs/DateTime"}
+        }
+      }
+    }
+  }
+}

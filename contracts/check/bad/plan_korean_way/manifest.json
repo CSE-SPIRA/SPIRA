@@ -1,0 +1,10 @@
+{
+  "$comment": "Korean value instead of the English code (COM-03)",
+  "expect": "is not one of",
+  "files": {
+    "plan.json": {
+      "schema": "plan.json"
+    }
+  },
+  "devices": "../../../fixtures/ep_9031/devices.json"
+}

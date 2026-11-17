@@ -1,0 +1,17 @@
+{
+  "result_id": "rs_5001",
+  "kind": "run",
+  "operation_id": "op_7701",
+  "plan_id": "ep_9031",
+  "plan_version": 3,
+  "task_id": "t_fridge#1",
+  "device": "fridge_01",
+  "cmd": "show_notice",
+  "substrate": "virtual",
+  "status": "success",
+  "reason": null,
+  "at": "2026-10-16T18:05:20+09:00",
+  "observed": {
+    "notice": "씻지 말고 키친타월을 깔아 냉장 보관하고, 토요일 꾸미기 직전에 씻어 주세요"
+  }
+}

@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rationale.json",
+  "title": "Rationale",
+  "description": "Why SPIRA prepared what it did, read from stored values (no new LLM call). Server -> app: GET /v1/episodes/{id}/rationale. Masked items never appear, only masked_count. (APP-06)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["episode_id", "intents", "none_reason", "evidence", "unbundled", "masked_count", "tasks", "item_tasks", "executions", "observations"],
+  "properties": {
+    "episode_id": {"$ref": "common.json#/$defs/EpisodeId"},
+    "intents": {"type": "array", "maxItems": 2, "items": {"$ref": "#/$defs/Intent"}},
+    "none_reason": {"type": ["string", "null"], "description": "Set when no intent was found."},
+    "evidence": {
+      "type": "object", "additionalProperties": false, "required": ["calendar", "unusual_items", "kb_counts", "kb_examples", "kb_note"],
+      "properties": {
+        "calendar": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["id", "days_after", "day", "tags", "start", "end"],
+            "properties": {
+              "id": {"type": "string"}, "days_after": {"type": "integer"}, "day": {"type": "string"},
+              "tags": {"type": "array", "items": {"type": "string"}},
+              "start": {"type": "string", "pattern": "^[0-9]{2}:[0-9]{2}$"}, "end": {"type": "string", "pattern": "^[0-9]{2}:[0-9]{2}$"}
+            }
+          }
+        },
+        "unusual_items": {
+          "anyOf": [{"type": "null"}, {
+            "type": "object", "additionalProperties": false, "required": ["status"],
+            "properties": {
+              "status": {"$ref": "common.json#/$defs/UnusualStatus"},
+              "items": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["item", "why"], "properties": {"item": {"type": "string"}, "why": {"type": "string"}}}},
+              "usual": {"type": "array", "items": {"type": "string"}}
+            }
+          }],
+          "description": "null when the home context switch was off."
+        },
+        "kb_counts": {
+          "anyOf": [{"type": "null"}, {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["intent_id", "name", "n"], "properties": {"intent_id": {"type": "string"}, "name": {"type": "string"}, "n": {"type": "integer", "minimum": 1}}}}]
+        },
+        "kb_examples": {
+          "type": "array", "maxItems": 3,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["case_id", "items", "intent_id", "intent_text", "overlap"],
+            "properties": {
+              "case_id": {"$ref": "common.json#/$defs/CaseId"},
+              "items": {"type": "array", "items": {"type": "string"}},
+              "intent_id": {"type": "string"}, "intent_text": {"type": ["string", "null"]},
+              "overlap": {"type": "object", "additionalProperties": false, "required": ["k", "n", "items"], "properties": {"k": {"type": "integer"}, "n": {"type": "integer"}, "items": {"type": "array", "items": {"type": "string"}}}}
+            }
+          }
+        },
+        "kb_note": {"type": ["string", "null"], "description": "e.g. 'few similar cases' when fewer than the minimum."}
+      }
+    },
+    "unbundled": {"type": "array", "items": {"type": "string"}, "description": "Items not part of any intent."},
+    "masked_count": {"type": "integer", "minimum": 0},
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["task_id", "card_id", "line", "need", "way", "state", "devices"],
+        "properties": {
+          "task_id": {"$ref": "common.json#/$defs/TaskId"},
+          "card_id": {"$ref": "common.json#/$defs/CardId"},
+          "line": {"type": "string"}, "need": {"type": "string"},
+          "way": {"$ref": "common.json#/$defs/Way"},
+          "state": {"$ref": "common.json#/$defs/LineState"},
+          "devices": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["id", "type", "room"], "properties": {"id": {"$ref": "common.json#/$defs/DeviceId"}, "type": {"$ref": "common.json#/$defs/DeviceType"}, "room": {"type": ["string", "null"]}}}}
+        }
+      }
+    },
+    "item_tasks": {"type": "array", "items": {"$ref": "episode.json#/$defs/ItemTask"}},
+    "executions": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["task_id", "device", "status", "substrate", "at"],
+        "properties": {
+          "task_id": {"$ref": "common.json#/$defs/TaskId"}, "device": {"$ref": "common.json#/$defs/DeviceId"},
+          "status": {"$ref": "common.json#/$defs/ExecutionStatus"}, "substrate": {"$ref": "common.json#/$defs/Substrate"},
+          "at": {"$ref": "common.json#/$defs/DateTime"}
+        }
+      }
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["card_id", "verdict", "task_feedback"],
+        "properties": {
+          "card_id": {"$ref": "common.json#/$defs/CardId"},
+          "verdict": {"anyOf": [{"$ref": "common.json#/$defs/Verdict"}, {"type": "null"}], "description": "null until the observation window closes."},
+          "task_feedback": {"type": "array", "items": {"$ref": "case_row.json#/$defs/Feedback"}}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "Intent": {
+      "type": "object", "additionalProperties": false,
+      "required": ["card_id", "intent_id", "intent_text", "situation", "basis", "calendar_event_id", "calendar_tags"],
+      "properties": {
+        "card_id": {"anyOf": [{"$ref": "common.json#/$defs/CardId"}, {"type": "null"}], "description": "null when the intent got no card (nothing to prepare)."},
+        "intent_id": {"type": "string"},
+        "intent_text": {"type": "string"},
+        "situation": {"$ref": "case_row.json#/$defs/Situation"},
+        "basis": {
+          "type": "object", "additionalProperties": false, "required": ["intent", "event", "guests", "activity", "theme"],
+          "description": "Evidence per field: item types, calendar event ids, or '가구 유형' (household types).",
+          "properties": {
+            "intent": {"type": "array", "items": {"type": "string"}},
+            "event": {"type": "array", "items": {"type": "string"}},
+            "guests": {"type": "array", "items": {"type": "string"}},
+            "activity": {"type": "array", "items": {"type": "string"}},
+            "theme": {"type": "array", "items": {"type": "string"}}
+          }
+        },
+        "calendar_event_id": {"type": ["string", "null"]},
+        "calendar_tags": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

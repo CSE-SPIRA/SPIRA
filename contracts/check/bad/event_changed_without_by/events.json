@@ -1,0 +1,16 @@
+[
+  {
+    "event_id": "ev_x1",
+    "household_id": "h_042",
+    "type": "light.changed",
+    "source": "light_01",
+    "at": "2026-10-17T15:10:05+09:00",
+    "payload": {
+      "property": "color_temp",
+      "from": null,
+      "to": {
+        "kelvin": 2700
+      }
+    }
+  }
+]

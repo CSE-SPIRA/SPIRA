@@ -1,0 +1,363 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "common.json",
+  "title": "Common definitions",
+  "description": "IDs, time formats and enum values shared by the other schemas. Enum lists here must equal enums.json (checked by check/check.py). (COM-02, COM-03, COM-04)",
+  "$defs": {
+    "HouseholdId": {
+      "type": "string",
+      "pattern": "^h_[0-9a-z]+$",
+      "examples": [
+        "h_042"
+      ]
+    },
+    "EpisodeId": {
+      "type": "string",
+      "pattern": "^ep_[0-9a-z]+$",
+      "description": "Also used as plan_id (one plan per order).",
+      "examples": [
+        "ep_9031"
+      ]
+    },
+    "CardId": {
+      "type": "string",
+      "pattern": "^nc_[0-9a-z]+$",
+      "examples": [
+        "nc_331"
+      ]
+    },
+    "TaskId": {
+      "type": "string",
+      "pattern": "^t_[a-z][a-z0-9_]*#[0-9]+$",
+      "description": "t_{name}#{n}. n is the order inside the episode and never changes across plan versions (COM-04).",
+      "examples": [
+        "t_clean#1"
+      ]
+    },
+    "DeviceId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "{type}_{two digits} or plug_{purpose}. Nobody parses it (HUB-06).",
+      "examples": [
+        "light_01",
+        "plug_kettle"
+      ]
+    },
+    "EventId": {
+      "type": "string",
+      "pattern": "^ev_[0-9a-z_]+$",
+      "description": "Globally unique; the same id on resend."
+    },
+    "ResultId": {
+      "type": "string",
+      "pattern": "^rs_[0-9a-z_]+$",
+      "description": "Globally unique; the same id on resend."
+    },
+    "OperationId": {
+      "type": "string",
+      "pattern": "^op_[0-9a-z_]+$"
+    },
+    "CaseId": {
+      "type": "string",
+      "pattern": "^(syn_.+|home_h_[0-9a-z]+_ep_[0-9a-z]+_[0-9]+)$",
+      "description": "syn_{batch}_{nnnn} (KB) or home_{household_id}_{episode_id}_{n} (this home, one per card)."
+    },
+    "ItemId": {
+      "type": "string",
+      "pattern": "^it_[0-9a-z_]+$"
+    },
+    "DateTime": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$",
+      "description": "ISO 8601 with offset, e.g. 2026-10-17T14:00:00+09:00 (COM-02)."
+    },
+    "Date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "Duration": {
+      "type": "string",
+      "pattern": "^[0-9]+(m|h)$",
+      "description": "Minutes or hours, e.g. 30m, 2h."
+    },
+    "EventName": {
+      "type": "string",
+      "pattern": "^(package\\.brought_in|guest_arrived|event_end|[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*)$",
+      "description": "A home event, or '{device type}.{device event}'."
+    },
+    "DeviceType": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Open list; known values in enums.json device_type."
+    },
+    "DeviceEvent": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Open list; known values in enums.json device_event."
+    },
+    "ActionKey": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "minItems": 2,
+      "maxItems": 2,
+      "description": "[device type (plugs: 'smart_plug:{label}'), cmd]"
+    },
+    "Way": {
+      "title": "Way",
+      "type": "string",
+      "enum": [
+        "run",
+        "standby",
+        "notice"
+      ]
+    },
+    "TaskSource": {
+      "title": "TaskSource",
+      "type": "string",
+      "enum": [
+        "situation",
+        "item"
+      ]
+    },
+    "TriggerEvent": {
+      "title": "TriggerEvent",
+      "type": "string",
+      "enum": [
+        "package.brought_in",
+        "guest_arrived",
+        "event_end"
+      ]
+    },
+    "HomeEvent": {
+      "title": "HomeEvent",
+      "type": "string",
+      "enum": [
+        "package.brought_in",
+        "guest_arrived",
+        "event_end"
+      ]
+    },
+    "By": {
+      "title": "By",
+      "type": "string",
+      "enum": [
+        "user",
+        "spira",
+        "unknown"
+      ]
+    },
+    "Substrate": {
+      "title": "Substrate",
+      "type": "string",
+      "enum": [
+        "virtual",
+        "physical"
+      ]
+    },
+    "AckStatus": {
+      "title": "AckStatus",
+      "type": "string",
+      "enum": [
+        "admitted",
+        "rejected"
+      ]
+    },
+    "AckRejectReason": {
+      "title": "AckRejectReason",
+      "type": "string",
+      "enum": [
+        "unknown_device",
+        "unsupported_cmd",
+        "value_out_of_range",
+        "schema"
+      ]
+    },
+    "ExecutionKind": {
+      "title": "ExecutionKind",
+      "type": "string",
+      "enum": [
+        "run",
+        "restore"
+      ]
+    },
+    "ExecutionStatus": {
+      "title": "ExecutionStatus",
+      "type": "string",
+      "enum": [
+        "completed",
+        "failed",
+        "running",
+        "unverifiable",
+        "unknown",
+        "blocked"
+      ]
+    },
+    "BlockedReason": {
+      "title": "BlockedReason",
+      "type": "string",
+      "enum": [
+        "plan_cancelled",
+        "paused",
+        "not_delegated",
+        "plan_unconfirmed",
+        "offline",
+        "in_use_by_person",
+        "already_done_by_person",
+        "quiet_hours"
+      ]
+    },
+    "RestoreItemStatus": {
+      "title": "RestoreItemStatus",
+      "type": "string",
+      "enum": [
+        "restored",
+        "skipped_user_changed",
+        "failed",
+        "unknown",
+        "not_needed"
+      ]
+    },
+    "LineState": {
+      "title": "LineState",
+      "type": "string",
+      "enum": [
+        "held",
+        "scheduled",
+        "running",
+        "done",
+        "partial",
+        "failed",
+        "unknown",
+        "blocked",
+        "user_changed",
+        "off",
+        "stopped",
+        "cancelled",
+        "dropped"
+      ]
+    },
+    "EndState": {
+      "title": "EndState",
+      "type": "string",
+      "enum": [
+        "restored",
+        "kept_user_change",
+        "restore_failed",
+        "none"
+      ]
+    },
+    "EpisodeStatus": {
+      "title": "EpisodeStatus",
+      "type": "string",
+      "enum": [
+        "received",
+        "reading",
+        "read_failed",
+        "judged",
+        "notified",
+        "held",
+        "closed",
+        "paused_skip"
+      ]
+    },
+    "Reaction": {
+      "title": "Reaction",
+      "type": "string",
+      "enum": [
+        "stop",
+        "line_off",
+        "line_on"
+      ]
+    },
+    "CardButton": {
+      "title": "CardButton",
+      "type": "string",
+      "enum": [
+        "stop"
+      ]
+    },
+    "Verdict": {
+      "title": "Verdict",
+      "type": "string",
+      "enum": [
+        "match",
+        "stopped",
+        "unconfirmed"
+      ]
+    },
+    "TaskFeedback": {
+      "title": "TaskFeedback",
+      "type": "string",
+      "enum": [
+        "off",
+        "changed",
+        "kept"
+      ]
+    },
+    "OffWhen": {
+      "title": "OffWhen",
+      "type": "string",
+      "enum": [
+        "before_run",
+        "during_run"
+      ]
+    },
+    "NoticeKind": {
+      "title": "NoticeKind",
+      "type": "string",
+      "enum": [
+        "prep",
+        "storage"
+      ]
+    },
+    "UnusualStatus": {
+      "title": "UnusualStatus",
+      "type": "string",
+      "enum": [
+        "insufficient",
+        "all_usual",
+        "list"
+      ]
+    },
+    "CaseSource": {
+      "title": "CaseSource",
+      "type": "string",
+      "enum": [
+        "synthetic",
+        "this_home",
+        "other_home"
+      ]
+    },
+    "ReservedIntent": {
+      "title": "ReservedIntent",
+      "type": "string",
+      "enum": [
+        "none",
+        "unclassified"
+      ]
+    },
+    "ErrorCode": {
+      "title": "ErrorCode",
+      "type": "string",
+      "enum": [
+        "invalid_request",
+        "invalid_image",
+        "unauthorized",
+        "forbidden",
+        "not_found",
+        "line_started",
+        "stale_revision",
+        "validation_error",
+        "household_types_invalid",
+        "internal"
+      ]
+    }
+  }
+}

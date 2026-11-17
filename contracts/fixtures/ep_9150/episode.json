@@ -1,0 +1,50 @@
+{
+  "episode_id": "ep_9150",
+  "household_id": "h_042",
+  "status": "judged",
+  "shared_at": "2026-11-04T19:30:41+09:00",
+  "item_count": 5,
+  "masked_count": 0,
+  "items": [
+    {
+      "item_id": "it_1",
+      "name": "서울우유 1L",
+      "type": "우유",
+      "qty": 2
+    },
+    {
+      "item_id": "it_2",
+      "name": "무항생제 계란 15구",
+      "type": "계란",
+      "qty": 1
+    },
+    {
+      "item_id": "it_3",
+      "name": "통영 바지락 500g",
+      "type": "바지락",
+      "qty": 1
+    },
+    {
+      "item_id": "it_4",
+      "name": "3겹 롤휴지 30롤",
+      "type": "휴지",
+      "qty": 1
+    },
+    {
+      "item_id": "it_5",
+      "name": "OO 주방세제 1L",
+      "type": "주방 세제",
+      "qty": 1
+    }
+  ],
+  "item_tasks": [
+    {
+      "task_id": "t_fridge#1",
+      "item": "바지락",
+      "kind": "prep",
+      "text": "소금물(물 1L에 소금 2큰술)에 담고 검은 봉지를 덮어 냉장고에서 2~3시간 해감한 뒤 드세요",
+      "state": "scheduled"
+    }
+  ],
+  "card_ids": []
+}

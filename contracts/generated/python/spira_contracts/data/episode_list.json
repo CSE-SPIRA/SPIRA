@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "episode_list.json",
+  "title": "EpisodeList",
+  "description": "Response of GET /v1/households/{hid}/episodes?limit=&before= (newest first). Pass next_before to get older ones. (APP-01)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["episodes", "next_before"],
+  "properties": {
+    "episodes": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["episode_id", "shared_at", "status", "item_count", "card_ids"],
+        "properties": {
+          "episode_id": {"$ref": "common.json#/$defs/EpisodeId"},
+          "shared_at": {"$ref": "common.json#/$defs/DateTime"},
+          "status": {"$ref": "common.json#/$defs/EpisodeStatus"},
+          "item_count": {"type": "integer", "minimum": 0},
+          "card_ids": {"type": "array", "items": {"$ref": "common.json#/$defs/CardId"}}
+        }
+      }
+    },
+    "next_before": {"anyOf": [{"$ref": "common.json#/$defs/DateTime"}, {"type": "null"}]}
+  }
+}

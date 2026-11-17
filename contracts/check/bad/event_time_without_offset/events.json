@@ -1,0 +1,10 @@
+[
+  {
+    "event_id": "ev_x2",
+    "household_id": "h_042",
+    "type": "guest_arrived",
+    "source": "hub",
+    "at": "2026-10-17 13:52",
+    "payload": {}
+  }
+]

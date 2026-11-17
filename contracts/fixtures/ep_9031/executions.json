@@ -1,0 +1,147 @@
+[
+  {
+    "result_id": "rs_5001",
+    "kind": "run",
+    "operation_id": "op_7701",
+    "plan_id": "ep_9031",
+    "plan_version": 3,
+    "task_id": "t_fridge#1",
+    "device": "fridge_01",
+    "cmd": "show_notice",
+    "substrate": "virtual",
+    "status": "completed",
+    "reason": null,
+    "at": "2026-10-16T18:05:20+09:00",
+    "observed": {
+      "notice": "씻지 말고 키친타월을 깔아 냉장 보관하고, 토요일 꾸미기 직전에 씻어 주세요"
+    }
+  },
+  {
+    "result_id": "rs_5002",
+    "kind": "run",
+    "operation_id": "op_7702",
+    "plan_id": "ep_9031",
+    "plan_version": 3,
+    "task_id": "t_fridge#2",
+    "device": "fridge_01",
+    "cmd": "show_notice",
+    "substrate": "virtual",
+    "status": "completed",
+    "reason": null,
+    "at": "2026-10-16T18:05:21+09:00",
+    "observed": {
+      "notice": "꾸미기 직전까지 냉장고 안쪽에 두고, 휘핑할 때 볼도 차갑게 해 두면 잘 올라와요"
+    }
+  },
+  {
+    "result_id": "rs_5003",
+    "kind": "run",
+    "operation_id": "op_7710",
+    "plan_id": "ep_9031",
+    "plan_version": 3,
+    "task_id": "t_clean#1",
+    "device": "cleaner_01",
+    "cmd": "clean",
+    "substrate": "virtual",
+    "status": "running",
+    "reason": null,
+    "at": "2026-10-17T12:30:05+09:00"
+  },
+  {
+    "result_id": "rs_5004",
+    "kind": "run",
+    "operation_id": "op_7710",
+    "plan_id": "ep_9031",
+    "plan_version": 3,
+    "task_id": "t_clean#1",
+    "device": "cleaner_01",
+    "cmd": "clean",
+    "substrate": "virtual",
+    "status": "completed",
+    "reason": null,
+    "at": "2026-10-17T12:58:32+09:00",
+    "observed": {
+      "job": "completed"
+    }
+  },
+  {
+    "result_id": "rs_5011",
+    "kind": "run",
+    "operation_id": "op_7780",
+    "plan_id": "ep_9031",
+    "plan_version": 3,
+    "task_id": "t_mood#1",
+    "device": "display_01",
+    "cmd": "play_mood",
+    "substrate": "virtual",
+    "status": "completed",
+    "reason": null,
+    "at": "2026-10-17T13:52:37+09:00",
+    "saved_state": {
+      "play_mood": null
+    },
+    "observed": {
+      "scene": "kids_party"
+    }
+  },
+  {
+    "result_id": "rs_5012",
+    "kind": "run",
+    "operation_id": "op_7781",
+    "plan_id": "ep_9031",
+    "plan_version": 3,
+    "task_id": "t_mood#1",
+    "device": "light_01",
+    "cmd": "color",
+    "substrate": "physical",
+    "status": "completed",
+    "reason": null,
+    "at": "2026-10-17T13:52:40+09:00",
+    "saved_state": {
+      "color_temp": {
+        "kelvin": 3000
+      }
+    },
+    "observed": {
+      "hue": 330,
+      "saturation": 45,
+      "brightness": 70
+    }
+  },
+  {
+    "result_id": "rs_5020",
+    "kind": "run",
+    "operation_id": "op_7790",
+    "plan_id": "ep_9031",
+    "plan_version": 3,
+    "task_id": "t_oven#1",
+    "device": "oven_01",
+    "cmd": "set_cook_standby",
+    "substrate": "virtual",
+    "status": "completed",
+    "reason": null,
+    "at": "2026-10-17T14:00:03+09:00",
+    "observed": {
+      "temp_c": 170,
+      "minutes": 20
+    }
+  },
+  {
+    "result_id": "rs_5090",
+    "kind": "restore",
+    "plan_id": "ep_9031",
+    "plan_version": 3,
+    "task_id": "t_mood#1",
+    "at": "2026-10-17T17:50:15+09:00",
+    "items": [
+      {
+        "device": "light_01",
+        "status": "skipped_user_changed"
+      },
+      {
+        "device": "display_01",
+        "status": "restored"
+      }
+    ]
+  }
+]

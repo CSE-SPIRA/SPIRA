@@ -1,0 +1,32 @@
+{
+  "plan_id": "ep_9150",
+  "household_id": "h_042",
+  "plan_version": 1,
+  "devices_revision": 3,
+  "sent_at": "2026-11-04T19:41:05+09:00",
+  "cancelled": [],
+  "tasks": [
+    {
+      "task_id": "t_fridge#1",
+      "source": "item",
+      "way": "notice",
+      "actions": [
+        {
+          "device": "fridge_01",
+          "cmd": "show_notice",
+          "value": "소금물(물 1L에 소금 2큰술)에 담고 검은 봉지를 덮어 냉장고에서 2~3시간 해감한 뒤 드세요"
+        }
+      ],
+      "trigger": {
+        "event": "package.brought_in",
+        "released": false
+      },
+      "end": {
+        "on": "fridge.door_opened",
+        "after": "2h",
+        "or_after": "12h",
+        "restore": false
+      }
+    }
+  ]
+}

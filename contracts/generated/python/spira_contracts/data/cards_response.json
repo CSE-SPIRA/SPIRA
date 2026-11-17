@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cards_response.json",
+  "title": "CardsResponse",
+  "description": "Response of GET /v1/households/{hid}/cards?since=. Cards updated after since. Use server_time as the next since. (APP-04)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["cards", "server_time"],
+  "properties": {
+    "cards": {"type": "array", "items": {"$ref": "card.json"}},
+    "server_time": {"$ref": "common.json#/$defs/DateTime"}
+  }
+}

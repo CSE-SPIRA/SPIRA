@@ -1,0 +1,10 @@
+{
+  "$comment": "device not in the household list",
+  "expect": "unknown device",
+  "files": {
+    "plan.json": {
+      "schema": "plan.json"
+    }
+  },
+  "devices": "../../../fixtures/ep_9031/devices.json"
+}

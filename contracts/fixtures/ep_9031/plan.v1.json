@@ -1,0 +1,158 @@
+{
+  "plan_id": "ep_9031",
+  "household_id": "h_042",
+  "plan_version": 1,
+  "devices_revision": 3,
+  "sent_at": "2026-10-15T21:11:40+09:00",
+  "tasks": [
+    {
+      "task_id": "t_clean#1",
+      "source": "situation",
+      "way": "run",
+      "actions": [
+        {
+          "device": "cleaner_01",
+          "cmd": "clean",
+          "value": {
+            "room": "거실"
+          }
+        }
+      ],
+      "trigger": {
+        "time": "2026-10-17T12:30:00+09:00"
+      },
+      "end": {
+        "on": "event_end",
+        "or_time": "2026-10-17T20:00:00+09:00",
+        "restore": false
+      }
+    },
+    {
+      "task_id": "t_safe#1",
+      "source": "situation",
+      "way": "run",
+      "actions": [
+        {
+          "device": "cooktop_01",
+          "cmd": "child_lock"
+        },
+        {
+          "device": "plug_kettle",
+          "cmd": "off"
+        }
+      ],
+      "trigger": {
+        "time": "2026-10-17T13:30:00+09:00"
+      },
+      "end": {
+        "on": "event_end",
+        "or_time": "2026-10-17T20:00:00+09:00",
+        "restore": true
+      }
+    },
+    {
+      "task_id": "t_mood#1",
+      "source": "situation",
+      "way": "run",
+      "actions": [
+        {
+          "device": "display_01",
+          "cmd": "play_mood",
+          "value": {
+            "scene": "kids_party"
+          }
+        },
+        {
+          "device": "light_01",
+          "cmd": "color",
+          "value": {
+            "hue": 330,
+            "saturation": 45,
+            "brightness": 70
+          }
+        }
+      ],
+      "trigger": {
+        "event": "guest_arrived",
+        "first_only": true,
+        "window": {
+          "from": "2026-10-17T13:30:00+09:00",
+          "to": "2026-10-17T17:00:00+09:00"
+        }
+      },
+      "end": {
+        "on": "event_end",
+        "or_time": "2026-10-17T20:00:00+09:00",
+        "restore": true
+      }
+    },
+    {
+      "task_id": "t_oven#1",
+      "source": "situation",
+      "way": "standby",
+      "actions": [
+        {
+          "device": "oven_01",
+          "cmd": "set_cook_standby",
+          "value": {
+            "temp_c": 170,
+            "minutes": 20
+          }
+        }
+      ],
+      "trigger": {
+        "time": "2026-10-17T14:00:00+09:00"
+      },
+      "end": {
+        "on": "oven.started",
+        "by": "user",
+        "restore": false
+      }
+    },
+    {
+      "task_id": "t_fridge#1",
+      "source": "item",
+      "way": "notice",
+      "actions": [
+        {
+          "device": "fridge_01",
+          "cmd": "show_notice",
+          "value": "씻지 말고 키친타월을 깔아 냉장 보관하고, 토요일 꾸미기 직전에 씻어 주세요"
+        }
+      ],
+      "trigger": {
+        "event": "package.brought_in",
+        "released": false
+      },
+      "end": {
+        "on": "fridge.door_opened",
+        "after": "2h",
+        "or_after": "12h",
+        "restore": false
+      }
+    },
+    {
+      "task_id": "t_fridge#2",
+      "source": "item",
+      "way": "notice",
+      "actions": [
+        {
+          "device": "fridge_01",
+          "cmd": "show_notice",
+          "value": "꾸미기 직전까지 냉장고 안쪽에 두고, 휘핑할 때 볼도 차갑게 해 두면 잘 올라와요"
+        }
+      ],
+      "trigger": {
+        "event": "package.brought_in",
+        "released": false
+      },
+      "end": {
+        "on": "fridge.door_opened",
+        "after": "2h",
+        "or_after": "12h",
+        "restore": false
+      }
+    }
+  ],
+  "cancelled": []
+}

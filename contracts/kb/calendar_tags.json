@@ -1,0 +1,164 @@
+{
+  "$comment": "Calendar tags (30). Owner: KB (Uijin). The server LLM picks only from these when it receives a calendar; titles are not stored. (KB-09, KB-15)",
+  "source": "uijinlee-luj/SPIRA_KB config/lists/calendar_tags.yaml @20d569f",
+  "version": 1,
+  "rules": [
+    "Pick a tag only when the title clearly says so; otherwise no tag.",
+    "Health / hospital events get no tag.",
+    "Everyday tags (everyday: true) never link to an intent.",
+    "No seasons. Only time and weekday.",
+    "The server's holiday calendar uses the same tag words."
+  ],
+  "tags": [
+    {
+      "tag": "생일",
+      "group": "기념일·행사",
+      "everyday": false
+    },
+    {
+      "tag": "기념일",
+      "group": "기념일·행사",
+      "everyday": false
+    },
+    {
+      "tag": "설날",
+      "group": "기념일·행사",
+      "everyday": false
+    },
+    {
+      "tag": "추석",
+      "group": "기념일·행사",
+      "everyday": false
+    },
+    {
+      "tag": "크리스마스",
+      "group": "기념일·행사",
+      "everyday": false
+    },
+    {
+      "tag": "연말 모임",
+      "group": "기념일·행사",
+      "everyday": false
+    },
+    {
+      "tag": "어린이날",
+      "group": "기념일·행사",
+      "everyday": false
+    },
+    {
+      "tag": "어버이날",
+      "group": "기념일·행사",
+      "everyday": false
+    },
+    {
+      "tag": "졸업식",
+      "group": "기념일·행사",
+      "everyday": false
+    },
+    {
+      "tag": "집들이",
+      "group": "모임·손님",
+      "everyday": false
+    },
+    {
+      "tag": "손님 방문",
+      "group": "모임·손님",
+      "everyday": false
+    },
+    {
+      "tag": "가족 모임",
+      "group": "모임·손님",
+      "everyday": false
+    },
+    {
+      "tag": "친구 모임",
+      "group": "모임·손님",
+      "everyday": false
+    },
+    {
+      "tag": "경기 관람",
+      "group": "모임·손님",
+      "everyday": false
+    },
+    {
+      "tag": "여행",
+      "group": "외출·여행",
+      "everyday": false
+    },
+    {
+      "tag": "출장",
+      "group": "외출·여행",
+      "everyday": false
+    },
+    {
+      "tag": "캠핑",
+      "group": "외출·여행",
+      "everyday": false
+    },
+    {
+      "tag": "나들이·소풍",
+      "group": "외출·여행",
+      "everyday": false
+    },
+    {
+      "tag": "이사",
+      "group": "생활·학교",
+      "everyday": false
+    },
+    {
+      "tag": "입학·개학",
+      "group": "생활·학교",
+      "everyday": false
+    },
+    {
+      "tag": "방학",
+      "group": "생활·학교",
+      "everyday": false
+    },
+    {
+      "tag": "시험",
+      "group": "생활·학교",
+      "everyday": false
+    },
+    {
+      "tag": "김장",
+      "group": "생활·학교",
+      "everyday": false
+    },
+    {
+      "tag": "대청소",
+      "group": "생활·학교",
+      "everyday": false
+    },
+    {
+      "tag": "반려동물 입양",
+      "group": "생활·학교",
+      "everyday": false
+    },
+    {
+      "tag": "회의",
+      "group": "일상",
+      "everyday": true
+    },
+    {
+      "tag": "약속·외식",
+      "group": "일상",
+      "everyday": true
+    },
+    {
+      "tag": "운동",
+      "group": "일상",
+      "everyday": true
+    },
+    {
+      "tag": "학원·수업",
+      "group": "일상",
+      "everyday": true
+    },
+    {
+      "tag": "공연·영화",
+      "group": "일상",
+      "everyday": true
+    }
+  ]
+}

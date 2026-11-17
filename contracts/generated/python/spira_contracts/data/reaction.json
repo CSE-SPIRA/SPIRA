@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "reaction.json",
+  "title": "Reaction",
+  "description": "User reaction on a card. App -> server: POST /v1/cards/{card_id}/reactions. stop = the intent is wrong (whole card); line_off / line_on = one line (line_on only before it starts). (APP-05)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["reaction"],
+  "properties": {
+    "reaction": {"$ref": "common.json#/$defs/Reaction"},
+    "task_id": {"$ref": "common.json#/$defs/TaskId"}
+  },
+  "if": {"properties": {"reaction": {"enum": ["line_off", "line_on"]}}},
+  "then": {"required": ["task_id"]},
+  "else": {"not": {"required": ["task_id"]}}
+}

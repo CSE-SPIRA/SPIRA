@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "execution_response.json",
+  "title": "ExecutionResponse",
+  "description": "Response of POST /v1/hub/executions. duplicate = this result_id was already stored (nothing changed). (COM-04)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["duplicate"],
+  "properties": {"duplicate": {"type": "boolean"}}
+}

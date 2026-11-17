@@ -1,0 +1,9 @@
+{
+  "$comment": "'success' is not an execution status",
+  "expect": "[oneOf]",
+  "files": {
+    "r.json": {
+      "schema": "execution_result.json"
+    }
+  }
+}

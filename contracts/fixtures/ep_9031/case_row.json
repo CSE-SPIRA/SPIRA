@@ -1,0 +1,160 @@
+{
+  "case_id": "home_h_042_ep_9031_1",
+  "source": "this_home",
+  "household_id": "h_042",
+  "items": [
+    "고깔모자",
+    "딸기",
+    "로션",
+    "세탁 세제",
+    "아이싱 펜",
+    "컵케이크 믹스",
+    "케이크 토퍼",
+    "풍선",
+    "휘핑크림"
+  ],
+  "intent_id": "kid_birthday_party",
+  "intent_text": "디즈니 공주 테마로 손님 여럿이 오는 아이 생일 파티를 열고, 컵케이크를 굽고 꾸미려는 준비",
+  "situation": {
+    "event": "생일",
+    "guests": "손님 여러 명",
+    "activity": "컵케이크 굽고 꾸미기",
+    "theme": "디즈니 공주"
+  },
+  "when": {
+    "weekday": "토",
+    "calendar_tags": [
+      "생일"
+    ],
+    "executed_at": "2026-10-17T12:30:05+09:00"
+  },
+  "household": {
+    "types": [
+      "3~4인",
+      "영유아 자녀",
+      "맞벌이"
+    ]
+  },
+  "kb_version": null,
+  "home_did": [
+    {
+      "task_id": "t_clean#1",
+      "line": "손님 오기 전 거실 청소",
+      "way": "run",
+      "actions": [
+        [
+          "cleaner",
+          "clean"
+        ]
+      ],
+      "ran": true
+    },
+    {
+      "task_id": "t_safe#1",
+      "line": "아이 안전 모드 (인덕션 잠금·전기포트 차단)",
+      "way": "run",
+      "actions": [
+        [
+          "cooktop",
+          "child_lock"
+        ],
+        [
+          "smart_plug:전기포트",
+          "off"
+        ]
+      ],
+      "ran": false
+    },
+    {
+      "task_id": "t_mood#1",
+      "line": "손님 오시면 공주 분위기 화면·조명",
+      "way": "run",
+      "actions": [
+        [
+          "display",
+          "play_mood"
+        ],
+        [
+          "light",
+          "color"
+        ]
+      ],
+      "ran": true
+    },
+    {
+      "task_id": "t_oven#1",
+      "line": "오븐 컵케이크 설정 대기",
+      "way": "standby",
+      "actions": [
+        [
+          "oven",
+          "set_cook_standby"
+        ]
+      ],
+      "ran": true
+    }
+  ],
+  "verdict": "match",
+  "task_feedback": [
+    {
+      "task_id": "t_clean#1",
+      "actions": [
+        [
+          "cleaner",
+          "clean"
+        ]
+      ],
+      "user": "kept"
+    },
+    {
+      "task_id": "t_safe#1",
+      "actions": [
+        [
+          "cooktop",
+          "child_lock"
+        ],
+        [
+          "smart_plug:전기포트",
+          "off"
+        ]
+      ],
+      "user": "off",
+      "when": "before_run",
+      "at": "2026-10-16"
+    },
+    {
+      "task_id": "t_mood#1",
+      "actions": [
+        [
+          "display",
+          "play_mood"
+        ],
+        [
+          "light",
+          "color"
+        ]
+      ],
+      "user": "changed",
+      "changes": [
+        {
+          "device_type": "light",
+          "property": "color_temp",
+          "to": {
+            "kelvin": 2700
+          },
+          "after_start_minutes": 70
+        }
+      ]
+    },
+    {
+      "task_id": "t_oven#1",
+      "actions": [
+        [
+          "oven",
+          "set_cook_standby"
+        ]
+      ],
+      "user": "kept"
+    }
+  ]
+}

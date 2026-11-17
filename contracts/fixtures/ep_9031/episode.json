@@ -1,0 +1,83 @@
+{
+  "episode_id": "ep_9031",
+  "household_id": "h_042",
+  "status": "closed",
+  "shared_at": "2026-10-15T21:00:08+09:00",
+  "item_count": 9,
+  "masked_count": 0,
+  "items": [
+    {
+      "item_id": "it_1",
+      "name": "설향 딸기 500g (냉장)",
+      "type": "딸기",
+      "qty": 2
+    },
+    {
+      "item_id": "it_2",
+      "name": "OO 컵케이크 믹스",
+      "type": "컵케이크 믹스",
+      "qty": null
+    },
+    {
+      "item_id": "it_3",
+      "name": "동물성 휘핑크림 500ml (냉장)",
+      "type": "휘핑크림",
+      "qty": 1
+    },
+    {
+      "item_id": "it_4",
+      "name": "OO 액체 세탁세제 3L",
+      "type": "세탁 세제",
+      "qty": 1
+    },
+    {
+      "item_id": "it_5",
+      "name": "OO 베이비 로션 300ml",
+      "type": "로션",
+      "qty": 1
+    },
+    {
+      "item_id": "it_6",
+      "name": "파티 풍선 세트",
+      "type": "풍선",
+      "qty": 1
+    },
+    {
+      "item_id": "it_7",
+      "name": "디즈니 공주 케이크 토퍼",
+      "type": "케이크 토퍼",
+      "qty": 1
+    },
+    {
+      "item_id": "it_8",
+      "name": "파티 고깔모자",
+      "type": "고깔모자",
+      "qty": 6
+    },
+    {
+      "item_id": "it_9",
+      "name": "아이싱 펜",
+      "type": "아이싱 펜",
+      "qty": 1
+    }
+  ],
+  "item_tasks": [
+    {
+      "task_id": "t_fridge#1",
+      "item": "딸기",
+      "kind": "storage",
+      "text": "씻지 말고 키친타월을 깔아 냉장 보관하고, 토요일 꾸미기 직전에 씻어 주세요",
+      "state": "done"
+    },
+    {
+      "task_id": "t_fridge#2",
+      "item": "휘핑크림",
+      "kind": "prep",
+      "text": "꾸미기 직전까지 냉장고 안쪽에 두고, 휘핑할 때 볼도 차갑게 해 두면 잘 올라와요",
+      "state": "done"
+    }
+  ],
+  "card_ids": [
+    "nc_331"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "$comment": "hue outside the device range (HUB-05)",
+  "expect": "outside",
+  "files": {
+    "plan.json": {
+      "schema": "plan.json"
+    }
+  },
+  "devices": "../../../fixtures/ep_9031/devices.json"
+}

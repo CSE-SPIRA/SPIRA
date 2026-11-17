@@ -1,0 +1,84 @@
+# Home Hub <-> Server API. The hub always calls the server; the server never calls the hub.
+# Auth: X-API-Key per household (issued by POST /v1/households). (HUB-04, HUB-10, DEP-07)
+openapi: 3.1.0
+info:
+  title: SPIRA Hub API
+  version: 0.1.0
+  description: Device list, plan pull, plan ack, events and execution results. Body shapes are in ../schemas; common rules in ../rules.md.
+servers:
+  - url: http://localhost:8000
+security:
+  - hubKey: []
+paths:
+  /health:
+    get:
+      summary: Readiness (DB and embedding model). No auth. (COM-08)
+      security: []
+      responses:
+        '200': {description: Ready, content: {application/json: {schema: {$ref: '../schemas/health.json'}}}}
+        '503': {description: Not ready, content: {application/json: {schema: {$ref: '../schemas/health.json'}}}}
+  /v1/hub/households/{household_id}/devices:
+    put:
+      summary: Register the delegated device list. Send at start and whenever devices, rooms or delegation change (revision + 1). (HUB-05, HUB-11)
+      parameters: [{$ref: '#/components/parameters/HouseholdId'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '../schemas/devices.json'}}}
+      responses:
+        '200': {description: Stored, content: {application/json: {schema: {$ref: '../schemas/devices_response.json'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /v1/hub/plans:
+    get:
+      summary: Pull every unfinished plan (latest version each) + paused. Every 15 s, when an event response says plans_changed, and right before a run. (HUB-04, HUB-16)
+      parameters:
+        - {name: household, in: query, required: true, schema: {$ref: '../schemas/common.json#/$defs/HouseholdId'}}
+      responses:
+        '200': {description: Plans, content: {application/json: {schema: {$ref: '../schemas/plan_pull.json'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /v1/hub/plans/{plan_id}/ack:
+    post:
+      summary: Report which tasks of a new plan version were taken. Reject only malformed tasks. (HUB-15)
+      parameters:
+        - {name: plan_id, in: path, required: true, schema: {$ref: '../schemas/common.json#/$defs/EpisodeId'}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '../schemas/ack.json'}}}
+      responses:
+        '204': {description: Stored}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /v1/hub/events:
+    post:
+      summary: Send home and device events (one or more, time order). Same event_id on resend. (HUB-07, HUB-12)
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '../schemas/event_batch.json'}}}
+      responses:
+        '200': {description: Per-event result; plans_changed true means pull now, content: {application/json: {schema: {$ref: '../schemas/event_response.json'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /v1/hub/executions:
+    post:
+      summary: Send one execution or restore result. Same result_id on resend. (HUB-08)
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '../schemas/execution_result.json'}}}
+      responses:
+        '200': {description: Stored (or duplicate), content: {application/json: {schema: {$ref: '../schemas/execution_response.json'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+components:
+  securitySchemes:
+    hubKey: {type: apiKey, in: header, name: X-API-Key}
+  parameters:
+    HouseholdId: {name: household_id, in: path, required: true, schema: {$ref: '../schemas/common.json#/$defs/HouseholdId'}}
+  responses:
+    Error:
+      description: See error.code (enums.json error_code).
+      content: {application/json: {schema: {$ref: '../schemas/error.json'}}}

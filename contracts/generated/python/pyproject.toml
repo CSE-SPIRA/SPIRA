@@ -1,0 +1,18 @@
+# Generated data models of contracts/ (do not edit spira_contracts/; run contracts/codegen/generate.sh).
+# Install from a part folder: pip install -e ../contracts/generated/python
+[project]
+name = "spira-contracts"
+version = "0.1.0"
+description = "SPIRA shared contract models (generated)"
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2.7", "jsonschema>=4.23", "referencing>=0.35"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["spira_contracts*"]
+
+[tool.setuptools.package-data]
+spira_contracts = ["data/*.json"]

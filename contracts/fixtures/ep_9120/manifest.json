@@ -1,0 +1,30 @@
+{
+  "$comment": "Scenario ep_9120: another household (h_051, 4 devices incl. an unknown type 'speaker'). Family gathering ordered with no calendar -> lines held; the calendar arrives the next morning -> time found, plan v2, same card updated with notify true.",
+  "devices": "devices.json",
+  "files": {
+    "devices.json": {
+      "schema": "devices.json",
+      "what": "Device list with a type not in enums (accepted)"
+    },
+    "plan.v1.json": {
+      "schema": "plan.json",
+      "what": "Only the item task is sent; held lines are not sent"
+    },
+    "card.held.json": {
+      "schema": "card.json",
+      "what": "Card while waiting for a time"
+    },
+    "calendar.json": {
+      "schema": "calendar.json",
+      "what": "Calendar sent the next morning"
+    },
+    "plan.v2.json": {
+      "schema": "plan.json",
+      "what": "Plan after the time was found"
+    },
+    "card.found.json": {
+      "schema": "card.json",
+      "what": "Same card, time found (notify true)"
+    }
+  }
+}

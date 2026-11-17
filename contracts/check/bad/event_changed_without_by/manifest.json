@@ -1,0 +1,9 @@
+{
+  "$comment": "state change without by (HUB-07)",
+  "expect": "'by' is a required property",
+  "files": {
+    "events.json": {
+      "schema": "event_batch.json"
+    }
+  }
+}
