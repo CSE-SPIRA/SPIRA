@@ -840,7 +840,7 @@ Needs first, then tasks only where a listed device fulfils a need, then notice t
 
 ### 10.10 Example
 
-`ep_9031` → `t_clean#1` (run, cleaner 거실, 12:30), `t_safe#1` (run, cooktop child_lock + plug off, 13:30), `t_mood#1` (run, display kids_party + light hue 330/45/70, guest_arrived 13:30–17:00), `t_oven#1` (standby, oven 170 °C 20 min, 14:00), `t_fridge#1` 딸기 (storage) and `t_fridge#2` 휘핑크림 (prep) waiting for the package → `contracts/fixtures/ep_9031/plan.v1.json`. The air purifier, styler and fridge in the prompt's device list are not chosen (decoys in the prompt test).
+`ep_9031` → `t_clean#1` (run, cleaner 거실, 12:30), `t_safe#2` (run, cooktop child_lock + plug off, 13:30), `t_mood#3` (run, display kids_party + light hue 330/45/70, guest_arrived 13:30–17:00), `t_oven#4` (standby, oven 170 °C 20 min, 14:00), `t_fridge#5` 딸기 (storage) and `t_fridge#6` 휘핑크림 (prep) waiting for the package → `contracts/fixtures/ep_9031/plan.v1.json`. The air purifier, styler and fridge in the prompt's device list are not chosen (decoys in the prompt test).
 
 ---
 
@@ -1236,6 +1236,8 @@ pytest, LLM `mock` (§6.1), DB = Postgres with pgvector (docker compose service 
 | T59 | LLM proposes `oven.start` as standby | dropped `unsafe_cmd` |
 | T60 | Ack / execution with another household's `plan_id`; events batch with one bad element | 403; valid events accepted, bad one in `rejected` |
 | T61 | Paused household, same `source_id` twice | same `paused_skip` episode |
+| T62 | `event_end`-triggered task: one `event_end` both starts it and anchors `end {on: event_end, after: 60m}` (shared fixture with the hub) | plan carries that end; `end_tasks` does not end the task at that same event, ends it 60 min later and expects the restore result; no second `event_end` needed |
+| T63 | Hub unreachable for more than `ack_timeout_min`, then acks the old version and pulls | lines failed by timeout whose trigger is still ahead go back to `live`; past ones stay `failed`; no duplicate effects |
 
 ---
 
