@@ -12,3 +12,4 @@ Tables and starting values kept out of code (server/spec.md §4). Loaded at star
 | `device_names.yaml` | Device type → Korean name |
 | `card_templates.yaml` | Card sentences and line notes |
 | `material_courses.yaml` | Material → styler course |
+| `command_policy.yaml` | Commands allowed per way (safety) |

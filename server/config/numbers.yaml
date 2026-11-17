@@ -1,6 +1,6 @@
-# Starting values (server/spec.md §4.1). `demo:` replaces values when DEMO_MODE=1 (COM-15).
+# Starting values (server/spec.md §4.1). Durations are integers in the unit of the key suffix. `demo:` replaces values when DEMO_MODE=1 (COM-15).
 group_window_h: 8
-quiet_min: 10
+quiet_s: 600
 max_images_per_call: 10
 image_max_mb: 5
 images_per_request: 3
@@ -28,17 +28,25 @@ habit_min: 2
 habit_slot_h: 1
 before_start_default_min: 90
 guest_window_before_min: 30
-end_fallback_h: 3
-notice_after_door_h: 2
-notice_max_h: 12
+end_fallback_min: 180
+after_event_end_min: 60
+notice_after_door_min: 120
+notice_max_min: 720
+standby_max_min: 1440
+late_grace_min: 10
+ack_timeout_min: 30
 notice_repeat_max: 2
 notices_per_screen: 3
 quiet_hours: [22, 8]
 llm_timeout_s: 60
 device_event_keep_d: 14
 demo:
-  quiet_min: 0.5
+  quiet_s: 30
   before_start_default_min: 3
   guest_window_before_min: 1
-  end_fallback_h: 0.17
-  notice_after_door_h: 0.033
+  end_fallback_min: 10
+  after_event_end_min: 5
+  notice_after_door_min: 2
+  standby_max_min: 60
+  late_grace_min: 1
+  ack_timeout_min: 2
