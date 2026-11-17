@@ -1,0 +1,7 @@
+# Dated holidays for find_time (server/spec.md §4.4, S4). Extend every year.
+# tag: main days (YYYY-MM-DD, the holiday itself; Korean dates from the 2027 calendar notice) and a default window
+설날:      {days: [2027-02-07], window: ["10:00", "14:00"]}
+추석:      {days: [2026-09-25, 2027-09-15], window: ["10:00", "14:00"]}
+크리스마스: {days: [2026-12-25, 2027-12-25], window: ["18:00", "21:00"]}
+어린이날:  {days: [2027-05-05], window: ["11:00", "15:00"]}
+어버이날:  {days: [2027-05-08], window: ["18:00", "20:00"]}

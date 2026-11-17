@@ -1,0 +1,44 @@
+# Starting values (server/spec.md §4.1). `demo:` replaces values when DEMO_MODE=1 (COM-15).
+group_window_h: 8
+quiet_min: 10
+max_images_per_call: 10
+image_max_mb: 5
+images_per_request: 3
+calendar_window_d: 14
+max_events: 5
+min_orders: 10
+history_d: 90
+routine_min: 3
+spike: 2.0
+type_sim: 0.85
+sim_floor: 0.6          # tuned
+min_similar: 5          # tuned
+w_cal: 0.05             # tuned
+w_house: 0.03           # tuned
+search_limit: 200
+max_use: 50
+cover: 0.8
+none_min: 0.10
+max_reps: 3
+max_bundles: 2
+max_lines: 4
+hold_d: 14
+line_off_d: 180
+habit_min: 2
+habit_slot_h: 1
+before_start_default_min: 90
+guest_window_before_min: 30
+end_fallback_h: 3
+notice_after_door_h: 2
+notice_max_h: 12
+notice_repeat_max: 2
+notices_per_screen: 3
+quiet_hours: [22, 8]
+llm_timeout_s: 60
+device_event_keep_d: 14
+demo:
+  quiet_min: 0.5
+  before_start_default_min: 3
+  guest_window_before_min: 1
+  end_fallback_h: 0.17
+  notice_after_door_h: 0.033

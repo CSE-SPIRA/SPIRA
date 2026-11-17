@@ -1,0 +1,25 @@
+# Product group -> label (server/spec.md §4.2, S1).
+# product group -> label. care: may create a per-item task. clue: only inside an intent.
+groups:
+  음·식료품: care
+  농축수산물: care
+  의복: care
+  신발: care
+  가구: clue            # mattress only -> care (rule below)
+  화장품: clue          # storage 냉장 -> care (rule below)
+  생활용품 – 침구·패브릭: clue
+  생활용품 – 주방용품: clue
+  애완용품: clue
+  가전·전자: clue
+  아동·유아용품: clue
+  패션용품·액세서리, 가방: clue
+  생활용품 – 세제·청소용품: clue
+  생활용품 – 휴지·위생, 파티용품: clue
+  스포츠·레저용품: clue
+  서적, 사무·문구: clue
+  컴퓨터 및 주변기기, 통신기기: clue
+  자동차 및 자동차용품: clue
+attribute_rules:
+  - {group: 가구, type_contains: 매트리스, label: care}
+  - {group: 화장품, attribute: {key: 보관, value: 냉장}, label: care}
+default: clue           # group null or unknown
