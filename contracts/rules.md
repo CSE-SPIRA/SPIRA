@@ -9,7 +9,7 @@ Rules every part follows when it sends or reads the shapes in `schemas/`. (COM-0
 | household | `h_042` | server | |
 | episode = plan | `ep_9031` | server | One order (all captures within 8 h). `plan_id` is the episode id |
 | card | `nc_331` | server | One card = one preparation = one intent. At most 2 per episode |
-| task | `t_{name}#{n}` | server | `n` is the order inside the episode; it never changes across plan versions. A re-judged task gets a new `n` |
+| task | `t_{name}#{n}` | server | `n` counts across the whole episode (1, 2, 3 … whatever the name; never reused); it never changes across plan versions. A re-judged or re-enabled task gets a new `n`. A `task_id` is never in both `tasks` and `cancelled` |
 | device | `{type}_{nn}`, plugs `plug_{purpose}` | hub | Nobody parses it. The server tells devices apart by `type` (+ plug `label`) |
 | event | `ev_…` | hub | Globally unique; the same id when resent |
 | result | `rs_…` | hub | Globally unique; the same id when resent |
@@ -85,7 +85,7 @@ Rules every part follows when it sends or reads the shapes in `schemas/`. (COM-0
 
 ## Errors (COM-05)
 
-Every 4xx / 5xx body is `{"code", "message", "details"?}` (`schemas/error.json`); codes in `enums.json` `error_code`.
+Every 4xx / 5xx body is `{"code", "message", "details"?}` (`schemas/error.json`); codes in `enums.json` `error_code`. Exception: `GET /health` 503 returns `schemas/health.json` (`{"status": "degraded", …}`).
 
 ## Secrets (COM-07)
 

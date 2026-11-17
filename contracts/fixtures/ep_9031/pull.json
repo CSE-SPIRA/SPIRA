@@ -33,7 +33,7 @@
           }
         },
         {
-          "task_id": "t_mood#1",
+          "task_id": "t_mood#3",
           "source": "situation",
           "way": "run",
           "actions": [
@@ -69,7 +69,7 @@
           }
         },
         {
-          "task_id": "t_oven#1",
+          "task_id": "t_oven#4",
           "source": "situation",
           "way": "standby",
           "actions": [
@@ -92,7 +92,7 @@
           }
         },
         {
-          "task_id": "t_fridge#1",
+          "task_id": "t_fridge#5",
           "source": "item",
           "way": "notice",
           "actions": [
@@ -115,7 +115,7 @@
           }
         },
         {
-          "task_id": "t_fridge#2",
+          "task_id": "t_fridge#6",
           "source": "item",
           "way": "notice",
           "actions": [
@@ -140,7 +140,7 @@
       ],
       "cancelled": [
         {
-          "task_id": "t_safe#1",
+          "task_id": "t_safe#2",
           "restore": false
         }
       ]

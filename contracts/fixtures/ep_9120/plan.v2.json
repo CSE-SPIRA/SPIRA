@@ -28,7 +28,7 @@
       }
     },
     {
-      "task_id": "t_music#1",
+      "task_id": "t_music#2",
       "source": "situation",
       "way": "run",
       "actions": [
@@ -56,7 +56,7 @@
       }
     },
     {
-      "task_id": "t_fridge#1",
+      "task_id": "t_fridge#3",
       "source": "item",
       "way": "notice",
       "actions": [
