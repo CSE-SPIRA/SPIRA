@@ -134,13 +134,18 @@ ownership, whether its attribution is `user` or `unknown`. Ownership MUST NOT be
 reacquired when the value later happens to equal SPIRA's desired value, and a
 released property MUST NOT be overwritten during restoration. (PC-5)
 
-**H7-R2.** Restoration has two product meanings. Mood restoration may restore a
-still-owned light/display property at its specified end, including a time
-fallback. Protective release, such as unlocking a child lock or re-enabling a
-disabled appliance, MUST occur only after an actually observed `event_end` and
-MUST NOT occur on `or_time`, `or_after`, elapsed time, missing evidence, or an
-inferred end. Every restoration MUST preserve non-owned values and report each
-restored or skipped device. (PC-5)
+**H7-R2.** Restoration has two product meanings, mood restoration and
+protective release (for example unlocking a child lock or re-enabling a disabled
+appliance). Protective release MUST occur only after an actually observed
+`event_end`. Because the current plan contract does not mark which lines are
+protective (O-04/SP-11), the Hub MUST NOT classify lines itself; until the
+contract does, a time fallback (`or_time`, `or_after`, elapsed time, missing
+evidence, or an inferred end) MUST end the line's lifecycle without restoring
+anything, mood included, and restoration of still-owned properties happens only
+on an observed `event_end`. A withheld restoration MUST NOT be reported as
+`restored` or `not_needed`; until the contract has a value for it (SP-15) the
+Hub reports `unknown`. Every restoration MUST preserve non-owned values and
+report each restored or skipped device. (PC-5)
 
 **H7-R3.** A device rebind MUST preserve the old device from writes to its
 replacement. `restore: false` MUST relinquish restoration authority without
@@ -214,7 +219,7 @@ internals is not acceptance evidence.
 | HUB-AT09 | A process dies after dispatch and while C-3/C-4 packets are unacknowledged, then restarts/reconnects | The device effect is not blindly repeated; uncertainty remains visible; each packet is resent with byte-equivalent identity/body | PC-4, PC-5, PC-6 | H6-R3, H8-R1, H9-R1, H9-R2 |
 | HUB-AT12 | Two cards have waiting/running work; Stop is posted for one card through the fixture Server while a person has changed one property and started one job | Only that card's unstarted work is cancelled; its still-owned eligible mood property restores; the person change/job, the other card, and item notices remain; no Hub Stop All or direct stop endpoint exists | PC-5, PC-6 | H3-R4, H7-R1, H7-R2, H7-R4 |
 | HUB-AT15 | Five device effects occur: matching echoed operation, class-A local operation, class-B person change, external automation, and unmatched device transition; door/presence signals surround the changes | Fixture Server records `spira`, `user`, `unknown`, `unknown`, `unknown` respectively; removing door/presence signals does not change the outputs | PC-6 | H4-R1, H8-R1, H8-R2 |
-| HUB-AT16 | `ep_9031` plan v1 protective actions are active; wall time passes their `or_time` without `event_end`, then an observed `event_end` arrives | At fallback, child lock and disabled-appliance protection remain; only the observed `event_end` permits their still-owned protective release; mood restoration may already have occurred | PC-5 | H4-R3, H7-R2 |
+| HUB-AT16 | `ep_9031` plan v1 protective and mood actions are active; wall time passes their `or_time` without `event_end`, then an observed `event_end` arrives | At fallback no restore command is sent: child lock, disabled appliance and mood values all remain and are reported `unknown`, never `restored`/`not_needed`; only the observed `event_end` restores still-owned properties | PC-5 | H4-R3, H7-R2 |
 | HUB-AT17 | Waiting, accepted-but-unverified, attributed person change, Server event delivery, restored, and skipped cases are present | The dashboard's first views show the four H8-R3 groups, including exact `by`, sent C-3 content, virtual/physical labels, and assumption badge | PC-4, PC-5, PC-6 | H8-R2, H8-R3 |
 | HUB-AT18 | The three demo surfaces run with Server `DEMO_MODE` off and on | All timestamps advance on wall time; only Server-supplied absolute/duration values shorten in demo mode; Hub exposes no separate demo-clock control | PC-4 | H4-R4 |
 | HUB-AT19 | App and Hub clients replay all three contract episodes, including card reactions, C-3 events, and C-4 results | The fixture answers every App/Hub OpenAPI route with schema-valid responses; the Simulator judge reads `by` from the fixture's received C-3 records; surfaces label the peer as a fixture with no inference claim | PC-1, PC-2, PC-3, PC-4, PC-5, PC-6 | H10-R1 |
@@ -234,6 +239,11 @@ internals is not acceptance evidence.
   `ep_9150` rationale/same-item contrast and change the `ep_9031` line-off example
   from child safety to a mood display. The fixture Server follows committed
   contract fixtures until that separate contract change lands.
+- **SP-15 — contract:** a restore item status for "restoration withheld because
+  the end was not observed"; until then H7-R2 reports `unknown`.
+- **SP-16 — Server:** shared displays (fridge, TV) must never show intent text,
+  only item guidance and mood. The text is produced at plan time by the Server;
+  the Hub displays Server-supplied values and does not judge text content.
 - **SP-14 — Server:** the real Server at gate G0 exposes only `/health`; core
   schema and App/Hub contract routes remain Server work. Passing H10-R1 is not
   real-Server interoperability evidence.
