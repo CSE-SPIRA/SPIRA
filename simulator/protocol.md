@@ -289,7 +289,8 @@ only the fields allowed above.
 
 The judge reads the C-3 record that `hub/tests/fixture_server` actually received.
 It MUST NOT accept a Hub audit projection as a substitute. It joins on logical
-device, event type, and occurrence time; the fixture Server's C-3 `source`,
+device ID (taken from the Simulator household configuration, which uses the
+same logical IDs as the Hub registry), event type, and occurrence time; the fixture Server's C-3 `source`,
 `type`, and `at` are the received side of that join.
 
 The operator-side result vocabulary is:

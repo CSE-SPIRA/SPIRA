@@ -105,7 +105,7 @@ Hub completion or changing Server result state.
 ### E5. Household viewer (PC-2, PC-4, PC-5, PC-6)
 
 **E5-R1.** The stage viewer MUST fill in only observed device state. Planned or
-waiting work MAY be shown only as a visually faint, distinct overlay. Stale,
+waiting work MUST be shown only as a visually faint, distinct overlay. Stale,
 missing, or unavailable observations MUST remain visibly so; disconnection MUST
 NOT change World state.
 
@@ -149,7 +149,9 @@ virtual-device profile; other Matter capabilities require their own evidence.
 
 **E6-R3.** The judge MUST read `by` from the C-3 event record that
 `hub/tests/fixture_server` actually received, not from a Hub audit claim. It MUST
-join World truth to that event by device, event type, and occurrence time, and
+join World truth to that event by logical device ID, event type, and occurrence
+time; the household configuration MUST carry, for each native target, the same
+logical device ID that the Hub registry uses, and
 produce exactly one of: `match`, `person-reported-unknown`,
 `non-person-reported-user`, or `person-not-decision-maker` (child or guest).
 Judge results and truth details MUST be visible only on the operator side.
