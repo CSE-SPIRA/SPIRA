@@ -44,13 +44,17 @@ class FaultAction(OperatorInput):
     mode: str
 
 
-def env_source(name: str, token_name: str | None = None) -> Source | None:
+def env_source(name: str, token_name: str, *, hub_key: bool = False) -> Source | None:
     value = os.getenv(name)
-    return (
-        JsonSource(value, os.getenv(token_name) if token_name else None)
-        if value
-        else None
-    )
+    if not value:
+        return None
+    token = os.getenv(token_name)
+    headers = None
+    if token:
+        headers = (
+            {"X-API-Key": token} if hub_key else {"Authorization": f"Bearer {token}"}
+        )
+    return JsonSource(value, headers)
 
 
 def create_app(
@@ -115,7 +119,7 @@ def create_app(
                 "WORLD_RECEIVED_URL", "WORLD_RECEIVED_TOKEN"
             )
             app.state.plans = plan_source or env_source(
-                "WORLD_PLANS", "WORLD_PLANS_TOKEN"
+                "WORLD_PLANS", "WORLD_PLANS_TOKEN", hub_key=True
             )
             app.state.executions = execution_source or env_source(
                 "WORLD_EXECUTIONS", "WORLD_EXECUTIONS_TOKEN"

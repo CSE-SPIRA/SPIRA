@@ -1,10 +1,11 @@
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 import httpx
 import pytest
-from conftest import LIGHT, PLUG, Wire, fixture_json
+from conftest import LIGHT, OVEN, PLUG, Wire, fixture_json
 from fastapi.testclient import TestClient
 from spira_simulator.api import create_app
 from spira_simulator.profile import Profile, load_profile, public_value
@@ -36,6 +37,103 @@ def post(client, endpoint, **payload):
     response = client.post(endpoint, json=payload, auth=AUTH)
     response.raise_for_status()
     return response
+
+
+def mock_http_source(monkeypatch, handle):
+    actual_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: actual_client(
+            transport=httpx.MockTransport(handle),
+            **kwargs,
+        ),
+    )
+
+
+@pytest.fixture
+def captured_receipts():
+    path = Path(__file__).with_name("fixtures") / "fixture_receipts.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_overlay_reads_authenticated_plan_and_fixture_executions(
+    tmp_path, monkeypatch, captured_receipts
+):
+    fixture = "http://fixture.invalid"
+    monkeypatch.setenv("WORLD_PLANS", f"{fixture}/v1/hub/plans?household=h_042")
+    monkeypatch.setenv("WORLD_PLANS_TOKEN", "test-hub-key")
+    monkeypatch.setenv("WORLD_EXECUTIONS", f"{fixture}/_fixture/receipts")
+
+    def handle(request):
+        assert request.method == "GET"
+        if request.url.path == "/v1/hub/plans":
+            assert request.url.params["household"] == "h_042"
+            assert request.headers["X-API-Key"] == "test-hub-key"
+            assert "Authorization" not in request.headers
+            return httpx.Response(200, json=fixture_json("ep_9031/pull.json"))
+        assert request.url.path == "/_fixture/receipts"
+        return httpx.Response(200, json=captured_receipts)
+
+    mock_http_source(monkeypatch, handle)
+    with TestClient(operator_app(tmp_path)) as client:
+        overlay = client.get("/sim/overlay").raise_for_status().json()
+
+    assert overlay["errors"] == []
+    assert overlay["preparation"] == []
+    assert len(overlay["item_notices"]) == 2
+    assert {
+        (row["device"], row["status"], row["substrate"]) for row in overlay["restores"]
+    } == {
+        ("cooktop_01", "restored", "virtual"),
+        ("plug_kettle", "restored", "virtual"),
+        ("light_01", "skipped_user_changed", "virtual"),
+        ("display_01", "restored", "virtual"),
+    }
+
+
+def test_judge_reads_events_from_multiple_fixture_receipt_batches(
+    tmp_path, monkeypatch, captured_receipts
+):
+    monkeypatch.setenv("WORLD_RECEIVED_URL", "http://fixture.invalid/_fixture/receipts")
+
+    def handle(request):
+        assert request.method == "GET"
+        assert request.url.path == "/_fixture/receipts"
+        return httpx.Response(200, json=captured_receipts)
+
+    mock_http_source(monkeypatch, handle)
+    light, oven = [
+        event
+        for batch in captured_receipts["events"]
+        for event in batch
+        if event["payload"].get("by") == "user"
+    ]
+    app = operator_app(tmp_path)
+    with TestClient(app) as client:
+        monkeypatch.setattr(
+            app.state.world, "clock", lambda: datetime.fromisoformat(light["at"])
+        )
+        post(
+            client,
+            "/operator/device",
+            target=LIGHT,
+            actor="resident",
+            values={"color": light["payload"]["to"]},
+        )
+        monkeypatch.setattr(
+            app.state.world, "clock", lambda: datetime.fromisoformat(oven["at"])
+        )
+        post(client, "/operator/device", target=OVEN, actor="resident", start=True)
+        result = client.get("/operator/judge", auth=AUTH).raise_for_status().json()
+
+    comparisons = [
+        (row["event_id"], row["by"], row["verdict"]) for row in result["results"]
+    ]
+    assert comparisons == [
+        (light["event_id"], "user", "match"),
+        (oven["event_id"], "user", "match"),
+    ]
 
 
 @pytest.mark.provisional
@@ -221,15 +319,7 @@ def test_judge_reads_http_receipt_and_only_joins_exact_device_type_and_time(
             calls.append((request.method, request.url.path))
             return httpx.Response(200, json=records)
 
-        actual_client = httpx.AsyncClient
-        monkeypatch.setattr(
-            httpx,
-            "AsyncClient",
-            lambda **kwargs: actual_client(
-                transport=httpx.MockTransport(handle),
-                **kwargs,
-            ),
-        )
+        mock_http_source(monkeypatch, handle)
         result = client.get("/operator/judge", auth=AUTH).json()
         assert calls == [("GET", "/received")]
         assert [row["verdict"] for row in result["results"]] == [

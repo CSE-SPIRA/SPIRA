@@ -9,6 +9,7 @@ from typing import Protocol
 import httpx
 from pydantic import TypeAdapter
 from spira_contracts.event import Event
+from spira_contracts.event_batch import EventBatch
 from spira_contracts.execution_result import ExecutionResult, RestoreResult
 from spira_contracts.plan import Plan, TimeTrigger
 from spira_contracts.plan_pull import PlanPull
@@ -22,21 +23,21 @@ class Source(Protocol):
 
 
 class JsonSource:
-    def __init__(self, location: str, token: str | None = None):
+    def __init__(self, location: str, headers: dict[str, str] | None = None):
         self.location = location
-        self.token = token
+        self.headers = headers
 
     async def fetch(self):
         if self.location.startswith(("http://", "https://")):
-            headers = {"Authorization": f"Bearer {self.token}"} if self.token else None
             async with httpx.AsyncClient(timeout=3) as client:
-                response = await client.get(self.location, headers=headers)
+                response = await client.get(self.location, headers=self.headers)
                 response.raise_for_status()
                 return response.json()
         return json.loads(Path(self.location).read_text(encoding="utf-8"))
 
 
 received_events = TypeAdapter(list[Event])
+received_batches = TypeAdapter(list[EventBatch])
 execution_records = TypeAdapter(list[ExecutionResult])
 plan_source = TypeAdapter(Plan | PlanPull)
 
@@ -56,11 +57,11 @@ async def stage_overlay(
             errors.append("Plan source unavailable")
     if executions:
         try:
+            payload = await executions.fetch()
+            if isinstance(payload, dict):
+                payload = payload.get("executions")
             records = [
-                record.root
-                for record in execution_records.validate_python(
-                    await executions.fetch()
-                )
+                record.root for record in execution_records.validate_python(payload)
             ]
         except (OSError, ValueError, httpx.HTTPError):
             errors.append("Execution source unavailable")
@@ -156,7 +157,12 @@ def _verdict(actor: str, by: str) -> str | None:
 
 
 async def judge(household_id: str, truth: list[dict], source: Source) -> dict:
-    received = received_events.validate_python(await source.fetch())
+    payload = await source.fetch()
+    if isinstance(payload, dict):
+        batches = received_batches.validate_python(payload.get("events"))
+        received = [event for batch in batches for event in batch.root]
+    else:
+        received = received_events.validate_python(payload)
     candidates = defaultdict(list)
     for fact in truth:
         if fact["logical_id"] is not None:
