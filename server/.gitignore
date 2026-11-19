@@ -1,0 +1,4 @@
+# Dry run (scripts/dry_run.py): order photos, results and your own home file stay local
+orders/
+out/
+dev/home.yaml

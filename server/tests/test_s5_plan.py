@@ -256,3 +256,18 @@ def test_card_text_variants():
     assert card_text(b, None)[1].startswith("이번 준비를 알아챘어요")
     with session_scope() as s:
         assert s.execute(select(CardLine)).first() is None
+
+
+def test_room_mismatch_removes_only_other_room_actions():
+    ep = ep9031()
+    out = _finalize(ep, [_draft("t_mood#1", [{"device": "display_01", "cmd": "off"},
+                                             {"device": "cooktop_01", "cmd": "child_lock"}],
+                                {"time": "2026-10-17T13:30:00+09:00"}, room="거실")])
+    assert out.dropped == {}
+    [task] = _plan(ep)["tasks"]
+    assert task["actions"] == [{"device": "display_01", "cmd": "off"}]       # the 주방 device is left out
+    with session_scope() as s:
+        row = s.get(Task, (ep, "t_mood#1"))
+        assert row.meta["room_removed"] == [{"device": "cooktop_01", "cmd": "child_lock", "room": "주방"}]
+        assert row.line == "t_mood#1"                                         # card line text unchanged
+        assert s.execute(select(CardLine)).scalar_one().note is None          # nothing shown to the user

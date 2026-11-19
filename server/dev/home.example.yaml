@@ -1,0 +1,58 @@
+# Fake home for server/scripts/dry_run.py. Copy to dev/home.yaml and edit.
+# Every dry run deletes this household and writes it again (use an id only for dry runs).
+household_id: h_dry
+
+# kb/household_types.json values; blocked combinations stop the run with the reason.
+household_types: [3~4인, 부부·커플, 영유아 자녀, 맞벌이]
+
+devices_revision: 1
+# The 7 devices of contracts/fixtures/ep_9031/devices.json (path relative to this file) ...
+devices_from: ../../contracts/fixtures/ep_9031/devices.json
+# ... plus a styler and an air purifier. Every device needs a room.
+extra_devices:
+  - id: styler_01
+    type: styler
+    room: 드레스룸
+    substrate: virtual
+    commands:
+      - cmd: set_course_standby
+        value_schema:
+          course: {enum: [표준, 울케어, 셔츠, 패딩], default: 표준}
+    events: [started]
+    never: []
+    noisy: true
+  - id: purifier_01
+    type: purifier
+    room: 침실
+    substrate: virtual
+    commands:
+      - cmd: mode
+        value_schema:
+          mode: {enum: [auto, sleep, deodorize], default: auto}
+      - cmd: "off"
+    events: [changed, odor_normal]
+    never: []
+    noisy: false
+
+# Titles go to the LLM once for tags and are never stored. "+2d 14:00" = 2 days after the run date, 14:00.
+calendar:
+  - {id: c1, title: "지아 생일파티 🎂", start: "+2d 14:00", end: "+2d 17:00"}
+  - {id: c2, title: "부모님 저녁 식사", start: "+8d 19:00", end: "+8d 21:00"}
+  - {id: c3, title: "주간 팀 회의", start: "+1d 10:00", end: "+1d 11:00"}
+  - {id: c4, title: "치과 예약", start: "+3d 09:30", end: "+3d 10:30"}
+  - {id: c5, title: "요가", start: "+4d 19:00", end: "+4d 20:00"}
+
+# Optional. 10 or more past orders turn on "unusual items" (spec §8.2); fewer -> "주문 기록이 10개 미만".
+past_orders:
+  - {days_ago: 5, items: [{type: 우유, group: 음·식료품, qty: 1, label: care}, {type: 세탁 세제, qty: 1}, {type: 로션, qty: 1}, {type: 딸기, group: 농축수산물, qty: 1, label: care}]}
+  - {days_ago: 11, items: [{type: 우유, qty: 1, label: care}, {type: 세탁 세제, qty: 1}, {type: 로션, qty: 1}, {type: 딸기, qty: 1, label: care}]}
+  - {days_ago: 17, items: [{type: 우유, qty: 1, label: care}, {type: 세탁 세제, qty: 1}, {type: 로션, qty: 1}, {type: 딸기, qty: 1, label: care}]}
+  - {days_ago: 23, items: [{type: 우유, qty: 1, label: care}, {type: 계란, qty: 1, label: care}]}
+  - {days_ago: 29, items: [{type: 우유, qty: 1, label: care}, {type: 컵케이크 믹스, qty: 1, label: care}, {type: 휘핑크림, qty: 1, label: care}]}
+  - {days_ago: 35, items: [{type: 우유, qty: 1, label: care}, {type: 계란, qty: 1, label: care}]}
+  - {days_ago: 41, items: [{type: 우유, qty: 1, label: care}, {type: 휴지, qty: 1}]}
+  - {days_ago: 47, items: [{type: 우유, qty: 1, label: care}, {type: 계란, qty: 1, label: care}]}
+  - {days_ago: 53, items: [{type: 우유, qty: 1, label: care}, {type: 주방 세제, qty: 1}]}
+  - {days_ago: 59, items: [{type: 우유, qty: 1, label: care}, {type: 계란, qty: 1, label: care}]}
+  - {days_ago: 65, items: [{type: 우유, qty: 1, label: care}, {type: 휴지, qty: 1}]}
+  - {days_ago: 71, items: [{type: 우유, qty: 1, label: care}, {type: 계란, qty: 1, label: care}]}

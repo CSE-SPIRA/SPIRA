@@ -75,6 +75,8 @@ def _t(value: str | None) -> datetime | None:
 
 
 def safety_reason(d: Draft, catalog: Catalog, body: dict, now: datetime, cfg: Config) -> str | None:
+    """Reason to drop the task, or None. Actions on a device outside `target_room` are removed from the task
+    (kept in meta.room_removed); only a task left with no action is dropped as room_mismatch."""
     n, policy = cfg.numbers, cfg.command_policy
     raw = {x["id"]: x for x in body.get("devices", [])}
     for a in d.actions:
@@ -88,9 +90,13 @@ def safety_reason(d: Draft, catalog: Catalog, body: dict, now: datetime, cfg: Co
         if not value_ok(a.get("value"), catalog.get(a["device"]).commands[a["cmd"]]):
             return "value_out_of_range"
     if d.target_room is not None:
-        for a in d.actions:
-            if catalog.get(a["device"]).room != d.target_room:
-                return "room_mismatch"
+        other = [a for a in d.actions if catalog.get(a["device"]).room != d.target_room]
+        if len(other) == len(d.actions):
+            return "room_mismatch"
+        if other:                                    # drop only the actions in another room; recorded, not shown
+            d.meta["room_removed"] = [{"device": a["device"], "cmd": a["cmd"],
+                                       "room": catalog.get(a["device"]).room} for a in other]
+            d.actions = [a for a in d.actions if a not in other]
     if d.trigger is None:
         return None                                              # held: times come later
     t = _t(d.trigger.get("time"))
