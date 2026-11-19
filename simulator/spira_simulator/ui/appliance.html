@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>가전 앱 · {{ home }}</title>
+  <link rel="stylesheet" href="/sim/style.css">
+  <script defer src="/sim/stage.js"></script>
+</head>
+<body class="appliance-app">
+  <main>
+    <header>
+      <h1>가전 앱 · {{ home }}</h1>
+      {% if people %}
+      <label for="person">조작하는 사람</label>
+      <select id="person" name="person" form="appliance-actions">
+        {% for person in people %}<option value="{{ person }}"{% if person == selected %} selected{% endif %}>{{ person }}</option>{% endfor %}
+      </select>
+      {% endif %}
+    </header>
+    <p id="connection-lost" class="observation-warning" role="status" hidden>연결 끊김 · 마지막 관찰값</p>
+    {% if people %}<form id="appliance-actions" method="post" action="/app/device">{% endif %}
+      {% for device in tiles %}
+      {% set target, actions = controls[device.id] %}
+      <section class="appliance-device">
+        <h2>{{ device.name }} <small>{{ room_names.get(device.room, device.room) }}</small></h2>
+        <div id="value-{{ device.id }}" data-live data-observation="{{ device.observation }}">
+          {% if device.content is not none %}<p class="device-value">{{ device.content }}</p>{% endif %}
+          {% if device.observation_label %}<p class="observation-warning">{{ device.observation_label }}</p>{% endif %}
+        </div>
+        {% if people %}
+        <div class="device-actions">
+          {% for action in actions %}
+          <button name="control" value="{{ action.key }}" formaction="/app/device?target={{ target|urlencode }}">{{ action.label }}</button>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </section>
+      {% endfor %}
+    {% if people %}</form>{% endif %}
+  </main>
+</body>
+</html>

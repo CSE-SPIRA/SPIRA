@@ -82,7 +82,7 @@ def test_overlay_reads_authenticated_plan_and_fixture_executions(
 
     assert overlay["errors"] == []
     assert overlay["preparation"] == []
-    assert len(overlay["item_notices"]) == 2
+    assert len(overlay["notices"]) == 2
     assert {
         (row["device"], row["status"], row["substrate"]) for row in overlay["restores"]
     } == {
@@ -223,7 +223,7 @@ def test_overlay_prefers_live_plans_and_uses_hub_task_stories_and_restoration(
 
     assert overlay["errors"] == []
     assert [row["device"] for row in overlay["preparation"]] == ["oven_01"]
-    assert len(overlay["item_notices"]) == 2
+    assert len(overlay["notices"]) == 2
     assert {
         (row["device"], row["status"], row["substrate"], row["delivery"])
         for row in overlay["restores"]
@@ -627,43 +627,51 @@ def test_sim_at10_read_only_faint_waiting_and_item_only_episode(tmp_path):
         viewer = client.get("/sim/viewer")
         assert viewer.status_code == 200 and "<button" not in viewer.text
         assert 'class="planned"' in viewer.text
-        script = client.get("/sim/stage.js").text
-        assert "Stale" in script and "Readback missing" in script
-        assert "border: 1px dashed #88998e" in client.get("/sim/style.css").text
+        assert "border: 1px dashed #9db3e3" in client.get("/sim/style.css").text
+        for mode, label in (
+            ("stale", "오래된 관찰값"),
+            ("missing", "관찰값 누락"),
+            ("unavailable", "관찰 불가"),
+        ):
+            post(client, "/operator/fault", target=LIGHT, fault="readback", mode=mode)
+            marked = client.get("/sim/viewer").text
+            assert f'data-observation="{mode}"' in marked and label in marked
+        post(client, "/operator/fault", target=LIGHT, fault="readback", mode="current")
         original = client.get("/sim/overlay").json()
-        assert any(row["task_id"] == "t_clean#1" for row in original["preparation"])
+        assert any(row["device"] == "cleaner_01" for row in original["preparation"])
         source.body = fixture_json("ep_9031/pull.json")
         overlay = client.get("/sim/overlay").json()
         assert overlay["errors"] == []
-        assert not any(row["task_id"] == "t_clean#1" for row in overlay["preparation"])
-        protective_devices = {
-            row["device"] for row in overlay["preparation"] if row["protective"]
+        assert not any(row["device"] == "cleaner_01" for row in overlay["preparation"])
+        assert {(row["device"], row["command"]) for row in overlay["preparation"]} >= {
+            ("cooktop_01", "child_lock"),
+            ("plug_kettle", "off"),
         }
-        assert protective_devices == {"cooktop_01", "plug_kettle"}
-        assert any(
-            row["device"] == "light_01" and row["wait"] == "guest_arrived"
-            for row in overlay["preparation"]
-        )
-        assert not any(
-            row["device"] == "light_01" and row["target_value"] == {"kelvin": 3000}
-            for row in overlay["preparation"]
-        )
+        assert {
+            "device": "light_01",
+            "command": "color",
+            "wait": "guest_arrived",
+        } in overlay["preparation"]
         source.body = fixture_json("ep_9150/plan.v1.json")
         grocery = client.get("/sim/overlay").json()
         assert grocery["errors"] == []
         assert grocery["preparation"] == []
         grocery_episode = fixture_json("ep_9150/episode.json")
-        assert {
-            row["task_id"]: row["target_value"] for row in grocery["item_notices"]
-        } == {task["task_id"]: task["text"] for task in grocery_episode["item_tasks"]}
-        assert len(grocery["item_notices"]) == len(grocery_episode["item_tasks"]) == 2
-        assert all(
-            row["device"] == "fridge_01"
-            and row["command"] == "show_notice"
-            and row["wait"] == "package.brought_in"
-            and not row["protective"]
-            for row in grocery["item_notices"]
+        assert len(grocery["notices"]) == len(grocery_episode["item_tasks"]) == 2
+        assert (
+            grocery["notices"]
+            == [
+                {
+                    "device": "fridge_01",
+                    "command": "show_notice",
+                    "wait": "package.brought_in",
+                }
+            ]
+            * 2
         )
+        grocery_page = client.get("/sim/viewer").text
+        assert "예정된 집 준비 없음" in grocery_page
+        assert all(task["text"] not in grocery_page for task in grocery_episode["item_tasks"])
         for path in ("/sim/snapshot", "/sim/viewer", "/sim/overlay"):
             assert client.post(path, json={}).status_code == 405
         after = client.get("/sim/snapshot").json()

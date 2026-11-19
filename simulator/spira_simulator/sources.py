@@ -15,7 +15,6 @@ from spira_contracts.execution_result import ExecutionResult, RestoreResult, Run
 from spira_contracts.plan import Plan, TimeTrigger
 from spira_contracts.plan_pull import PlanPull
 
-from .profile import public_value
 from .world import PEOPLE
 
 
@@ -133,7 +132,7 @@ async def stage_overlay(
         if key not in runs or record.at > runs[key].at:
             runs[key] = record
     preparation = []
-    item_notices = []
+    notices = []
     for plan in stage_plans:
         if plan.household_id != household_id:
             continue
@@ -146,22 +145,18 @@ async def stage_overlay(
                 if isinstance(task.trigger, TimeTrigger)
                 else task.trigger.event.value
             )
-            overlay = item_notices if task.source.value == "item" else preparation
+            overlay = notices if task.source.value == "item" else preparation
             for action in task.actions:
                 if (
                     plan.plan_id,
                     task.task_id,
                     action.device,
-                ) not in runs and public_value(action.value):
+                ) not in runs:
                     overlay.append(
                         {
-                            "plan_id": plan.plan_id,
-                            "task_id": task.task_id,
                             "device": action.device,
                             "command": action.cmd,
-                            "target_value": action.value,
                             "wait": wait,
-                            "protective": task.protective is True,
                         }
                     )
 
@@ -174,8 +169,6 @@ async def stage_overlay(
                 substrate
             )
             row = {
-                "plan_id": record.plan_id,
-                "task_id": record.task_id,
                 "at": record.at,
                 "device": item.device,
                 "status": item.status.value,
@@ -187,7 +180,7 @@ async def stage_overlay(
             restores.append(row)
     return {
         "preparation": preparation,
-        "item_notices": item_notices,
+        "notices": notices,
         "restores": restores,
         "errors": errors,
     }

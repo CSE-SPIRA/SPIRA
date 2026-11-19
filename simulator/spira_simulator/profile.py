@@ -111,8 +111,15 @@ class SensorFact(ProfileModel):
         return self
 
 
+class DemoPerson(ProfileModel):
+    name: str = Field(min_length=1)
+    role: Literal["resident", "child", "guest"]
+
+
 class Profile(ProfileModel):
     household_id: str = Field(pattern=r"^h_[0-9a-z]+$")
+    display_name: str | None = None
+    demo_people: list[DemoPerson] = Field(default_factory=list)
     devices: list[Device]
     home_signals: dict[str, list[SensorFact]] = Field(default_factory=dict)
 
@@ -123,6 +130,8 @@ class Profile(ProfileModel):
                 self.devices
             ):
                 raise ValueError(f"duplicate device {attribute}")
+        if len({person.name for person in self.demo_people}) != len(self.demo_people):
+            raise ValueError("duplicate demo person name")
         return self
 
 

@@ -173,7 +173,9 @@ class World:
         with self.store.lock:
             return self._observation(target)[0]
 
-    def snapshot(self, *, include_operator_actions: bool = False) -> dict:
+    def snapshot(
+        self, *, include_operator_actions: bool = False, for_display: bool = False
+    ) -> dict:
         with self.store.lock:
             devices = []
             for target, device in self.devices.items():
@@ -203,6 +205,11 @@ class World:
                 }
                 if include_operator_actions:
                     tile["last_operator_action"] = state.get("last_operator_action")
+                if for_display and tile["values"].get("job_status") == "running":
+                    observed_state = (
+                        self.read_faults[target][1] if freshness == "stale" else state
+                    )
+                    tile["job_due"] = observed_state["due"]
                 devices.append(tile)
             return {
                 "household_id": self.profile.household_id,
