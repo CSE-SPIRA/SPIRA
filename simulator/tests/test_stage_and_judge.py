@@ -1064,7 +1064,7 @@ class SurfaceForms(HTMLParser):
             "washer_01", "course_delicates", "course_normal", "표준 코스 대기",
             {"코스 대기": "LG 가정"}, True,
         ),
-        ("plug_iron", "power_on", "power_off", "꺼짐", {"끄기": "LG 가정"}, False),
+        ("plug_iron", "power_on", "power_off", "꺼짐", {"끄기": "일반 기기"}, False),
         ("plug_router", "power_on", "power_off", "꺼짐", {}, False),
     ],
 )

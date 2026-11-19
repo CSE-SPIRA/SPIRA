@@ -107,7 +107,7 @@ def test_demo_profiles_label_every_command_basis(episode):
     profile = load_profile(DEFAULT_PROFILE.with_name(f"{episode}.json"))
     for device in profile.devices:
         assert set(device.command_basis) == set(device.commands)
-        assert set(device.command_basis.values()) <= {"sdk", "lg_assumed"}
+        assert set(device.command_basis.values()) <= {"sdk", "lg_assumed", "standard"}
 
 
 @pytest.mark.parametrize(

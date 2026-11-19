@@ -21,7 +21,7 @@
         "clean"
       ],
       "command_basis": {
-        "clean": "lg_assumed"
+        "clean": "sdk"
       },
       "properties": {
         "clean": {
@@ -90,8 +90,8 @@
         "color_temp"
       ],
       "command_basis": {
-        "color": "lg_assumed",
-        "color_temp": "lg_assumed"
+        "color": "standard",
+        "color_temp": "standard"
       },
       "properties": {
         "color": {
@@ -362,7 +362,7 @@
         "off"
       ],
       "command_basis": {
-        "off": "lg_assumed"
+        "off": "standard"
       },
       "properties": {
         "power": {
@@ -512,7 +512,7 @@
         "off"
       ],
       "command_basis": {
-        "off": "lg_assumed"
+        "off": "standard"
       },
       "label": "다리미 플러그",
       "properties": {

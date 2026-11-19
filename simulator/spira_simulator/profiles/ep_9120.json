@@ -20,7 +20,7 @@
         "clean"
       ],
       "command_basis": {
-        "clean": "lg_assumed"
+        "clean": "sdk"
       },
       "properties": {
         "clean": {

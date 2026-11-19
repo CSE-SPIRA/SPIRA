@@ -78,7 +78,7 @@ COMMAND_NAMES = {
     "set_course_standby": "코스 대기",
     "delayed_start": "예약 시작",
 }
-BASIS_LABELS = {"sdk": "SDK", "lg_assumed": "LG 가정"}
+BASIS_LABELS = {"sdk": "SDK", "lg_assumed": "LG 가정", "standard": "일반 기기"}
 TRIGGER_NAMES = {
     "package.brought_in": "택배를 들이면",
     "guest_arrived": "손님 오면",

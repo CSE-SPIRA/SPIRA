@@ -67,7 +67,7 @@ class Device(ProfileModel):
     local_operation_reporting: bool
     assumption: str | None = None
     commands: list[str]
-    command_basis: dict[str, Literal["sdk", "lg_assumed"]] = Field(default_factory=dict)
+    command_basis: dict[str, Literal["sdk", "lg_assumed", "standard"]] = Field(default_factory=dict)
     properties: dict[str, Property] = Field(min_length=1)
     job: Job | None = None
     prohibited_properties: list[str] = Field(default_factory=list)
