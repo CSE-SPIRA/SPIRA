@@ -182,6 +182,7 @@ Set in `server/.env` (never committed; template `server/.env.example`). No URL o
 | `LLM_MODEL` | yes | Exact model name with version |
 | `LLM_API_KEY` | unless mock | Provider key |
 | `LLM_TIMEOUT_S` | no | Default `60` |
+| `EMBED_MODE` | no | `bge` (default): BGE-M3 via `spira.embedding` / `mock`: deterministic fake 1024-d vectors, no model download (tests and mock runs only, §17) |
 | `APP_DEMO_TOKEN` | yes | Bearer token the app uses (APP-08) |
 | `KB_MODE` | no | `on` (default) / `off` (§15) |
 | `HOME_CONTEXT` | no | `on` (default) / `off` (§15) |
@@ -194,7 +195,7 @@ Set in `server/.env` (never committed; template `server/.env.example`). No URL o
 
 ### 3.2 Dependencies (`server/pyproject.toml`)
 
-Runtime: `fastapi`, `uvicorn[standard]`, `python-multipart`, `pydantic>=2.7`, `pydantic-settings`, `sqlalchemy>=2`, `alembic`, `psycopg[binary]>=3.2`, `pgvector`, `apscheduler>=3.10,<4`, `pyyaml`, `jsonschema`, `referencing`, `anthropic`, `openai`, `google-genai`, `spira-contracts` (local path), `spira-kb[embed] @ git+https://github.com/CSE-SPIRA/SPIRA_KB@<KB_VERSION tag>` (KB-16; embedding only). Dev: `pytest`, `httpx`, `ruff`.
+Runtime: `fastapi`, `uvicorn[standard]`, `python-multipart`, `pydantic>=2.7`, `pydantic-settings`, `sqlalchemy>=2`, `alembic`, `psycopg[binary]>=3.2`, `pgvector`, `apscheduler>=3.10,<4`, `pyyaml`, `jsonschema`, `referencing`, `anthropic`, `openai`, `google-genai`, `spira-contracts` (local path). Extra `embed`: `spira-kb[embed] @ git+https://github.com/CSE-SPIRA/SPIRA_KB@<KB_VERSION tag>` (KB-16; embedding only, pulls the BGE-M3 runtime, ~2 GB); installed by the Docker image and for real runs, not needed with `EMBED_MODE=mock`. Dev: `pytest`, `httpx`, `ruff`.
 
 Python 3.12 (`spira-kb` requires `<3.13`).
 
@@ -211,7 +212,7 @@ curl localhost:8000/health
 
 # without Docker (Python 3.12)
 python -m venv .venv && source .venv/bin/activate
-pip install -e ../contracts/generated/python -e ".[dev]"
+pip install -e ../contracts/generated/python -e ".[dev]"          # add ,embed for EMBED_MODE=bge
 alembic upgrade head
 uvicorn spira_server.main:app --reload
 pytest
@@ -736,7 +737,7 @@ def build_schema(item_types, cal_ids, intent_ids):
 
 **Purpose.** For each bundle: check this home's past reactions, find the time, then let the LLM turn the situation into device tasks (situation preparation). Per-item tasks come from `item_tasks.yaml` in code; the LLM only writes care-notice texts.
 
-**Output.** Draft tasks (`tasks` rows, `status` draft until S5) in contract form: `task_id, source, way, actions, trigger, end`, plus `need`, `line`, `target_room`, `meta`.
+**Output.** Draft tasks, kept in memory until S5 and never stored (§5.2), in contract form: `task_id, source, way, actions, trigger, end`, plus `need`, `line`, `target_room`, `meta`.
 
 ### 10.1 Steps
 
@@ -873,7 +874,7 @@ Runs under the household lock (§2.4) on the state as it is now. Household pause
 - `starts_at` = bundle `when.start` (null when held).
 - Any later change of the card (line state, re-run, reaction) → same card, new `updated_at`, `notify: false` — **except** a held card whose time was found (§14), which gets `notify: true` once.
 - `stopped: true` → `buttons: []`.
-- `summary`: `done` = lines in `done`/`partial`/`user_changed`; `total` = lines not `off`/`stopped`/`cancelled`; `waiting_for` = the event trigger of a `scheduled` line not yet seen (`guest_arrived` before `event_end`), else null.
+- `summary`: `done` = lines in `done`/`partial`/`user_changed`; `total` = lines not `off`/`stopped`/`cancelled`; `waiting_for` = the event trigger of a `scheduled` line whose trigger window has opened (`window.from` ≤ now) and whose event was not seen yet (`guest_arrived` before `event_end`), else null. Before the window opens it stays null (`ep_9031/card.v1.json`).
 
 ### 11.3 Publish a plan version
 
@@ -922,7 +923,7 @@ Recompute a line whenever an ack, execution result, user event or reaction for i
 
 ### 11.6 Held tasks
 
-- Kept `hold_d` (14) days from judging; not sent; card lines `held`, `when: null`.
+- Kept `hold_d` (14) days from judging; not sent; card lines `held`, `when: null`. A held task was never sent to the hub, so when its time is found it keeps its id (§14 step 3).
 - A calendar change re-runs the episode (§14); if a time is found the card is updated with times, `notify: true` once.
 - `expire_held` (daily): held tasks older than 14 days → `dropped`; card lines `dropped` with `dropped_note`; nothing sent.
 
@@ -1116,7 +1117,7 @@ A re-run judges the episode again from S2 with the current items, calendar and d
 Re-run procedure:
 1. Household paused → no re-run.
 2. Run S2 → S4 outside the lock (§2.4). Exclusions given to S4 (§10.1–10.2): intents of stopped cards of this episode; actions of lines currently `checked: false` on the same-intent card.
-3. Lock the household and the episode. **Keep** every started task (§5.2) with its id and line. A new draft equal to a kept task (same device, cmd, value) is discarded. Every not-started live or held task is replaced: if a new draft equals it in device, cmd, value and trigger, the existing task stays as it is (same id, no change); otherwise the old task is cancelled and the draft becomes a new task with a new number `n`. A cancelled id never comes back (§11.3).
+3. Lock the household and the episode. **Keep** every started task (§5.2) with its id and line. A new draft equal to a kept task (same device, cmd, value) is discarded. Every not-started live or held task is replaced: if a new draft equals it in device, cmd, value and trigger, the existing task stays as it is (same id, no change); a **held** task whose new draft equals it in device, cmd and value keeps its id and takes the draft's trigger and end (it was never sent, so no hub sees a change of meaning; `ep_9120/plan.v2.json`); otherwise the old task is cancelled and the draft becomes a new task with a new number `n`. A cancelled id never comes back (§11.3).
 4. Map bundles to cards by `intent_id`:
    - same intent → same card; lines = kept started lines first, then new lines in `needs` order, ≤ `max_lines` in total; a line whose action keys equal an unchecked line keeps `checked: false` (and its task is not sent);
    - intent gone → the card's not-started lines `cancelled`; if it still has started tasks it stays controllable (Stop works) until they end, then `archived`; otherwise `archived` now;
@@ -1172,7 +1173,7 @@ For the evaluation (separate plan, not part of this spec) the server also:
 
 ## 17. Acceptance tests
 
-pytest, LLM `mock` (§6.1), DB = Postgres with pgvector (docker compose service or testcontainers). Clock fixed by `clock.now` override. Fixture paths are under `contracts/fixtures/`.
+pytest, LLM `mock` (§6.1), `EMBED_MODE=mock` (§3.1), DB = Postgres with pgvector (docker compose service or testcontainers). Clock fixed by `clock.now` override. Fixture paths are under `contracts/fixtures/`.
 
 | # | Test | Expect |
 | --- | --- | --- |
@@ -1326,3 +1327,13 @@ Not yet in the Notion server spec (synchronised in one pass later). B.2 lists th
 | R18 | `protective` tasks (child lock, power cut) from `command_policy.yaml`; released only on an observed end or a cancellation; at a time fallback the hub reports `withheld_end_not_observed` → `end_state` `withheld` | §4.5, §11.3, §11.5, §11.8 |
 | R19 | Shared-screen notices never name the occasion, guests or theme (prompt + code check) | §10.1 step 9, §10.6 |
 | R20 | `ep_9031`: the line switched off on Friday is cleaning, not child safety (hub owner's choice) | examples, T18 |
+
+### B.4 From the implementation plan (11-19)
+
+| # | Decision | Where |
+| --- | --- | --- |
+| R21 | Unused standby with a time trigger ends at the schedule end (`or_time`); `ep_9031` fixtures carry it (contracts PR) | §10.4, T17 |
+| R22 | A held task keeps its id when its time is found (never sent to the hub) | §11.6, §14, T34 |
+| R23 | `summary.waiting_for` only after the trigger window opens | §11.2, T22 |
+| R24 | `EMBED_MODE=mock` for tests; `spira-kb[embed]` is an optional extra | §3.1, §3.2, §17 |
+| R25 | Draft tasks are never stored (wording aligned with §5.2) | §10 |
