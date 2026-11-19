@@ -175,13 +175,14 @@ def replay_birthday(client):
         "household_id": client.household,
         "household_types": [],
     }
+    committed = fixture("household.create.json")
+    assert request("PUT", f"{APP_HOUSEHOLD}/profile", json=committed) == {
+        "household_id": client.household,
+        "household_types": committed["household_types"],
+    }
+    blocked = read_json(CONTRACTS / "check/bad/household_blocked/household.create.json")
     assert (
-        request(
-            "PUT",
-            f"{APP_HOUSEHOLD}/profile",
-            422,
-            json=fixture("household.create.json"),
-        )["code"]
+        request("PUT", f"{APP_HOUSEHOLD}/profile", 422, json=blocked)["code"]
         == "household_types_invalid"
     )
     calendar = fixture("calendar.json")
