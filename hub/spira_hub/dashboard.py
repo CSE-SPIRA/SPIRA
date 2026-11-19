@@ -5,8 +5,7 @@ from html import escape
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
-from .contracts import offset_time, packet_body
-from .plans import action_keys
+from .dashboard_state import state_view
 from .store import encode
 
 
@@ -19,6 +18,7 @@ def create_app(runtime, *, lifespan=None):
         return {"status": "ok", "server_confirmed": runtime.reconciled
                 and runtime.last_pull_error is None, "device_online": runtime.device.online}
 
+    @app.get("/state")
     @app.get("/api/state")
     async def state():
         return state_view(runtime)
@@ -28,64 +28,6 @@ def create_app(runtime, *, lifespan=None):
         return render(state_view(runtime))
 
     return app
-
-
-def state_view(runtime):
-    store = runtime.store
-    devices = []
-    for device in runtime.installation.devices.devices:
-        target = runtime.installation.bindings[device.id].target
-        capability = runtime.capabilities.get(target)
-        devices.append({
-            "device": device.id, "target": target, "substrate": device.substrate.value,
-            "observed_substrate": capability.substrate if capability else None,
-            "assumption": capability.assumption if capability else None,
-        })
-    waiting = []
-    attempts = store.attempts()
-    now = runtime.clock()
-    snapshot = store.get("snapshot", {})
-    for task in store.tasks():
-        if (not task["active"] or task["closed"] or not task["body"]
-                or task["plan"] not in snapshot.get("plans", [])):
-            continue
-        trigger = task["body"]["trigger"]
-        window = trigger.get("window")
-        if (task["triggered_at"] is None and window and now > offset_time(window["to"])):
-            continue
-        tried = {row["action_key"] for row in attempts
-                 if (row["plan"], row["task"]) == (task["plan"], task["id"])}
-        remaining = [action for key, action in action_keys(task) if key not in tried]
-        if remaining:
-            waiting.append({
-                "plan_id": task["plan"], "plan_version": task["version"], "task_id": task["id"],
-                "actions": remaining, "trigger": trigger, "triggered_at": task["triggered_at"],
-            })
-    commands = [
-        {
-            "plan": row["plan"], "task": row["task"], "device": row["action"]["device"],
-            "substrate": row["substrate"], "target": row["target"], "binding": row["epoch"],
-            "operation_id": row["op"], "kind": row["kind"], "at": row["sent_at"],
-            "desired": row["desired"], "acknowledgement": row["ack"],
-            "read_back": row["read_back"], "status": row["status"], "reason": row.get("reason"),
-        }
-        for row in reversed(attempts[-100:])
-    ]
-    events = [evidence(row) for row in store.evidence("event")]
-    restores = [evidence(row) for row in store.evidence("execution", limit=-1)
-                if packet_body(row)["kind"] == "restore"][:100]
-    return {
-        "waiting": waiting, "commands": commands, "events": events, "restoration": restores,
-        "devices": devices, "paused": snapshot.get("paused"),
-        "server_peer": runtime.server.fixture, "server_error": runtime.last_pull_error,
-        "registry_error": runtime.config_error, "observation_gap_at": runtime.observations.gap_at,
-        "device_online": runtime.device.online,
-    }
-
-
-def evidence(row):
-    return {"delivered": bool(row["delivered"]), "delivery_error": row["error"],
-            "packet": packet_body(row)}
 
 
 def render(state):
@@ -102,7 +44,8 @@ def render(state):
     waiting = [
         f'<article><h3>{text(row["task_id"])}</h3><p>{text(row["plan_id"])} · v{row["plan_version"]}</p>'
         f'<p>{text(", ".join(action["device"] + " · " + action["cmd"] for action in row["actions"]))}</p>'
-        f'<h4>Trigger</h4>{details(row["trigger"])}</article>'
+        + (f'<p>Window passed · {text(row["window_passed_at"])}</p>' if row["status"] == "window_passed" else "")
+        + f'<h4>Trigger</h4>{details(row["trigger"])}</article>'
         for row in state["waiting"]
     ]
     commands = [
@@ -141,6 +84,33 @@ def render(state):
         + '</article>'
         for row in state["devices"]
     ]
+    history = [
+        f'<article><h3>{text(row["plan_id"])} · v{row["plan_version"]}</h3>'
+        f'<p>Received {text(row["received_at"])}</p>'
+        f'<p>Acknowledgement · {delivery(row["ack"])}</p>{details(row["ack"]["packet"])}'
+        + (f'<p>Compared with v{row["previous_version"]}</p>' if row["previous_version"] else '')
+        + (f'<h4>Changes</h4>{details(row["changes"])}' if row["changes"] is not None
+           else '<p>Version changes unavailable.</p>')
+        + '</article>'
+        for row in state["plan_history"]
+    ]
+    summaries = [
+        f'<article><h3>{text(row["plan_id"])} · v{row["plan_version"]}</h3>'
+        f'<p>device actions {row["device_actions"]} · notices {row["notices"]}</p>'
+        f'<p>Waiting {row["waiting"]} · window passed {row["window_passed"]} · triggered {row["triggered"]} '
+        f'· completed {row["completed"]} · failed/unknown/unverifiable {row["failed_unknown_unverifiable"]} '
+        f'· restored {row["restored"]} · withheld {row["withheld"]}</p></article>'
+        for row in state["plan_summaries"]
+    ]
+    stories = []
+    for story in state["task_stories"]:
+        steps = "".join(
+            f'<li>{text(step["kind"].replace("_", " ").capitalize())}'
+            f'{details({key: value for key, value in step.items() if key != "kind"})}</li>'
+            for step in story["steps"]
+        )
+        stories.append(f'<article><h3>{text(story["task_id"])}</h3>'
+                       f'<p>{text(story["plan_id"])}</p><ol>{steps}</ol></article>')
     peer = state["server_peer"] or "Server"
     if state["server_error"]:
         peer += " · pull failed"
@@ -153,6 +123,9 @@ def render(state):
         + section("Command acknowledgement and read-back", commands, "No commands or execution blocks recorded.")
         + section("Person actions and C-3 events", events, "No device or home events recorded.")
         + section("Restoration and skips", restores, "No restoration results recorded.")
+        + section("Plan summaries", summaries, "No plans admitted.")
+        + section("Plan history", history, "No plan versions recorded.")
+        + section("Task stories", stories, "No task stories recorded.")
         + section("Device bindings", devices, "No delegated devices.")
     )
     return f"""<!doctype html>
