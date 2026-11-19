@@ -1,0 +1,11 @@
+# Used with server/Dockerfile (build context = repository root). Send only what the image needs.
+*
+!contracts/kb
+!contracts/generated/python
+!server/pyproject.toml
+!server/spira_server
+!server/alembic.ini
+!server/migrations
+!server/config
+**/__pycache__
+**/*.egg-info
