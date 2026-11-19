@@ -7,19 +7,22 @@ from pathlib import Path
 from spira_contracts.ack import Ack
 from spira_contracts.calendar import Calendar
 from spira_contracts.card import Card, Line, Summary
-from spira_contracts.common import EpisodeStatus, ExecutionStatus, LineState
+from spira_contracts.common import AckStatus, EpisodeStatus, ExecutionStatus, LineState, TriggerEvent
 from spira_contracts.devices import Devices
 from spira_contracts.episode import Episode
 from spira_contracts.event import Event
-from spira_contracts.execution_result import ExecutionResult, RunResult
+from spira_contracts.execution_result import ExecutionResult, RestoreResult, RunResult
 from spira_contracts.household_created import HouseholdCreated
 from spira_contracts.memory import Memory
 from spira_contracts.plan import Cancelled, EventTrigger, Plan
 from spira_contracts.reaction import Reaction
 
+from .projection import action_results, line_end, matching_trigger, run_state, task_end, user_changed
+
 CONTRACTS = Path(__file__).resolve().parents[3] / "contracts"
 FIXTURES = CONTRACTS / "fixtures"
 EPISODES = ("ep_9031", "ep_9150", "ep_9120")
+INACTIVE = (LineState.OFF, LineState.STOPPED, LineState.CANCELLED)
 
 
 def read_json(path: Path):
@@ -75,14 +78,16 @@ class Replay:
         self.files = {name: read_json(folder / name) for name in manifest["files"]}
         self.devices = Devices.model_validate(read_json(folder / manifest["devices"]))
         self.household_id = self.devices.household_id
-        self.plan = Plan.model_validate(self.files["plan.v1.json"])
+        self.plans: dict[int, Plan] = {}
+        self.plan = self.load(Plan, "plan.v1.json")
+        self.clock = datetime.fromisoformat(self.plan.sent_at)
+        self.set_plan(self.plan)
         self.card = self.load(Card, "card.v1.json") or self.load(Card, "card.held.json")
         self.final_card = self.load(Card, "card.final.json")
         self.calendar = self.load(Calendar, "calendar.json")
         self.calendar_applied = False
         self.finished = False
         self.paused = False
-        self.clock = datetime.fromisoformat(self.plan.sent_at)
         self.onboarding = HouseholdCreated.model_validate(
             read_json(FIXTURES / "ep_9031" / "household.created.json")
         ).model_copy(update={"household_id": self.household_id})
@@ -92,7 +97,7 @@ class Replay:
         self.profile: list[str] = []
 
         self.receipts = {"events": [], "executions": []}
-        self.events: dict[str, dict] = {}
+        self.events: dict[str, Event] = {}
         self.results: dict[str, ExecutionResult] = {}
         self.result_bodies: dict[str, dict] = {}
 
@@ -123,23 +128,25 @@ class Replay:
             return model.model_validate(self.files[name])
         return None
 
+    def now(self):
+        return max(self.clock, datetime.now(timezone.utc)) if self.live else self.clock
+
     def tick(self):
-        self.clock += timedelta(microseconds=1)
-        if self.live:
-            self.clock = max(self.clock, datetime.now(timezone.utc))
+        self.clock = max(self.clock + timedelta(microseconds=1), self.now())
         return self.clock.isoformat()
 
     def set_plan(self, plan: Plan):
         self.plan = plan
+        self.plans[plan.plan_version] = plan
         self.clock = max(self.clock, datetime.fromisoformat(plan.sent_at))
 
-    def replace_plan(self, **changes):
+    def replace_plan(self, *, sent_at: str | None = None, **changes):
         self.set_plan(
             self.plan.model_copy(
                 update={
                     **changes,
                     "plan_version": self.plan.plan_version + 1,
-                    "sent_at": self.tick(),
+                    "sent_at": sent_at or self.tick(),
                 }
             )
         )
@@ -186,15 +193,116 @@ class Replay:
                         in (LineState.DONE, LineState.PARTIAL, LineState.USER_CHANGED)
                         for line in lines
                     ),
-                    total=sum(
-                        line.state
-                        not in (LineState.OFF, LineState.STOPPED, LineState.CANCELLED)
-                        for line in lines
-                    ),
-                    waiting_for=None,
+                    total=sum(line.state not in INACTIVE for line in lines),
+                    waiting_for=self.waiting_for(lines) if self.live else None,
                 ),
             }
         )
+
+    def waiting_for(self, lines: list[Line]):
+        scheduled = {
+            line.task_id for line in lines
+            if line.state == LineState.SCHEDULED and line.end_state is None
+        }
+        waits = set()
+        now = self.now()
+        events = sorted(self.events.values(), key=lambda event: datetime.fromisoformat(event.at))
+        for task in self.plan.tasks:
+            trigger = task.trigger
+            if task.task_id not in scheduled or not isinstance(trigger, EventTrigger):
+                continue
+            if trigger.window and not (
+                datetime.fromisoformat(trigger.window.from_) <= now
+                <= datetime.fromisoformat(trigger.window.to)
+            ):
+                continue
+            admitted = self.admitted_at(task.task_id)
+            end = task_end(task, events, admitted)
+            if (end is None or end > now) and matching_trigger(trigger, events, admitted) is None:
+                waits.add(trigger.event)
+        return next((event for event in TriggerEvent if event in waits), None)
+
+    def admitted_at(self, task_id: str):
+        return next(
+            datetime.fromisoformat(plan.sent_at)
+            for plan in self.plans.values()
+            if any(task.task_id == task_id for task in plan.tasks)
+        )
+
+    def project(self):
+        """Refresh the projection after a receipt or when the App polls wall time."""
+        tasks = {task.task_id: task for plan in self.plans.values() for task in plan.tasks}
+        cancelled = {entry.task_id: entry.restore for entry in self.plan.cancelled}
+        rejected = set()
+        for version, plan in self.plans.items():
+            if (ack := self.acks.get(version)) is not None:
+                submitted = {task.task_id for task in plan.tasks}
+                if ack.status == AckStatus.REJECTED:
+                    rejected.update(submitted)
+                else:
+                    rejected.update(submitted.intersection(item.task_id for item in ack.rejected_tasks))
+
+        runs: dict[str, list[RunResult]] = {}
+        restores: dict[str, RestoreResult] = {}
+        packets = sorted((result.root for result in self.results.values()), key=lambda packet: datetime.fromisoformat(packet.at))
+        for packet in packets:
+            if isinstance(packet, RunResult):
+                runs.setdefault(packet.task_id, []).append(packet)
+            else:
+                restores[packet.task_id] = packet
+
+        item_tasks = []
+        for item in self.episode.item_tasks:
+            task = tasks[item.task_id]
+            latest = action_results(task, runs.get(item.task_id, []))
+            state, _ = run_state(task, latest, item.task_id in rejected)
+            if item.task_id in cancelled and not self.started(item.task_id):
+                state = LineState.CANCELLED
+            item_tasks.append(item.model_copy(update={"state": state}))
+        self.episode = self.episode.model_copy(update={"item_tasks": item_tasks})
+        if not self.live or not self.card:
+            return
+
+        events = sorted(self.events.values(), key=lambda event: datetime.fromisoformat(event.at))
+        now = self.now()
+        lines = []
+        all_ended = True
+        for line in self.card.lines:
+            task_id = line.task_id
+            task = tasks.get(task_id)
+            if task is None:
+                lines.append(line)
+                all_ended &= line.state in INACTIVE
+                continue
+            results = runs.get(task_id, [])
+            latest = action_results(task, results)
+            ended_at = task_end(task, events, self.admitted_at(task_id))
+            state, note = line.state, line.note
+            if state not in INACTIVE:
+                state, note = run_state(task, latest, task_id in rejected)
+                if state in (LineState.DONE, LineState.PARTIAL) and user_changed(task, results, events, ended_at):
+                    state = LineState.USER_CHANGED
+
+            ended, end_state = line_end(
+                task, ended_at, now, latest, restores.get(task_id), cancelled.get(task_id),
+            )
+            all_ended &= ended or task_id in rejected
+            lines.append(line.model_copy(update={
+                "state": state, "note": note, "end_state": end_state or line.end_state,
+            }))
+
+        status = EpisodeStatus.NOTIFIED
+        if all_ended:
+            status = EpisodeStatus.CLOSED
+        elif all(line.when is None for line in lines):
+            status = EpisodeStatus.HELD
+        if (
+            lines != self.card.lines
+            or self.waiting_for(lines) != self.card.summary.waiting_for
+            or self.episode.status != status
+        ):
+            self.update_card(lines, stopped=self.card.stopped)
+        self.episode = self.episode.model_copy(update={"status": status})
 
     def react(self, reaction: Reaction):
         if self.card.stopped:
@@ -282,7 +390,7 @@ class Replay:
             )
         state = LineState.SCHEDULED if line.when is not None else LineState.HELD
         return line.model_copy(
-            update={"task_id": new_id, "checked": True, "state": state}
+            update={"task_id": new_id, "checked": True, "state": state, "end_state": None, "note": None}
         )
 
     def card_templates(self):
@@ -313,18 +421,18 @@ class Replay:
                     self.update_card(lines)
         self.paused = paused
 
-    def put_calendar(self, calendar: Calendar):
+    def find_calendar_time(self):
         found = self.load(Card, "card.found.json")
         if (
             not found
             or self.calendar_applied
             or self.paused
-            or self.calendar != calendar
         ):
             return
         plan = self.load(Plan, "plan.v2.json")
         if (
-            wire(self.plan) == self.files["plan.v1.json"]
+            not self.live
+            and wire(self.plan) == self.files["plan.v1.json"]
             and wire(self.card) == self.files["card.held.json"]
         ):
             self.set_plan(plan)
@@ -352,6 +460,7 @@ class Replay:
                 return
             self.clock = max(self.clock, datetime.fromisoformat(plan.sent_at))
             self.replace_plan(
+                sent_at=plan.sent_at if self.live else None,
                 tasks=[
                     *added,
                     *self.plan.tasks,
@@ -422,7 +531,7 @@ class Replay:
         ):
             return False
         if any(
-            self.events.get(event["event_id"]) != event
+            event["event_id"] not in self.events or wire(self.events[event["event_id"]]) != event
             for event in self.files["events.json"]
         ):
             return False
