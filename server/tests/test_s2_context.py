@@ -158,9 +158,9 @@ def test_t57_kb_down_judged_with_error(env):
         assert e.intent["bundles"] == []
 
 
-def test_runner_stores_context():
+def test_run_stores_context():
     ep = ep9031()
-    runner.after_s1(ep)
+    assert s2_context.run(ep) is True
     with session_scope() as s:
         e = s.get(Episode, ep)
         assert e.stage == "s2" and e.context["for_intent"]["order_time"]["weekday"] == "목"
