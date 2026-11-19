@@ -226,6 +226,15 @@ internals is not acceptance evidence.
 
 ## 4. Open items
 
+- **Contract deviation — approval requested from the contract co-owner (Server):**
+  `contracts/schemas/plan.json` defines `or_time` as "End at this time if the end
+  event never comes", and `contracts/rules.md` restores what SPIRA still owns at
+  the end. H7-R2 and HUB-AT16 deliberately do not restore at a time fallback:
+  the plan cannot yet say which lines are protective (O-04/SP-11), and releasing
+  a child lock or a disabled appliance on a timer is unsafe. Approval accepts
+  this interim Hub behavior until the contract can mark protective lines
+  (SP-11) and carry a "withheld" restore status (SP-15). Rejection changes
+  H7-R2 and HUB-AT16 before any Hub code depends on them.
 - **O-01 / PQ-01 — professor:** confirm whether class-A appliances may be
   modelled as reporting local panel operation. Until answered, this is a visible
   virtual-device assumption; Matter and unverified physical devices are class B.
