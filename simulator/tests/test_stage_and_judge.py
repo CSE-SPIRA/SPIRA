@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from conftest import LIGHT, PLUG, fixture_json
+from conftest import LIGHT, PLUG, Wire, fixture_json
 from fastapi.testclient import TestClient
 from spira_simulator.api import create_app
 from spira_simulator.profile import Profile, load_profile, public_value
@@ -276,7 +276,7 @@ def test_raw_home_signals_and_wall_clock_sim_at18_local_evidence(tmp_path, monke
 
 
 def test_sim_at10_read_only_faint_waiting_and_item_only_episode(tmp_path):
-    source = SourceStub(fixture_json("ep_9031/plan.v3.json"))
+    source = SourceStub(fixture_json("ep_9031/plan.v1.json"))
     with TestClient(operator_app(tmp_path, plan_source=source)) as client:
         initial = client.get("/sim/snapshot").json()
         viewer = client.get("/sim/viewer")
@@ -285,7 +285,16 @@ def test_sim_at10_read_only_faint_waiting_and_item_only_episode(tmp_path):
         script = client.get("/sim/stage.js").text
         assert "Stale" in script and "Readback missing" in script
         assert "border: 1px dashed #88998e" in client.get("/sim/style.css").text
+        original = client.get("/sim/overlay").json()
+        assert any(row["task_id"] == "t_clean#1" for row in original["preparation"])
+        source.body = fixture_json("ep_9031/pull.json")
         overlay = client.get("/sim/overlay").json()
+        assert overlay["errors"] == []
+        assert not any(row["task_id"] == "t_clean#1" for row in overlay["preparation"])
+        protective_devices = {
+            row["device"] for row in overlay["preparation"] if row["protective"]
+        }
+        assert protective_devices == {"cooktop_01", "plug_kettle"}
         assert any(
             row["device"] == "light_01" and row["wait"] == "guest_arrived"
             for row in overlay["preparation"]
@@ -296,7 +305,20 @@ def test_sim_at10_read_only_faint_waiting_and_item_only_episode(tmp_path):
         )
         source.body = fixture_json("ep_9150/plan.v1.json")
         grocery = client.get("/sim/overlay").json()
-        assert grocery["preparation"] == [] and len(grocery["item_notices"]) == 1
+        assert grocery["errors"] == []
+        assert grocery["preparation"] == []
+        grocery_episode = fixture_json("ep_9150/episode.json")
+        assert {
+            row["task_id"]: row["target_value"] for row in grocery["item_notices"]
+        } == {task["task_id"]: task["text"] for task in grocery_episode["item_tasks"]}
+        assert len(grocery["item_notices"]) == len(grocery_episode["item_tasks"]) == 2
+        assert all(
+            row["device"] == "fridge_01"
+            and row["command"] == "show_notice"
+            and row["wait"] == "package.brought_in"
+            and not row["protective"]
+            for row in grocery["item_notices"]
+        )
         for path in ("/sim/snapshot", "/sim/viewer", "/sim/overlay"):
             assert client.post(path, json={}).status_code == 405
         after = client.get("/sim/snapshot").json()
@@ -365,18 +387,27 @@ def test_sim_at16_mixed_stage_labels_virtual_assumption_provisional(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "status", ["restored", "skipped_user_changed", "failed", "unknown"]
+    "status", ["restored", "skipped_user_changed", "failed", "unknown", "not_needed"]
 )
 def test_restore_overlay_keeps_report_and_observation_separate(tmp_path, status):
     records = fixture_json("ep_9031/executions.json")
-    restore = next(r for r in records if r["kind"] == "restore")
-    for item in restore["items"]:
-        item["status"] = status
+    mood = next(
+        r for r in records if r["kind"] == "restore" and r["task_id"] == "t_mood#3"
+    )
+    light_report = next(item for item in mood["items"] if item["device"] == "light_01")
+    light_report["status"] = status
     with TestClient(
         operator_app(tmp_path, execution_source=SourceStub(records))
     ) as client:
-        restores = client.get("/sim/overlay").json()["restores"]
-        assert {item["status"] for item in restores} == {status}
+        overlay = client.get("/sim/overlay").json()
+        assert overlay["errors"] == []
+        restores = overlay["restores"]
+        assert {item["device"]: item["status"] for item in restores} == {
+            "light_01": status,
+            "display_01": "restored",
+            "cooktop_01": "restored",
+            "plug_kettle": "restored",
+        }
         light = next(item for item in restores if item["device"] == "light_01")
         assert (
             light["substrate"] == "physical" and light["qualification"] == "unqualified"
@@ -390,3 +421,48 @@ def test_restore_overlay_keeps_report_and_observation_separate(tmp_path, status)
             "kelvin": 3000
         }
         assert public_value(restores)
+
+
+def test_protective_fallback_overlay_preserves_observed_state(tmp_path):
+    plan = fixture_json("ep_9031/plan.v3.json")
+    records = fixture_json("ep_9031/executions.json")
+    safety_task = next(task for task in plan["tasks"] if task.get("protective"))
+    safety_report = next(
+        record
+        for record in records
+        if record["kind"] == "restore" and record["task_id"] == safety_task["task_id"]
+    )
+    safety_report["at"] = safety_task["end"]["or_time"]
+    for item in safety_report["items"]:
+        item["status"] = "withheld_end_not_observed"
+    app = operator_app(
+        tmp_path, plan_source=SourceStub(plan), execution_source=SourceStub(records)
+    )
+    with TestClient(app) as client:
+        wire = Wire(app.state.world)
+        protection = {
+            "mqtt:cooktop_01": {"child_lock": True},
+            PLUG: {"power": False},
+        }
+        before = {}
+        for target, desired in protection.items():
+            receipt, _ = wire.command(target, desired)
+            assert receipt["status"] == "ACCEPTED"
+            before[target] = wire.read(target)
+
+        overlay = client.get("/sim/overlay").json()
+        assert overlay["errors"] == [] and overlay["preparation"] == []
+        assert {item["device"]: item["status"] for item in overlay["restores"]} == {
+            "light_01": "skipped_user_changed",
+            "display_01": "restored",
+            "cooktop_01": "withheld_end_not_observed",
+            "plug_kettle": "withheld_end_not_observed",
+        }
+        tiles = {
+            tile["target"]: tile
+            for tile in client.get("/sim/snapshot").json()["devices"]
+        }
+        for target, desired in protection.items():
+            tile = tiles[target]
+            assert all(tile["values"][key] == value for key, value in desired.items())
+            assert tile["revisions"] == before[target]["revisions"]

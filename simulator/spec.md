@@ -165,8 +165,10 @@ command. It MUST NOT read Hub ownership or decide which properties should be
 restored.
 
 **E7-R2.** The viewer MUST show actual observed state separately from Hub-supplied
-restore outcomes, preserving restored, skipped-user-changed, failed, and unknown
-distinctions. An unknown external change MUST NOT be displayed as a known user.
+restore outcomes, preserving the contract's `restore_item_status` distinctions,
+including `withheld_end_not_observed`. An unknown external change MUST NOT be
+displayed as a known user. Protective release follows
+[the shared execution rules](../contracts/rules.md#execution-results-hub-08).
 
 <a id="e8"></a>
 
@@ -216,10 +218,6 @@ passing claim until an implementation change supplies bounded evidence.
 - **O-01 / PQ-01:** professor confirmation of the Class A local-operation
   reporting assumption. Keep the assumption visible and its dependent acceptance
   evidence provisional.
-- **Agreed with the Server, contracts PR pending:** plan tasks get
-  `protective: true`; protective release happens only after an observed
-  `event_end`. The Simulator emits observations; it does not decide release
-  policy.
 - **O-07:** physical Tapo handover, driver/control path, and qualification evidence
   are pending. Do not claim a physical pass from the virtual fallback.
 - **SP-14:** the real Server contract routes and end-to-end C-3 receipt are not yet

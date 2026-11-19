@@ -87,13 +87,17 @@ function fillList(id, rows, format, empty) {
 function renderOverlay(overlay) {
   const pending = (row) => {
     const value = row.target_value === null ? "" : ` · ${display(row.target_value)}`;
-    return `${row.device} · ${label(row.command)}${value} · ${label(row.wait)}`;
+    const protection = row.protective ? " · Protective" : "";
+    return `${row.device} · ${label(row.command)}${value} · ${label(row.wait)}${protection}`;
   };
   fillList("preparation", overlay.preparation, pending, "No planned household preparation");
   fillList("notices", overlay.item_notices, pending, "No pending item notices");
-  fillList("restores", overlay.restores, (row) =>
-    `${row.device} · ${label(row.status)} · ${row.substrate || "substrate unknown"} · ${label(row.qualification || "qualification unknown")} · ${time(row.at)}`,
-    "No restore reports");
+  fillList("restores", overlay.restores, (row) => {
+    const outcome = row.status === "withheld_end_not_observed"
+      ? "Release withheld (end event unobserved)"
+      : label(row.status);
+    return `${row.device} · ${outcome} · ${row.substrate || "substrate unknown"} · ${label(row.qualification || "qualification unknown")} · ${time(row.at)}`;
+  }, "No restore reports");
   byId("plan-status").textContent = overlay.errors.join(" · ");
 }
 

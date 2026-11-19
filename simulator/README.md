@@ -38,7 +38,7 @@ Read replies carry `operation_id: null` and `local_operation: false`. A stale re
 | `WORLD_EXECUTIONS` | Local path or GET URL returning a list of generated C-4 execution records. `WORLD_EXECUTIONS_TOKEN` adds a Bearer header. |
 | `WORLD_RECEIVED_URL` | Fixture Server GET endpoint returning an array of received C-3 events. `WORLD_RECEIVED_TOKEN` adds a Bearer header. Compare these under **Private evidence** on the operator page. |
 
-The grocery fixture `../contracts/fixtures/ep_9150/plan.v1.json` shows one item notice and no household preparation. The stage treats plans and execution outcomes as overlays. Its device tiles come from World readback.
+The grocery fixture `../contracts/fixtures/ep_9150/plan.v1.json` shows two item notices and no household preparation. The birthday fixture keeps the protective line in the plan after the cleaning line is switched off. The stage labels planned protective actions and shows withheld releases in the Hub restore reports. Its device tiles come from World readback.
 
 ## Tests
 
@@ -57,14 +57,14 @@ Tests use in-process protocol fakes and C-3 source stubs. The Mosquitto test use
 
 ## Needs integration
 
-- Connect the Hub device adapter to the native property and raw sensor mappings above. Verify guest-window waiting, package release, independent readback, conditional restore, and operator actions with the Hub running.
+- Connect the Hub device adapter using the default profile protocol. Verify guest-window waiting, package release, independent readback, conditional restore, and operator actions with the Hub running. Exercise both an observed protective end and a time fallback that withholds release.
 - Connect the judge to the fixture Server's actual C-3 receipt endpoint and the viewer to live plan and restore sources. Run the birthday flow through all peers, including Server `DEMO_MODE=1`.
 - Qualify the physical Tapo handover and native Matter driver path separately. The mixed-stage test exercises metadata and virtual behavior.
 
 ## Open questions
 
-- The protocol specifies `camera.package_removed`. The other raw sensor names and native properties above are profile choices to align with the Hub. For reads of undiscovered targets, the Simulator returns an unavailable report with `substrate: null`.
+- For reads of undiscovered targets, the Simulator returns an unavailable report with `substrate: null`. The protocol leaves the substrate for such reads unspecified.
 - The fixture Server receipt endpoint and live overlay formats/authentication still need confirmation. Overlays accept generated C-1 and C-4 payloads, with restore substrate from its corresponding C-4 run record when available.
 - The judge vocabulary has no verdict for combinations such as a resident reported as `spira` or a SPIRA effect reported as `unknown`. The operator lists those as unresolved. A child or guest reported as `unknown` uses `person-reported-unknown`.
 - PQ-01 is pending. The fixture timestamps are historical and are only used as plan inputs or test evidence. Live scheduling comes from Server timestamps and the Hub's wall clock.
-- Protection release after observed `event_end` (SP-11), physical Tapo qualification (O-07), and real Server interoperability (SP-14) remain open.
+- Whether a late end event releases an already-withheld protective effect remains open in the Hub spec (O-24). Physical Tapo qualification (O-07) and real Server interoperability (SP-14) also remain open.

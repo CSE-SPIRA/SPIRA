@@ -106,6 +106,7 @@ async def stage_overlay(
                             "command": action.cmd,
                             "target_value": action.value,
                             "wait": wait,
+                            "protective": task.protective is True,
                         }
                     )
 
