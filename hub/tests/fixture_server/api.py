@@ -9,7 +9,7 @@ from spira_contracts.ack import Ack
 from spira_contracts.calendar import Calendar
 from spira_contracts.calendar_response import CalendarResponse
 from spira_contracts.cards_response import CardsResponse
-from spira_contracts.common import EpisodeStatus
+from spira_contracts.common import EpisodeStatus, HomeEvent
 from spira_contracts.devices import Devices
 from spira_contracts.devices_response import DevicesResponse
 from spira_contracts.episode_list import Episode as EpisodeSummary
@@ -80,6 +80,7 @@ def create_app(
 ) -> FastAPI:
     replay = Replay(episode_id)
     snapshots: dict[str, Replay] = {} if scene_controls else {episode_id: replay}
+    historical_package_replays: dict[str, Replay] = {}
     scene_counts: dict[str, int] = {}
     pending_order: NextOrder | None = None
     active_order: NextOrder | None = None
@@ -141,6 +142,21 @@ def create_app(
         snapshot.clock = max(snapshot.clock, replay.clock)
         snapshot.project()
         replay.clock = max(snapshot.clock, replay.clock)
+
+    def release_package(event: Event) -> bool:
+        newest_first = sorted(
+            snapshots.values(),
+            key=lambda snapshot: datetime.fromisoformat(snapshot.episode.shared_at),
+            reverse=True,
+        )
+        for snapshot in newest_first:
+            if snapshot.release_package(event):
+                snapshot.events[event.event_id] = event
+                if snapshot is not replay:
+                    historical_package_replays[snapshot.plan.plan_id] = snapshot
+                    project(snapshot)
+                return True
+        return False
 
     async def app_token(request: Request):
         scheme, _, token = request.headers.get("Authorization", "").partition(" ")
@@ -217,9 +233,10 @@ def create_app(
     async def put_pause(household_id: str, request: Request):
         require_household(household_id)
         pause = await read_body(request, Pause)
-        replay.pause(pause.paused)
-        if replay.live:
-            replay.project()
+        for snapshot in snapshots.values() or (replay,):
+            snapshot.pause(pause.paused)
+            if snapshot.live:
+                project(snapshot)
         return response(Pause(household_id=household_id, paused=replay.paused))
 
     @app.get("/v1/households/{household_id}/episodes", dependencies=app_auth)
@@ -409,12 +426,14 @@ def create_app(
     @app.get("/v1/hub/plans", dependencies=hub_auth)
     async def get_plans(request: Request):
         require_household(request.query_params.get("household"), hub=True)
+        plans = [replay.plan] if snapshots and not replay.finished else []
+        plans.extend(snapshot.plan for snapshot in historical_package_replays.values())
         return response(
             PlanPull(
                 household_id=replay.household_id,
                 paused=replay.paused,
                 devices_revision=replay.devices.revision,
-                plans=[replay.plan] if snapshots and not replay.finished else [],
+                plans=plans,
             )
         )
 
@@ -468,9 +487,10 @@ def create_app(
                     if event.source != "hub" and event.source not in device_ids:
                         raise ContractError("Unknown fixture device")
                     event_ids.add(event.event_id)
-                    if snapshots:
+                    if event.type == HomeEvent.PACKAGE_BROUGHT_IN and release_package(event):
+                        changed = True
+                    elif snapshots:
                         replay.events[event.event_id] = event
-                        changed = replay.release_package(event) or changed
                 accepted.append(event.event_id)
             except ValueError:
                 event_id = raw.get("event_id") if isinstance(raw, dict) else None

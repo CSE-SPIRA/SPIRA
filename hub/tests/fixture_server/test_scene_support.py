@@ -184,6 +184,57 @@ def test_groceries_release_both_notices_on_an_eligible_package(live):
     assert client.cards()["cards"] == []
 
 
+@pytest.mark.parametrize("newer_notices_released", [True, False])
+def test_package_skips_newer_episode_without_live_waiting_tasks(newer_notices_released):
+    """server/spec.md §12.4: "Find the household's most recent episode (by `shared_at`) with
+    any **live** task whose trigger is `{event: package.brought_in, released: false}`".
+    """
+    http = TestClient(create_app(scene_controls=True, demo_mode=True), headers=HEADERS)
+    client = ContractClient(http, "ep_9150", set())
+    assert http.post(SELECT, json={"episode_id": "ep_9150"}).status_code == 202
+    assert upload(http, "groceries").status_code == 202
+    older = client.pull()["plans"][0]
+    assert all(task["trigger"]["released"] is False for task in older["tasks"])
+    assert http.post(SELECT, json={"episode_id": "ep_9031"}).status_code == 202
+    assert upload(http, "birthday").status_code == 202
+    newer = client.pull()["plans"][0]
+    at = datetime.fromisoformat(newer["sent_at"]) + timedelta(seconds=1)
+    event = {
+        "event_id": "ev_package", "household_id": client.household, "source": "hub",
+        "type": "package.brought_in", "at": at.isoformat(), "payload": {"count": 1},
+    }
+    route = "/v1/hub/events"
+    if newer_notices_released:
+        # The first package goes to the newest eligible episode.
+        assert client.request("POST", route, json=[dict(event, event_id="ev_newer")])["plans_changed"]
+        plans = client.pull()["plans"]
+        assert len(plans) == 1 and plans[0]["plan_id"] == newer["plan_id"]
+        newer = plans[0]
+        assert all(task["trigger"]["released"] for task in newer["tasks"] if task["source"] == "item")
+        event["at"] = (at + timedelta(seconds=1)).isoformat()
+    else:
+        # A rejected notice is dropped under §12.2 even if its published trigger is still waiting.
+        client.request("POST", "/v1/hub/plans/{plan_id}/ack", 204, path={"plan_id": newer["plan_id"]}, json={
+            "plan_version": newer["plan_version"], "status": "admitted", "rejected_tasks": [
+                {"task_id": task["task_id"], "reason": "unsupported_cmd"}
+                for task in newer["tasks"] if task["source"] == "item"
+            ],
+        })
+
+    assert client.request("POST", route, json=[event]) == {
+        "accepted": [event["event_id"]], "plans_changed": True, "rejected": [],
+    }
+    current, released = client.pull()["plans"]
+    assert current == newer
+    assert released["plan_id"] == older["plan_id"]
+    assert released["plan_version"] == older["plan_version"] + 1
+    trigger = {"event": event["type"], "released": True, "at": event["at"]}
+    assert released["tasks"] == [dict(task, trigger=trigger) for task in older["tasks"]]
+    assert client.request("POST", route, json=[event])["plans_changed"] is False
+    assert client.request("POST", route, json=[dict(event, event_id="ev_no_waiting")])["plans_changed"] is False
+    assert client.pull()["plans"] == [newer, released]
+
+
 @pytest.mark.parametrize("via_app", [False, True])
 def test_family_calendar_finds_time_from_the_calendar_request(via_app):
     http = TestClient(create_app("ep_9120", scene_controls=True, demo_mode=True), headers=HEADERS)

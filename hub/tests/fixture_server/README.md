@@ -35,14 +35,19 @@ family gathering. Plan times use the Server's COM-15 offsets. Turn off the
 cleaning line before running the Hub if the chosen offset puts cleaning in the
 past.
 
-An eligible `package.brought_in` publishes a newer plan with released item
-notices. Live cards update as the fixture receives Hub acknowledgements,
-events and execution results. Card polling uses its usual `since` cursor for
+A live `package.brought_in` selects the most recently shared episode with a
+live task still waiting for the package. It releases every such task in that
+episode at the event timestamp and publishes a new plan version. A package
+with no waiting task is recorded without publishing a version.
+
+Live cards update as the fixture receives Hub acknowledgements, events and
+execution results. A line waits for all expected actions to reach final
+results before projecting a final execution outcome. `partial` requires at
+least one `completed` action. Card polling uses its usual `since` cursor for
 updates, including the final card after an episode closes. The fixture keeps
 earlier episode details, committed rationale snapshots and cards until
-restart. Only the newest episode's plan is returned. Each template uses
-its committed episode and card IDs on first use. Repeating a template with a
-new order allocates fresh IDs to retain history.
+restart. Each template uses its committed episode and card IDs on first use.
+Repeating a template with a new order allocates fresh IDs to retain history.
 
 `GET /_fixture/scene/acks` uses the fixture Hub key from onboarding and returns
 the active episode's acknowledgements by version. `GET /_fixture/receipts`
@@ -55,6 +60,11 @@ retains its original shape across orders.
   replay still serves its committed final transcript and memory.
 - The family fixture has no committed rationale or episode item-detail
   snapshot. A calendar match uses the committed event identity and title.
-- The fixture links package events only to the newest episode. The contract's
-  latest-waiting-order lookup across older orders would require serving their
-  plans alongside the newest one.
+- The scene controls normally serve the newest episode's plan. When §12.4
+  selects an older episode, its updated plan stays available alongside the
+  newest plan until restart so the Hub can confirm work from both.
+- When a previously running line has only non-completed final results and
+  still has a pending action, the fixture retains `running` as requested.
+  The Server implementation falls back to `scheduled` in this case.
+- Fixed-date replay retains its existing timestamp check for packages
+  observed before the order and the committed birthday release timestamp.
