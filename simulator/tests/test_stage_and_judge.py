@@ -253,12 +253,12 @@ def test_raw_home_signals_and_wall_clock_sim_at18_local_evidence(tmp_path, monke
         for action in ("delivery", "guests_arrive", "event_end"):
             post(client, "/operator/home", action=action)
         end = datetime.now(UTC)
-        assert [signal["event_type"] for signal in signals] == [
-            "camera.package_removed",
-            "doorbell.pressed",
-            "door_lock.opened",
-            "presence.room_occupied",
-            "presence.room_empty",
+        assert [(signal["target"], signal["event_type"]) for signal in signals] == [
+            ("mqtt:sim_camera", "camera.package_removed"),
+            ("mqtt:sim_doorbell", "doorbell.pressed"),
+            ("mqtt:sim_door_lock", "door_lock.opened"),
+            ("mqtt:sim_presence", "presence.room_occupied"),
+            ("mqtt:sim_presence", "presence.room_empty"),
         ]
         assert signals[0]["payload"] == {"removed_count": 1, "remaining_count": 0}
         assert len({signal["signal_id"] for signal in signals}) == len(signals)

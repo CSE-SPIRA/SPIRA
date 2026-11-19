@@ -26,27 +26,9 @@ Use `WORLD_DB` to give a household its own database. Reopen the same file to ret
 
 ## Peer inputs and binding
 
-Set the Hub's MQTT endpoint and prefix to match the Simulator. `MQTT_HOST`, `MQTT_PORT`, and `MQTT_PREFIX` default to loopback, `1883`, and `spira/g0`. In the default profile, each device binds to `mqtt:<logical_id>`. MQTT credentials, if configured, are separate from the operator credentials.
+Set the Hub's MQTT endpoint and prefix to match the Simulator. `MQTT_HOST`, `MQTT_PORT`, and `MQTT_PREFIX` default to loopback, `1883`, and `spira/g0`. MQTT credentials, if configured, are separate from the operator credentials.
 
-The Hub sends native desired properties on `P/command`. The table shows how fixture commands map to the profile's properties. Use the fresh read's property witnesses for conditional writes.
-
-| Logical device | Fixture command | Desired properties |
-| --- | --- | --- |
-| `cleaner_01` | `clean` | `clean: {room}` starts a job. `clean: null` with the current `clean` witness stops a running job. |
-| `light_01` | `color`, `color_temp` | `color: {hue, saturation, brightness}` or `color: {kelvin}`. Both modes share the same witness. |
-| `display_01` | `play_mood`, `off` | `play_mood: {scene}` or `play_mood: null`. |
-| `cooktop_01` | `child_lock` | `child_lock: true`. |
-| `oven_01` | `set_cook_standby` | `preset: {temp_c, minutes}`. Actual cooking starts with a local device action. |
-| `fridge_01` | `show_notice` | `show_notice: <text>`. The display slot holds the latest notice. Opening the door emits `fridge.door_opened`. |
-| `plug_kettle` | `off` | `power: false`. |
-
-The operator emits these raw observations from the default profile.
-
-| Control | Native target and event |
-| --- | --- |
-| Bring package inside | `mqtt:sim_camera` · `camera.package_removed` with `removed_count: 1`, `remaining_count: 0` |
-| Guests arrive | `mqtt:sim_doorbell` · `doorbell.pressed`, `mqtt:sim_door_lock` · `door_lock.opened`, and `mqtt:sim_presence` · `presence.room_occupied` |
-| Event ends | `mqtt:sim_presence` · `presence.room_empty` |
+The [default `h_042` profile protocol](protocol.md#11-default-h_042-profile) defines the Hub command mappings and operator raw signals.
 
 Read replies carry `operation_id: null` and `local_operation: false`. A stale read retains its cached observation time. Missing readback has empty values and revisions with `available: true`. Unavailable readback uses empty values and revisions with `available: false`. The viewer shows the MQTT connection and last observed gap. Device event delivery after a gap starts with new observations.
 

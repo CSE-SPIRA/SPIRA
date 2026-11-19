@@ -309,3 +309,29 @@ The operator-side result vocabulary is:
 
 The judge MUST expose truth and results only on the operator side. It MUST NOT
 feed its verdict to Hub execution, C-3 creation, or Server memory.
+
+## 11. Default `h_042` profile
+
+In the [default profile](spira_simulator/profiles/ep_9031.json), the Hub MUST bind
+each logical device to `mqtt:<logical_id>` and use these mappings when sending
+fixture commands as desired properties on `P/command`. Use the fresh read's
+property witnesses for conditional writes.
+
+| Logical device | Fixture command | Desired properties |
+| --- | --- | --- |
+| `cleaner_01` | `clean` | `clean: {room}` starts a job. `clean: null` with the current `clean` witness stops a running job. |
+| `light_01` | `color`, `color_temp` | `color: {hue, saturation, brightness}` or `color: {kelvin}`. Both modes share the same witness. |
+| `display_01` | `play_mood`, `off` | `play_mood: {scene}` or `play_mood: null`. |
+| `cooktop_01` | `child_lock` | `child_lock: true`. |
+| `oven_01` | `set_cook_standby` | `preset: {temp_c, minutes}`. Actual cooking starts with a local device action. |
+| `fridge_01` | `show_notice` | `show_notice: <text>`. The display slot holds the latest notice. Opening the door emits `fridge.door_opened`. |
+| `plug_kettle` | `off` | `power: false`. |
+
+The default profile's operator controls MUST emit these raw observations as
+`event_signal` messages.
+
+| Control | Native target and event |
+| --- | --- |
+| Bring package inside | `mqtt:sim_camera` · `camera.package_removed` with `removed_count: 1`, `remaining_count: 0` |
+| Guests arrive | `mqtt:sim_doorbell` · `doorbell.pressed`, `mqtt:sim_door_lock` · `door_lock.opened`, and `mqtt:sim_presence` · `presence.room_occupied` |
+| Event ends | `mqtt:sim_presence` · `presence.room_empty` |
