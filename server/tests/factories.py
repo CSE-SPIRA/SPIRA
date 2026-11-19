@@ -26,7 +26,8 @@ def png(seed: int = 0) -> bytes:
 
 def household(hid: str = "h_042", types: list[str] | None = None, paused: bool = False) -> str:
     with session_scope() as s:
-        s.add(Household(id=hid, household_types=types if types is not None else ["3~4인", "영유아 자녀", "맞벌이"],
+        default = ["3~4인", "부부·커플", "영유아 자녀", "맞벌이"]
+        s.add(Household(id=hid, household_types=types if types is not None else default,
                         paused=paused, hub_key_hash=new_hub_key()[1]))
     return hid
 

@@ -68,7 +68,7 @@ def test_t4_ep9031_items(mock_llm, app_headers):
     assert by_type["컵케이크 믹스"].qty is None
     assert by_type["케이크 토퍼"].attributes == [{"key": "테마", "value": "디즈니 공주", "source": "디즈니 공주"}]
     e = _episode(ep)
-    assert (e.stage, e.status) == ("s1", "reading")         # S2-S5 not installed in this PR
+    assert (e.stage, e.status) == ("s2", "reading")         # S3-S5 not installed yet
     with session_scope() as s:
         assert s.execute(select(EpisodeImage).where(EpisodeImage.read.is_(False))).first() is None
         paths = [i.path for i in s.execute(select(EpisodeImage)).scalars()]
