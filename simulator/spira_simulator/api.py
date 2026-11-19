@@ -46,11 +46,13 @@ class FaultAction(OperatorInput):
     mode: str
 
 
-def env_source(name: str, token_name: str, *, hub_key: bool = False) -> Source | None:
+def env_source(
+    name: str, token_name: str | None = None, *, hub_key: bool = False
+) -> Source | None:
     value = os.getenv(name)
     if not value:
         return None
-    token = os.getenv(token_name)
+    token = os.getenv(token_name) if token_name else None
     headers = None
     if token:
         headers = (
@@ -117,13 +119,17 @@ def create_app(
             app.state.broker = broker
             app.state.protocol = protocol
             app.state.operator_token = token if enabled else None
-            app.state.received = received_source or env_source(
+            hub_state = env_source("WORLD_HUB_STATE_URL")
+            app.state.evidence_from_hub = hub_state is not None
+            app.state.received = hub_state or received_source or env_source(
                 "WORLD_RECEIVED_URL", "WORLD_RECEIVED_TOKEN"
             )
-            app.state.plans = plan_source or env_source(
-                "WORLD_PLANS", "WORLD_PLANS_TOKEN", hub_key=True
+            app.state.plans = (
+                plan_source
+                or env_source("WORLD_PLANS_URL", "WORLD_PLANS_TOKEN", hub_key=True)
+                or env_source("WORLD_PLANS", "WORLD_PLANS_TOKEN", hub_key=True)
             )
-            app.state.executions = execution_source or env_source(
+            app.state.executions = hub_state or execution_source or env_source(
                 "WORLD_EXECUTIONS", "WORLD_EXECUTIONS_TOKEN"
             )
             timer = asyncio.create_task(jobs(protocol))
@@ -185,7 +191,10 @@ def create_app(
     async def overlay(request: Request):
         state = request.app.state
         return await stage_overlay(
-            state.world.profile.household_id, state.plans, state.executions
+            state.world.profile.household_id,
+            state.plans,
+            state.executions,
+            from_hub=state.evidence_from_hub,
         )
 
     @application.get("/sim/viewer")
@@ -280,6 +289,7 @@ def create_app(
                 state.world.profile.household_id,
                 state.world.store.truth(),
                 state.received,
+                from_hub=state.evidence_from_hub,
             )
         except (OSError, ValueError, httpx.HTTPError) as exc:
             log.info("Received C-3 source could not be read")

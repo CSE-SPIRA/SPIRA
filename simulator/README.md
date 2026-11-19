@@ -37,9 +37,15 @@ Read replies carry `operation_id: null` and `local_operation: false`. A stale re
 
 | Setting | Input |
 | --- | --- |
-| `WORLD_PLANS` | Local path or GET URL returning a generated C-1 `Plan` or `PlanPull`. For `GET /v1/hub/plans?household=h_042`, set `WORLD_PLANS_TOKEN` to the Hub key sent in `X-API-Key`. |
+| `WORLD_PLANS_URL` | Live Server `GET /v1/hub/plans?household=h_042` URL. This takes precedence over `WORLD_PLANS`. Set `WORLD_PLANS_TOKEN` to the household's Hub key, sent in `X-API-Key`. |
+| `WORLD_PLANS` | Local path or GET URL returning a generated C-1 `Plan` or `PlanPull`. Existing URLs continue to accept `WORLD_PLANS_TOKEN`. |
+| `WORLD_HUB_STATE_URL` | Hub dashboard `GET /state` URL for the same household. When set, it supplies both the judge's C-3 events and the viewer's execution overlay. |
 | `WORLD_EXECUTIONS` | Local path or GET URL returning the fixture Server's `/_fixture/receipts` object with a C-4 `executions` array. A standalone C-4 array also works. `WORLD_EXECUTIONS_TOKEN` adds an optional Bearer header. |
 | `WORLD_RECEIVED_URL` | Fixture Server `/_fixture/receipts` GET URL. The judge reads the received C-3 batches in `events`. A flat C-3 array also works. `WORLD_RECEIVED_TOKEN` adds an optional Bearer header. Compare the events under **Private evidence** on the operator page. |
+
+Leave `WORLD_HUB_STATE_URL` unset to use fixture receipts for evidence. For a live demo, set it to the Hub dashboard's `/state` URL and set `WORLD_PLANS_URL` to the Server's plan-pull URL for the selected household. Use `household=h_051` with the family-gathering profile. Supply the Hub key via `WORLD_PLANS_TOKEN` in your local environment and start the Simulator with the same process command above. A configured input that fails reports an error without switching to fixture data.
+
+The attribution judge labels its source as `fixture_receipts` or `hub_state`. In Hub mode, it compares only device events the Hub marks delivered. Pending device events appear under `not_delivered` with the Hub's delivery error when available. In the viewer, local run outcomes from Hub task stories clear the corresponding waiting entries. Restore reports retain their outcome and show **pending delivery** when the Hub has yet to confirm delivery.
 
 The grocery fixture `../contracts/fixtures/ep_9150/plan.v1.json` shows two item notices and no household preparation. The birthday fixture keeps the protective line in the plan after the cleaning line is switched off. The stage labels planned protective actions and shows withheld releases in the Hub restore reports. Its device tiles come from World readback.
 
@@ -53,7 +59,7 @@ Counts cover the first valid command arrival for each operation ID, including re
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/pytest
 ```
 
-Tests use in-process protocol fakes, source stubs, and a fixture Server receipt captured from the live birthday scene. The Mosquitto test uses a separate local broker when available. Tests marked `provisional` include Class A evidence pending PQ-01.
+Tests use in-process protocol fakes, HTTP stubs for both evidence sources, and a fixture Server receipt captured from the live birthday scene. The Mosquitto test uses a separate local broker when available. Tests marked `provisional` include Class A evidence pending PQ-01.
 
 | Acceptance | Simulator evidence |
 | --- | --- |
@@ -70,6 +76,8 @@ Tests use in-process protocol fakes, source stubs, and a fixture Server receipt 
 
 ## Open questions
 
+- E6-R3 and protocol §10 still describe fixture Server receipts as the required judge evidence. Should the Hub dashboard projection count toward SIM-AT-02, or should acceptance continue to require a Server-side receipt?
+- `/state` exposes the latest 100 event records and latest 100 restore reports with their delivery flags. Task stories expose run outcomes without C-4 run delivery status. Would future acceptance need run delivery evidence or older dashboard records?
 - For reads of undiscovered targets, the Simulator returns an unavailable report with `substrate: null`. The protocol leaves the substrate for such reads unspecified.
 - The judge vocabulary has no verdict for combinations such as a resident reported as `spira` or a SPIRA effect reported as `unknown`. The operator lists those as unresolved. A child or guest reported as `unknown` uses `person-reported-unknown`.
 - PQ-01 is pending. The fixture timestamps are historical and are only used as plan inputs or test evidence. Live scheduling comes from Server timestamps and the Hub's wall clock.
