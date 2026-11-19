@@ -14,6 +14,7 @@ from hub.tests.fixture_server import create_app as fixture_app
 from .peers import Clock, Scenario, Stub, action, fixture, light_config, task
 
 INSTALLATION = Path(__file__).resolve().parents[2] / "installation.example.json"
+PURIFIER_INITIAL = {"mode": "CLEAN", "wind_strength": "MID"}
 
 
 def run(test):
@@ -37,6 +38,11 @@ def install_birthday(scenario):
         "oven_01": {"preset": None, "in_use": False},
         "fridge_01": {"show_notice": None},
         "plug_kettle": {"power": True},
+        "air_purifier_01": PURIFIER_INITIAL,
+        "dishwasher_01": {"course": None, "delay_hours": None},
+        "washer_01": {"course": None},
+        "plug_iron": {"power": False},
+        "plug_router": {"power": True},
     }
     for device in config["devices"]["devices"]:
         logical = device["id"]
@@ -820,9 +826,14 @@ def test_hub_at19_fixture_runtime_replays_remaining_episodes(tmp_path, episode, 
                 "speaker_01": {"play": "mix", "stop": {"fixed": {"mix": None}}},
                 "oven_01": {"set_cook_standby": "preset"},
                 "fridge_01": {"show_notice": "show_notice"},
+                "air_purifier_01": {
+                    "mode": {"properties": {"mode": "mode"}},
+                    "wind_strength": {"properties": {"wind_strength": "wind_strength"}},
+                },
             }
             hub.write(devices, {name: {"target": f"mqtt:{name}", "commands": mapping}
                                 for name, mapping in commands.items()})
+            hub.world.add("mqtt:air_purifier_01", "purifier", PURIFIER_INITIAL, ["mode", "wind_strength"])
         hub.boot()
         await hub.reconcile()
         await hub.cycle()
