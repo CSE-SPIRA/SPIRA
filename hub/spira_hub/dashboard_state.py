@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 from .contracts import offset_time, packet_body
+from .dashboard_words import device_words, event_words, plan_words, restore_words, run_words
 from .plans import action_keys, trigger_match
 
 RUN_PROBLEMS = {"failed", "unknown", "unverifiable"}
@@ -19,15 +20,17 @@ def state_view(runtime):
     attempts_by_task = defaultdict(list)
     for attempt in attempts:
         attempts_by_task[attempt["plan"], attempt["task"]].append(attempt)
+    outbox = {kind: store.evidence(kind, limit=-1) for kind in ("ack", "event", "execution")}
+    executions = [evidence(row) for row in reversed(outbox["execution"])]
     restores = []
     restores_by_task = defaultdict(list)
-    for row in reversed(store.evidence("execution", limit=-1)):
-        result = packet_body(row)
+    for row in executions:
+        result = row["packet"]
         if result["kind"] == "restore":
-            restores.append(evidence(row, result))
+            restores.append(row)
             restores_by_task[result["plan_id"], result["task_id"]].append(result)
 
-    history, admissions = plan_history(store)
+    history, admissions, task_counts = plan_history(store, outbox["ack"])
     summaries = {}
     for version in history:
         plan_id = version["plan_id"]
@@ -39,8 +42,11 @@ def state_view(runtime):
         }
 
     waiting, stories = [], []
-    changes = person_changes(store, attempts)
-    for task in store.tasks():
+    facts = [(row["target"], json.loads(row["body"])) for row in store.facts()]
+    events = [evidence(row) for row in reversed(outbox["event"])]
+    changes = person_changes(facts)
+    tasks = store.tasks()
+    for task in tasks:
         plan_id, task_id = key = task["plan"], task["id"]
         task_attempts = attempts_by_task[key]
         results = restores_by_task[key]
@@ -63,8 +69,17 @@ def state_view(runtime):
 
     return {
         "waiting": waiting, "commands": [command(row) for row in reversed(attempts[-100:])],
-        "events": [evidence(row) for row in store.evidence("event")], "restoration": restores[-100:][::-1],
+        "events": events[-100:][::-1], "restoration": restores[-100:][::-1],
         "plan_history": history, "plan_summaries": list(summaries.values()), "task_stories": stories,
+        "household": runtime.server.household,
+        "current_plans": [
+            {"plan_id": plan_id, "plan_version": summary["plan_version"],
+             "task_count": summary["device_actions"] + summary["notices"]}
+            for plan_id, summary in summaries.items() if summary["current"]
+        ],
+        "server_confirmed": runtime.reconciled and runtime.last_pull_error is None,
+        "ledger": ledger_view(runtime.installation, history, task_counts, tasks, attempts, facts, events, executions,
+                              {row["id"]: row["seq"] for rows in outbox.values() for row in rows}),
         "devices": device_bindings(runtime), "paused": snapshot.get("paused"),
         "server_peer": runtime.server.fixture, "server_error": runtime.last_pull_error,
         "registry_error": runtime.config_error, "observation_gap_at": runtime.observations.gap_at,
@@ -103,11 +118,12 @@ def summarize(summary, task, actions, tried, work, results):
         summary["withheld"] += "withheld_end_not_observed" in items
 
 
-def plan_history(store):
+def plan_history(store, ack_rows):
     versions = store.plan_versions()
     history = []
     admissions = defaultdict(list)
-    for row in reversed(store.evidence("ack", limit=-1)):
+    task_counts = {}
+    for row in reversed(ack_rows):
         plan_id, _ = row["id"].rsplit("/", 1)
         ack = evidence(row)
         version = ack["packet"]["plan_version"]
@@ -121,6 +137,7 @@ def plan_history(store):
         })
         if not saved:
             continue
+        task_counts[plan_id, version] = len(saved["triggers"])
         step = {"at": received_at, "plan_version": version}
         changes = saved["changes"]
         changed_triggers = {item["task_id"] for item in changes["triggers_changed"]}
@@ -136,17 +153,14 @@ def plan_history(store):
             admissions[plan_id, item["task_id"]].append({
                 "kind": "cancelled", "restore": item["restore"], **step,
             })
-    return history, admissions
+    return history, admissions, task_counts
 
 
-def person_changes(store, attempts):
-    sent = [offset_time(row["sent_at"]).timestamp() for row in attempts if row["before"] is not None]
+def person_changes(facts):
     changes = defaultdict(list)
-    if sent:
-        for row in store.facts(earliest=min(sent)):
-            event = json.loads(row["body"])
-            if event["payload"].get("by") == "user":
-                changes[event["source"], row["target"]].append(event)
+    for target, event in facts:
+        if event["payload"].get("by") == "user":
+            changes[event["source"], target].append(event)
     return changes
 
 
@@ -217,9 +231,111 @@ def command(row):
     }
 
 
-def evidence(row, body=None):
+def evidence(row):
     return {"delivered": bool(row["delivered"]), "delivery_error": row["error"],
-            "packet": packet_body(row) if body is None else body}
+            "packet": packet_body(row)}
+
+
+def ledger_view(installation, history, task_counts, tasks, attempts, facts, events, executions, sequence):
+    devices = {device.id: device for device in installation.devices.devices}
+    task_devices = {
+        (task["plan"], task["id"]): list(dict.fromkeys(action["device"] for action in task["body"]["actions"]))
+        for task in tasks if task["body"]
+    }
+    rows = []
+
+    def add(kind, at, label, what, by, reports, **details):
+        order = min((sequence[report["id"]] for report in reports), default=float("inf"))
+        rows.append((offset_time(at), order, {
+            "kind": kind, "at": at, "label": label, "what": what, "by": by, "reports": reports, **details,
+        }))
+
+    for version in history:
+        plan_id, number = version["plan_id"], version["plan_version"]
+        count = task_counts.get((plan_id, number))
+        what = plan_words(version, count, task_devices, devices)
+        add("plan", version["received_at"], "—", what, "hub",
+            [delivery_report("ack", f"{plan_id}/{number}", version["ack"])],
+            plan_id=plan_id, plan_version=number, task_count=count)
+
+    # Show an operation and its correlated C-3 reports as one happening.
+    event_operations = {fact["event_id"]: fact["operation_id"] for _, fact in facts if "operation_id" in fact}
+    operation_events, event_rows = defaultdict(list), {}
+    for row in events:
+        event, = row["packet"]
+        event_id = event["event_id"]
+        event_rows[event_id] = row
+        if operation := event_operations.get(event_id):
+            operation_events[operation].append(event_id)
+
+    attempts_by_operation = {attempt["op"]: attempt for attempt in attempts}
+    attempts_by_device = defaultdict(list)
+    for attempt in attempts:
+        attempts_by_device[attempt["plan"], attempt["task"], attempt["action"]["device"]].append(attempt)
+    reported_operations = set()
+
+    def reports_for_operation(operation):
+        return [delivery_report("event", event_id, event_rows.pop(event_id))
+                for event_id in operation_events.pop(operation, [])]
+
+    for row in executions:
+        result = row["packet"]
+        kind, at = result["kind"], result["at"]
+        report = delivery_report(kind, result["result_id"], row)
+        if kind == "run":
+            operation = result["operation_id"]
+            attempt = attempts_by_operation.get(operation)
+            device, cmd, status = result["device"], result["cmd"], result["status"]
+            value = attempt["action"].get("value") if attempt else None
+            add("run", at, device_words(device, devices), run_words(cmd, value, status), "spira",
+                [report, *reports_for_operation(operation)], device=device, status=status,
+                operation_id=operation, acknowledgement=attempt["ack"] if attempt else None,
+                read_back=result.get("observed"))
+            reported_operations.add(operation)
+            continue
+        for item in result["items"]:
+            device, status = item["device"], item["status"]
+            related = attempts_by_device[result["plan_id"], result["task_id"], device]
+            writes = [attempt for attempt in related if attempt["kind"] == "restore"
+                      and attempt["status"] != "dispatching"
+                      and offset_time(attempt["sent_at"]) <= offset_time(at)]
+            originals = [attempt for attempt in related if attempt["kind"] == "run"]
+            reports = [report]
+            for attempt in writes:
+                reports.extend(reports_for_operation(attempt["op"]))
+                reported_operations.add(attempt["op"])
+            add("restore", at, device_words(device, devices), restore_words(status, writes, originals),
+                "spira" if status == "restored" else "hub", reports, device=device, status=status,
+                commands=[command(attempt) for attempt in writes])
+
+    for attempt in attempts:
+        if attempt["op"] in reported_operations:
+            continue
+        entry = command(attempt)
+        device, status = entry["device"], entry["status"]
+        if entry["kind"] == "restore":
+            what = restore_words(status, [attempt], [])
+        else:
+            action = attempt["action"]
+            what = run_words(action["cmd"], action.get("value"), status)
+        read_back = entry["read_back"]
+        add(entry["kind"], entry["at"], device_words(device, devices), what, "spira",
+            reports_for_operation(entry["operation_id"]), device=device, status=status,
+            operation_id=entry["operation_id"], acknowledgement=entry["acknowledgement"],
+            read_back=read_back["values"] if read_back else None)
+
+    for event_id, row in event_rows.items():
+        event, = row["packet"]
+        source = event["source"]
+        label, what = event_words(event, devices)
+        by = "hub" if source == "hub" else event["payload"]["by"]
+        add("event", event["at"], label, what, by, [delivery_report("event", event_id, row)],
+            device=None if source == "hub" else source, event_type=event["type"])
+    return [row for _, _, row in sorted(rows, key=lambda entry: entry[:2])]
+
+
+def delivery_report(kind, packet_id, row):
+    return {"kind": kind, "id": packet_id, "delivered": row["delivered"], "delivery_error": row["delivery_error"]}
 
 
 def device_bindings(runtime):
