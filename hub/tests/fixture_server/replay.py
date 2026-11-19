@@ -229,10 +229,7 @@ class Replay:
             if any(task.task_id == task_id for task in plan.tasks)
         )
 
-    def project(self):
-        """Refresh the projection after a receipt or when the App polls wall time."""
-        tasks = {task.task_id: task for plan in self.plans.values() for task in plan.tasks}
-        cancelled = {entry.task_id: entry.restore for entry in self.plan.cancelled}
+    def rejected_tasks(self) -> set[str]:
         rejected = set()
         for version, plan in self.plans.items():
             if (ack := self.acks.get(version)) is not None:
@@ -241,6 +238,13 @@ class Replay:
                     rejected.update(submitted)
                 else:
                     rejected.update(submitted.intersection(item.task_id for item in ack.rejected_tasks))
+        return rejected
+
+    def project(self):
+        """Refresh the projection after a receipt or when the App polls wall time."""
+        tasks = {task.task_id: task for plan in self.plans.values() for task in plan.tasks}
+        cancelled = {entry.task_id: entry.restore for entry in self.plan.cancelled}
+        rejected = self.rejected_tasks()
 
         runs: dict[str, list[RunResult]] = {}
         restores: dict[str, RestoreResult] = {}
@@ -255,7 +259,7 @@ class Replay:
         for item in self.episode.item_tasks:
             task = tasks[item.task_id]
             latest = action_results(task, runs.get(item.task_id, []))
-            state, _ = run_state(task, latest, item.task_id in rejected)
+            state, _ = run_state(task, latest, item.task_id in rejected, item.state)
             if item.task_id in cancelled and not self.started(item.task_id):
                 state = LineState.CANCELLED
             item_tasks.append(item.model_copy(update={"state": state}))
@@ -279,7 +283,7 @@ class Replay:
             ended_at = task_end(task, events, self.admitted_at(task_id))
             state, note = line.state, line.note
             if state not in INACTIVE:
-                state, note = run_state(task, latest, task_id in rejected)
+                state, note = run_state(task, latest, task_id in rejected, state)
                 if state in (LineState.DONE, LineState.PARTIAL) and user_changed(task, results, events, ended_at):
                     state = LineState.USER_CHANGED
 
@@ -488,35 +492,35 @@ class Replay:
         )
 
     def release_package(self, event: Event):
+        if self.paused or self.finished:
+            return False
         brought_in = datetime.fromisoformat(event.at)
-        if (
-            event.type != "package.brought_in"
-            or self.paused
-            or self.finished
-            or brought_in < datetime.fromisoformat(self.episode.shared_at)
-        ):
+        if not self.live and brought_in < datetime.fromisoformat(self.episode.shared_at):
+            return False
+        rejected = self.rejected_tasks()
+        waiting = {
+            task.task_id for task in self.plan.tasks
+            if task.task_id not in rejected
+            and isinstance(task.trigger, EventTrigger)
+            and task.trigger.event == event.type
+            and task.trigger.released is False
+        }
+        if not waiting:
             return False
         release_at = event.at
         if not self.live and "plan.v3.json" in self.files:
             # The fixed birthday replay uses the committed release time even
             # when a virtual Hub supplies its own event ID and timestamp.
-            if wire(self.plan) == self.files["plan.v2.json"]:
+            if not rejected and wire(self.plan) == self.files["plan.v2.json"]:
                 self.set_plan(self.load(Plan, "plan.v3.json"))
                 return True
             release_at = self.files["events.json"][0]["at"]
+        trigger = EventTrigger(event=event.type, released=True, at=release_at)
         tasks = [
-            task.model_copy(update={
-                "trigger": task.trigger.model_copy(update={"released": True, "at": release_at})
-            })
-            if task.source == "item"
-            and isinstance(task.trigger, EventTrigger)
-            and task.trigger.event == event.type
-            and task.trigger.released is False
-            else task
+            task.model_copy(update={"trigger": trigger}) if task.task_id in waiting else task
             for task in self.plan.tasks
+            if task.task_id not in rejected
         ]
-        if tasks == self.plan.tasks:
-            return False
         if not self.live:
             self.clock = max(self.clock, brought_in)
         self.replace_plan(tasks=tasks)
