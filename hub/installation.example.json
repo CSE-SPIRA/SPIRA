@@ -1,0 +1,303 @@
+{
+  "devices": {
+    "household_id": "h_042",
+    "revision": 3,
+    "updated_at": "2026-10-01T10:00:00+09:00",
+    "devices": [
+      {
+        "id": "cleaner_01",
+        "type": "cleaner",
+        "room": "거실",
+        "substrate": "virtual",
+        "commands": [
+          {
+            "cmd": "clean",
+            "value_schema": {
+              "room": {
+                "enum": [
+                  "거실",
+                  "주방"
+                ],
+                "default": "거실"
+              }
+            }
+          }
+        ],
+        "events": [
+          "started",
+          "completed"
+        ],
+        "never": [],
+        "noisy": true
+      },
+      {
+        "id": "light_01",
+        "type": "light",
+        "room": "거실",
+        "substrate": "virtual",
+        "commands": [
+          {
+            "cmd": "color",
+            "value_schema": {
+              "hue": {
+                "range": [
+                  0,
+                  360
+                ],
+                "default": 40
+              },
+              "saturation": {
+                "range": [
+                  0,
+                  100
+                ],
+                "default": 30
+              },
+              "brightness": {
+                "range": [
+                  0,
+                  100
+                ],
+                "default": 70
+              }
+            }
+          },
+          {
+            "cmd": "color_temp",
+            "value_schema": {
+              "kelvin": {
+                "range": [
+                  2700,
+                  6500
+                ],
+                "default": 3000
+              }
+            }
+          }
+        ],
+        "events": [
+          "changed"
+        ],
+        "never": [],
+        "noisy": false
+      },
+      {
+        "id": "display_01",
+        "type": "display",
+        "room": "거실",
+        "substrate": "virtual",
+        "commands": [
+          {
+            "cmd": "play_mood",
+            "value_schema": {
+              "scene": {
+                "enum": [
+                  "kids_party",
+                  "party",
+                  "calm",
+                  "cinema"
+                ],
+                "default": "calm"
+              }
+            }
+          },
+          {
+            "cmd": "off"
+          }
+        ],
+        "events": [
+          "started",
+          "stopped",
+          "changed"
+        ],
+        "never": [
+          "purchase"
+        ],
+        "noisy": true
+      },
+      {
+        "id": "cooktop_01",
+        "type": "cooktop",
+        "room": "주방",
+        "substrate": "virtual",
+        "commands": [
+          {
+            "cmd": "child_lock"
+          }
+        ],
+        "events": [
+          "changed"
+        ],
+        "never": [
+          "heat"
+        ],
+        "noisy": false
+      },
+      {
+        "id": "oven_01",
+        "type": "oven",
+        "room": "주방",
+        "substrate": "virtual",
+        "commands": [
+          {
+            "cmd": "set_cook_standby",
+            "value_schema": {
+              "temp_c": {
+                "range": [
+                  40,
+                  250
+                ],
+                "default": 180
+              },
+              "minutes": {
+                "range": [
+                  1,
+                  180
+                ],
+                "default": 20
+              }
+            }
+          }
+        ],
+        "events": [
+          "started",
+          "stopped"
+        ],
+        "never": [
+          "start"
+        ],
+        "noisy": false
+      },
+      {
+        "id": "fridge_01",
+        "type": "fridge",
+        "room": "주방",
+        "substrate": "virtual",
+        "commands": [
+          {
+            "cmd": "show_notice",
+            "value_schema": "text"
+          }
+        ],
+        "events": [
+          "door_opened"
+        ],
+        "never": [],
+        "noisy": false
+      },
+      {
+        "id": "plug_kettle",
+        "type": "smart_plug",
+        "room": "주방",
+        "label": "전기포트",
+        "substrate": "virtual",
+        "commands": [
+          {
+            "cmd": "off"
+          }
+        ],
+        "events": [
+          "changed"
+        ],
+        "never": [],
+        "noisy": false
+      }
+    ]
+  },
+  "bindings": {
+    "cleaner_01": {
+      "target": "mqtt:cleaner_01",
+      "commands": {
+        "clean": "clean"
+      }
+    },
+    "light_01": {
+      "target": "mqtt:light_01",
+      "commands": {
+        "color": "color",
+        "color_temp": "color"
+      }
+    },
+    "display_01": {
+      "target": "mqtt:display_01",
+      "commands": {
+        "play_mood": "play_mood",
+        "off": {
+          "fixed": {
+            "play_mood": null
+          }
+        }
+      }
+    },
+    "cooktop_01": {
+      "target": "mqtt:cooktop_01",
+      "commands": {
+        "child_lock": {
+          "fixed": {
+            "child_lock": true
+          }
+        }
+      }
+    },
+    "oven_01": {
+      "target": "mqtt:oven_01",
+      "commands": {
+        "set_cook_standby": "preset"
+      }
+    },
+    "fridge_01": {
+      "target": "mqtt:fridge_01",
+      "commands": {
+        "show_notice": "show_notice"
+      }
+    },
+    "plug_kettle": {
+      "target": "mqtt:plug_kettle",
+      "commands": {
+        "off": {
+          "fixed": {
+            "power": false
+          }
+        }
+      }
+    }
+  },
+  "home_signals": [
+    {
+      "event": "package.brought_in",
+      "sources": [
+        {
+          "target": "mqtt:sim_camera",
+          "event_type": "camera.package_removed"
+        }
+      ],
+      "count_field": "removed_count"
+    },
+    {
+      "event": "guest_arrived",
+      "sources": [
+        {
+          "target": "mqtt:sim_doorbell",
+          "event_type": "doorbell.pressed"
+        },
+        {
+          "target": "mqtt:sim_door_lock",
+          "event_type": "door_lock.opened"
+        },
+        {
+          "target": "mqtt:sim_presence",
+          "event_type": "presence.room_occupied"
+        }
+      ]
+    },
+    {
+      "event": "event_end",
+      "sources": [
+        {
+          "target": "mqtt:sim_presence",
+          "event_type": "presence.room_empty"
+        }
+      ]
+    }
+  ]
+}
