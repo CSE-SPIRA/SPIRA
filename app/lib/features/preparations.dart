@@ -159,8 +159,8 @@ class _PreparationCard extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               card.startsAt == null
-                  ? '일정 대기 중'
-                  : '일정 · ${seoulDateTime(card.startsAt!)}',
+                  ? '일정이 잡히기를 기다리고 있어요.'
+                  : '${seoulWeekdayTime(card.startsAt!)} 일정',
             ),
             Text('${card.summary.done}/${card.summary.total} 준비'),
             if (card.summary.waitingFor case final event?)
@@ -222,14 +222,19 @@ class _PreparationLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final when = line.when;
-    final time = when?.time;
-    final event = when?.event;
-    final timing = time != null
-        ? seoulDateTime(time)
-        : event != null
-        ? eventLabel(event)
-        : null;
+    final timing = switch ((line.when?.time, line.when?.event)) {
+      (final time?, _) =>
+        card.startsAt != null &&
+                DateTime.parse(time)
+                    .isAtSameMomentAs(DateTime.parse(card.startsAt!))
+            ? '일정이 시작될 때'
+            : '${seoulWeekdayTime(time, relativeTo: card.startsAt)}에',
+      (_, wire.TriggerEvent.GUEST_ARRIVED) => '손님이 오면',
+      (_, wire.TriggerEvent.EVENT_END) => '일정이 끝나면',
+      (_, wire.TriggerEvent.PACKAGE_BROUGHT_IN) => '택배를 집 안으로 들이면',
+      _ => null,
+    };
+    final state = visibleLineLabel(line.state);
     final pending = app.linePending(card, line);
     final on = line.state == wire.LineState.OFF;
     final end = line.endState;
@@ -239,8 +244,8 @@ class _PreparationLine extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(line.text, style: Theme.of(context).textTheme.titleMedium),
-        Text(lineLabel(line.state)),
-        if (timing != null) Text('실행 예정 · $timing'),
+        if (timing != null) Text(timing),
+        if (state != null) Text(state),
         if (outcome != null) Text(outcome),
         if (note != null && note != outcome) Text(note),
         if (pending) const StatusMessage('항목 변경 확인 중…'),
@@ -262,6 +267,10 @@ class _ItemGuidance extends StatelessWidget {
 
   final wire.Episode episode;
 
+  bool _waitingForPackage(wire.ItemTaskElement task) =>
+      task.state == wire.LineState.HELD ||
+      task.state == wire.LineState.SCHEDULED;
+
   @override
   Widget build(BuildContext context) {
     final closed = episode.status == wire.EpisodeStatus.CLOSED;
@@ -269,7 +278,10 @@ class _ItemGuidance extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text('품목 안내', style: Theme.of(context).textTheme.titleLarge),
-        if (closed) const Text('품목 안내가 종료됐어요.'),
+        if (closed)
+          const Text('품목 안내가 종료됐어요.')
+        else if (episode.itemTasks.any(_waitingForPackage))
+          const Text('택배를 집 안으로 들이면 안내를 볼 수 있어요.'),
         for (final task in episode.itemTasks)
           Padding(
             padding: const EdgeInsets.only(top: 10),
@@ -277,13 +289,10 @@ class _ItemGuidance extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(task.item, style: Theme.of(context).textTheme.titleMedium),
-                if (!closed &&
-                    (task.state == wire.LineState.HELD ||
-                        task.state == wire.LineState.SCHEDULED))
-                  const Text('택배를 집 안으로 들이면 품목 안내가 표시돼요.')
-                else if (!closed && task.text != null)
-                  Text(task.text!),
-                Text(lineLabel(task.state)),
+                if (!closed && !_waitingForPackage(task)) ...[
+                  if (task.text case final text?) Text(text),
+                  Text(lineLabel(task.state)),
+                ],
               ],
             ),
           ),
