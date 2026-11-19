@@ -93,6 +93,7 @@ class RestoreItemStatus(StrEnum):
     FAILED = 'failed'
     UNKNOWN = 'unknown'
     NOT_NEEDED = 'not_needed'
+    WITHHELD_END_NOT_OBSERVED = 'withheld_end_not_observed'
 
 
 class LineState(StrEnum):
@@ -115,6 +116,7 @@ class EndState(StrEnum):
     RESTORED = 'restored'
     KEPT_USER_CHANGE = 'kept_user_change'
     RESTORE_FAILED = 'restore_failed'
+    WITHHELD = 'withheld'
     NONE = 'none'
 
 

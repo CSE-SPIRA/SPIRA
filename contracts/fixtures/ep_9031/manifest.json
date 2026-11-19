@@ -29,7 +29,7 @@
     "reactions.json": {
       "schema": "reaction.json",
       "array": true,
-      "what": "User switched off the child-safety line"
+      "what": "User switched off the cleaning line (cleans by themself)"
     },
     "plan.v2.json": {
       "schema": "plan.json",

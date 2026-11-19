@@ -3,7 +3,7 @@
   "household_id": "h_042",
   "status": "judged",
   "shared_at": "2026-11-04T19:30:41+09:00",
-  "item_count": 5,
+  "item_count": 6,
   "masked_count": 0,
   "items": [
     {
@@ -25,6 +25,12 @@
       "qty": 1
     },
     {
+      "item_id": "it_6",
+      "name": "설향 딸기 500g",
+      "type": "딸기",
+      "qty": 1
+    },
+    {
       "item_id": "it_4",
       "name": "3겹 롤휴지 30롤",
       "type": "휴지",
@@ -43,6 +49,13 @@
       "item": "바지락",
       "kind": "prep",
       "text": "소금물(물 1L에 소금 2큰술)에 담고 검은 봉지를 덮어 냉장고에서 2~3시간 해감한 뒤 드세요",
+      "state": "scheduled"
+    },
+    {
+      "task_id": "t_fridge#2",
+      "item": "딸기",
+      "kind": "storage",
+      "text": "사흘 안에 못 드시면 꼭지를 떼고 씻어 물기를 닦은 뒤 냉동해 두세요",
       "state": "scheduled"
     }
   ],

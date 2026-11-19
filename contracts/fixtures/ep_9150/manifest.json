@@ -1,5 +1,5 @@
 {
-  "$comment": "Scenario ep_9150: household h_042 (devices from ep_9031). Plain groceries -> no intent, no card. Only the clam care notice is planned (most orders look like this).",
+  "$comment": "Scenario ep_9150: household h_042 (devices from ep_9031). Plain groceries -> no intent, no card. Only care notices are planned (most orders look like this). The same 딸기 gets a plain storage notice here, while ep_9031 (birthday) says when to wash it for the party.",
   "devices": "../ep_9031/devices.json",
   "files": {
     "plan.v1.json": {
@@ -9,6 +9,10 @@
     "episode.json": {
       "schema": "episode.json",
       "what": "Episode with no card"
+    },
+    "rationale.json": {
+      "schema": "rationale.json",
+      "what": "Rationale with no intent: none_reason, unbundled, item notices"
     }
   }
 }

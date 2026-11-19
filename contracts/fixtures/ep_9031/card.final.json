@@ -9,23 +9,23 @@
     {
       "task_id": "t_clean#1",
       "text": "손님 오기 전 거실 청소",
-      "checked": true,
+      "checked": false,
       "when": {
         "time": "2026-10-17T12:30:00+09:00"
       },
-      "state": "done",
-      "end_state": "none",
+      "state": "off",
+      "end_state": null,
       "note": null
     },
     {
       "task_id": "t_safe#2",
       "text": "아이 안전 모드 (인덕션 잠금·전기포트 차단)",
-      "checked": false,
+      "checked": true,
       "when": {
         "time": "2026-10-17T13:30:00+09:00"
       },
-      "state": "off",
-      "end_state": null,
+      "state": "done",
+      "end_state": "restored",
       "note": null
     },
     {

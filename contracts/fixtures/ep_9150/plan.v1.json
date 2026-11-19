@@ -27,6 +27,28 @@
         "or_after": "12h",
         "restore": false
       }
+    },
+    {
+      "task_id": "t_fridge#2",
+      "source": "item",
+      "way": "notice",
+      "actions": [
+        {
+          "device": "fridge_01",
+          "cmd": "show_notice",
+          "value": "사흘 안에 못 드시면 꼭지를 떼고 씻어 물기를 닦은 뒤 냉동해 두세요"
+        }
+      ],
+      "trigger": {
+        "event": "package.brought_in",
+        "released": false
+      },
+      "end": {
+        "on": "fridge.door_opened",
+        "after": "2h",
+        "or_after": "12h",
+        "restore": false
+      }
     }
   ]
 }

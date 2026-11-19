@@ -30,7 +30,10 @@ How the server turns plans, acks and hub results into card line states, and what
 | `restored` | Every item `restored` or `not_needed` |
 | `kept_user_change` | At least one `skipped_user_changed` |
 | `restore_failed` | At least one `failed` / `unknown` |
+| `withheld` | At least one `withheld_end_not_observed` (protective task ended at a time fallback, left as is) and none `failed` / `unknown` |
 | `none` | The task does not restore (`end.restore: false`) |
+
+Priority when several apply: `restore_failed` > `withheld` > `kept_user_change` > `restored`.
 
 `null` until the line has ended.
 

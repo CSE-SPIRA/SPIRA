@@ -64,7 +64,8 @@
   },
   "restore_item_status": {
     "used_in": ["execution_result.items[].status"],
-    "values": ["restored", "skipped_user_changed", "failed", "unknown", "not_needed"]
+    "values": ["restored", "skipped_user_changed", "failed", "unknown", "not_needed", "withheld_end_not_observed"],
+    "notes": {"withheld_end_not_observed": "protective task ended at a time fallback: not released (rules.md)"}
   },
   "line_state": {
     "used_in": ["card.lines[].state", "episode.item_tasks[].state", "rationale.tasks[].state"],
@@ -73,7 +74,8 @@
   },
   "end_state": {
     "used_in": ["card.lines[].end_state"],
-    "values": ["restored", "kept_user_change", "restore_failed", "none"]
+    "values": ["restored", "kept_user_change", "restore_failed", "withheld", "none"],
+    "notes": {"withheld": "protective task ended without an observed end event; left as is"}
   },
   "episode_status": {
     "used_in": ["episode.status", "episode_list.episodes[].status"],

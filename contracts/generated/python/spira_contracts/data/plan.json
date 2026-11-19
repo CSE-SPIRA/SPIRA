@@ -24,6 +24,7 @@
         "task_id": {"$ref": "common.json#/$defs/TaskId"},
         "source": {"$ref": "common.json#/$defs/TaskSource"},
         "way": {"$ref": "common.json#/$defs/Way"},
+        "protective": {"type": "boolean", "default": false, "description": "Safety task (child lock, power cut). Released only when its end event is actually observed or it is cancelled; never at a time fallback (or_time / or_after). Set by the server from its command policy, never by the LLM (rules.md)."},
         "actions": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/Action"}},
         "trigger": {"$ref": "#/$defs/Trigger"},
         "end": {"$ref": "#/$defs/End"}
