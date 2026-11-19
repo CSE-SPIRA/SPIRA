@@ -183,6 +183,15 @@ Hub-computed `by` and the C-3 payload sent to the Server; and restoration versus
 skip outcomes. It MUST identify each device as virtual or physical and visibly
 mark the class-A local-operation assumption. (PC-4, PC-5, PC-6)
 
+**H8-R4.** The dashboard's first screen MUST read as "what this home saw": a
+time-ordered list of what the Hub admitted, did and observed, one row per
+happening, with the time, the device (or home event), what happened in household
+words, who by (SPIRA, a person, unknown, or the home event), and what was sent to
+the Server for it (ack, C-3 event, C-4 run or restore result, with its delivery
+state). A header MUST name the household, the current plan version and its task
+count. The engineering detail of H8-R3 MUST remain available below or on a
+second view. (PC-4, PC-6)
+
 ### H9. Restart and reconciliation
 
 **H9-R1.** On restart the Hub MUST resume future waiting work and still-owned
@@ -229,6 +238,7 @@ internals is not acceptance evidence.
 | HUB-AT17 | Waiting, accepted-but-unverified, attributed person change, Server event delivery, restored, and skipped cases are present | The dashboard's first views show the four H8-R3 groups, including exact `by`, sent C-3 content, virtual/physical labels, and assumption badge | PC-4, PC-5, PC-6 | H8-R2, H8-R3 |
 | HUB-AT18 | The three demo surfaces run with Server `DEMO_MODE` off and on | All timestamps advance on wall time; only Server-supplied absolute/duration values shorten in demo mode; Hub exposes no separate demo-clock control | PC-4 | H4-R4 |
 | HUB-AT19 | App and Hub clients replay all three contract episodes, including card reactions, C-3 events, and C-4 results | The fixture answers every App/Hub OpenAPI route with schema-valid responses; the Simulator judge reads `by` from the fixture's received C-3 records; surfaces label the peer as a fixture with no inference claim | PC-1, PC-2, PC-3, PC-4, PC-5, PC-6 | H10-R1 |
+| HUB-AT20 | Run the ep_9031 birthday scene against the fixture and open the dashboard | The first screen lists, in time order, plan admission and ack, the safety commands, guest arrival, mood commands, the oven start by a person, the light change, the end and each restore or skip, each with who and what was sent to the Server and whether it was delivered; H8-R3 detail is still reachable | PC-4, PC-6 | H8-R4 |
 
 ## 4. Open items
 
