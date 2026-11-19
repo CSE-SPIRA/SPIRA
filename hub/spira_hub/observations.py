@@ -96,7 +96,7 @@ class Observations:
                     baseline = previous
                     if previous and previous["world_revision"] == observation["world_revision"]:
                         baseline = self.baselines.get(target)
-                    self.emit_device(device, observation, baseline, operation, by)
+                    self.emit_device(device, observation, baseline, operation, by, epoch)
                     self.home_event(target, observation["event_type"], observation["occurred_at"],
                                     {}, installation)
         self.latest[target] = observation
@@ -123,12 +123,13 @@ class Observations:
         if released:
             self.store.save_attempt(attempt)
 
-    def emit_device(self, device, observation, previous, operation, by):
+    def emit_device(self, device, observation, previous, operation, by, epoch):
         kind = observation["event_type"]
         if not kind or not re.fullmatch(rf"{re.escape(device.type)}\.[a-z][a-z0-9_]*", kind):
             return
         if not kind.endswith(".changed"):
-            self.emit(kind, device.id, observation["target"], observation["occurred_at"], {"by": by})
+            self.emit(kind, device.id, observation["target"], observation["occurred_at"], {"by": by},
+                      epoch=epoch)
             return
         before = previous
         if operation and (not before or before["world_revision"] >= observation["world_revision"]):
@@ -139,7 +140,7 @@ class Observations:
             self.emit(kind, device.id, observation["target"], observation["occurred_at"], {
                 "by": by, "property": prop, "from": before["values"].get(prop) if before else None,
                 "to": values.get(prop),
-            })
+            }, epoch=epoch)
 
     def home_event(self, target, event_type, occurred_at, payload, installation):
         at = offset_time(occurred_at)
@@ -187,7 +188,7 @@ class Observations:
                     self.store.save_attempt(attempt)
         self.emit(raw["event_type"], device.id, raw["target"], raw["occurred_at"], {**payload, "by": "unknown"})
 
-    def emit(self, kind, source, target, occurred_at, payload, *, evidence_from=None):
+    def emit(self, kind, source, target, occurred_at, payload, *, evidence_from=None, epoch=None):
         at = offset_time(occurred_at)
         event = Event(
             event_id=identity("ev"), household_id=self.household, type=kind, source=source,
@@ -196,6 +197,8 @@ class Observations:
         body = wire(event)
         if evidence_from is not None:
             body["evidence_from"] = evidence_from
+        if epoch is not None:
+            body["epoch"] = epoch
         data = packet(EventBatch([event]), "event_batch.json")
         self.store.fact(target, at.timestamp(), body)
         self.store.queue(event.event_id, "event", "/v1/hub/events", at.timestamp(), data)

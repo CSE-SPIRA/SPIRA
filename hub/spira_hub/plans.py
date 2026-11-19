@@ -13,7 +13,8 @@ HOME_EVENTS = {event.value for event in HomeEvent}
 
 def admit(store, plan, malformed, installation, now):
     plan_id, version = plan.plan_id, plan.plan_version
-    if version <= store.floor(plan_id):
+    previous_version = store.floor(plan_id)
+    if version <= previous_version:
         return
     rejected = {task_id: "schema" for task_id in malformed}
     current = {}
@@ -30,6 +31,23 @@ def admit(store, plan, malformed, installation, now):
     )
     cancelled = {entry.task_id: entry.restore for entry in plan.cancelled}
     previous = {task["id"]: task for task in store.tasks(plan_id)}
+    triggers = {task_id: body["trigger"] for task_id, body in current.items()}
+    previous_triggers = {task_id: task["body"]["trigger"] for task_id, task in previous.items()
+                         if task["active"]}
+    store.save_plan_version(plan_id, version, {
+        "received_at": now.isoformat(), "triggers": triggers, "previous_version": previous_version or None,
+        "changes": {
+            "added": sorted(triggers.keys() - previous_triggers.keys()),
+            "removed": sorted(previous_triggers.keys() - triggers.keys()),
+            "cancelled": [{"task_id": task_id, "restore": restore} for task_id, restore in cancelled.items()
+                          if previous.get(task_id, {}).get("cancel") != restore],
+            "triggers_changed": [
+                {"task_id": task_id, "from": previous_triggers[task_id], "to": triggers[task_id]}
+                for task_id in sorted(previous_triggers.keys() & triggers.keys())
+                if previous_triggers[task_id] != triggers[task_id]
+            ],
+        },
+    })
     frontier = store.frontier()
     for task_id in dict.fromkeys([*current, *previous, *cancelled]):
         task = previous.get(task_id, {
@@ -94,20 +112,24 @@ def action_keys(task):
 
 
 def trigger_time(store, task, now):
+    match = trigger_match(store, task, now)
+    return offset_time(match["at"]) if match else None
+
+
+def trigger_match(store, task, now):
     if task["triggered_at"]:
-        return offset_time(task["triggered_at"])
+        return {"at": task["triggered_at"]}
     trigger = task["body"]["trigger"]
     if "time" in trigger:
-        at = offset_time(trigger["time"])
-        return at if at <= now else None
+        return {"at": trigger["time"], "how": "time"} if offset_time(trigger["time"]) <= now else None
     if trigger.get("released") is False:
         return None
     if trigger["event"] == "package.brought_in":
         # The Server alone links a brought-in package to an order.
         if trigger.get("released") is not True or not trigger.get("at"):
             return None
-        at = offset_time(trigger["at"])
-        return at if at <= now else None
+        return ({"at": trigger["at"], "how": "server_release", "event_type": trigger["event"]}
+                if offset_time(trigger["at"]) <= now else None)
     window = trigger.get("window")
     earliest = offset_time(task["admitted_at"])
     latest = now
@@ -121,26 +143,33 @@ def trigger_time(store, task, now):
             break
         if (event["source"] == "hub" and event["type"] == trigger["event"]
                 and offset_time(event.get("evidence_from", event["at"])) >= earliest):
-            return at
+            return {"at": event["at"], "how": "event", "event_type": event["type"],
+                    "event_id": event["event_id"], "source": event["source"]}
     return None
 
 
 def end_status(store, task, now, *, started_at=None):
-    """Return the disposition of the task's effect when its lifecycle ends."""
+    match = end_match(store, task, now, started_at=started_at)
+    return match["disposition"] if match else None
+
+
+def end_match(store, task, now, *, started_at=None):
+    """Return the lifecycle disposition and the condition that selected it."""
     end = task["body"]["end"]
-    if task["cancel"] is False:
-        return "relinquished"
-    if task["cancel"] is True:
-        return "restore"
+    if task["cancel"] is not None:
+        return {"at": now.isoformat(), "how": "cancelled", "restore": task["cancel"],
+                "disposition": "restore" if task["cancel"] else "relinquished"}
     # A withheld task has ended, but its claims can still serve explicit cancellation.
     if task["closed"] == "withheld_end_not_observed":
         return None
 
     absolute = end.get("or_time", end.get("time"))
     deadline = offset_time(absolute) if absolute else None
+    rule = "or_time" if "or_time" in end else "time"
     if task["triggered_at"] and "or_after" in end:
         relative = offset_time(task["triggered_at"]) + duration(end["or_after"])
-        deadline = min(deadline, relative) if deadline is not None else relative
+        if deadline is None or relative < deadline:
+            deadline, rule = relative, "or_after"
     if started_at and end.get("on"):
         earliest = max(offset_time(task["admitted_at"]), started_at)
         devices = {action["device"] for action in task["body"]["actions"]}
@@ -161,9 +190,13 @@ def end_status(store, task, now, *, started_at=None):
                 at += duration(end["after"])
             if at > now:
                 return None
-            return "restore" if end["restore"] else "relinquished"
+            return {"at": at.isoformat(), "how": "event", "event_type": event["type"],
+                    "event_id": event["event_id"], "event_at": event["at"], "source": event["source"],
+                    "disposition": "restore" if end["restore"] else "relinquished"}
     if deadline is not None and deadline <= now:
-        if not end["restore"]:
-            return "relinquished"
-        return "withheld_end_not_observed" if task["body"].get("protective") else "restore"
+        disposition = "relinquished"
+        if end["restore"]:
+            disposition = "withheld_end_not_observed" if task["body"].get("protective") else "restore"
+        return {"at": deadline.isoformat(), "how": "time" if rule == "time" else "fallback",
+                "rule": rule, "disposition": disposition}
     return None

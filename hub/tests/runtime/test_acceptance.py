@@ -461,7 +461,12 @@ def test_hub_at09_dispatch_crash_and_byte_stable_resend(tmp_path):
         assert all(stub.packets.count(body) == 2 for body in originals)
         recovered = next(row for row in stub.executions if row["device"] == "light_02")
         assert recovered["status"] == "unknown"
-        assert (await hub.state())["commands"][0]["acknowledgement"] is None
+        state = await hub.state()
+        assert state["commands"][0]["acknowledgement"] is None
+        summary, = state["plan_summaries"]
+        assert summary["triggered"] == 2
+        assert summary["completed"] == 1
+        assert summary["failed_unknown_unverifiable"] == 1
         clock.advance(minutes=1)
         hub.world.signal("event_end", "home")
         await hub.cycle()
@@ -657,6 +662,14 @@ def test_hub_at16_fixture_protective_release(tmp_path, observed_end):
             "t_mood#3": {"display_01": "restored", "light_01": "restored"},
         }
         assert release_status in (await hub.dashboard.get("/")).text
+        state = (await hub.dashboard.get("/state")).json()
+        summary, = state["plan_summaries"]
+        assert summary["restored"] == (2 if observed_end else 1)
+        assert summary["withheld"] == (0 if observed_end else 1)
+        safety = next(row["steps"] for row in state["task_stories"] if row["task_id"] == "t_safe#2")
+        end = next(step for step in safety if step["kind"] == "end")
+        assert end["how"] == ("event" if observed_end else "fallback")
+        assert {item["status"] for item in safety[-1]["items"]} == {release_status}
         assert sum(event["type"] == "event_end" for batch in receipts["events"] for event in batch) == observed_end
         await hub.cycle()
         assert await hub.receipts() == receipts
@@ -815,6 +828,26 @@ def test_hub_at19_fixture_runtime_replays_remaining_episodes(tmp_path, episode, 
             assert {row["task_id"] for row in (await hub.state())["waiting"]} == {
                 "t_fridge#3", "t_clean#1", "t_music#2",
             }
+            state = (await hub.dashboard.get("/state")).json()
+            v1, v2 = state["plan_history"]
+            assert v1["changes"]["added"] == ["t_fridge#3"]
+            assert v2["previous_version"] == 1
+            assert v2["changes"]["added"] == ["t_clean#1", "t_music#2"]
+            cleaning = next(row["steps"] for row in state["task_stories"] if row["task_id"] == "t_clean#1")
+            assert cleaning == [
+                {"kind": "admitted", "at": clock().isoformat(), "plan_version": 2},
+                {"kind": "waiting", "at": clock().isoformat(), "plan_version": 2,
+                 "trigger": {"time": "2026-11-07T16:30:00+09:00"}},
+            ]
+        else:
+            state = (await hub.dashboard.get("/state")).json()
+            assert state["plan_summaries"] == [{
+                "plan_id": "ep_9150", "plan_version": 1, "current": True,
+                "device_actions": 0, "notices": 2, "waiting": 2, "window_passed": 0,
+                "triggered": 0, "completed": 0, "failed_unknown_unverifiable": 0,
+                "restored": 0, "withheld": 0,
+            }]
+            assert "device actions 0" in (await hub.dashboard.get("/")).text
         await hub.close()
     run(exercise)
 
@@ -933,5 +966,178 @@ def test_partial_restore_writes_only_owned_properties_and_uses_revision_witnesse
         assert restore["expected"].keys() == restore["desired"].keys()
         assert hub.world.native["light"].values == {"hue": 85, "saturation": 0, "brightness": 50}
         assert stub.executions[-1]["items"] == [{"device": "light_01", "status": "skipped_user_changed"}]
+        await hub.close()
+    run(exercise)
+
+
+@pytest.mark.parametrize("matched", [False, True])
+def test_dashboard_reports_missed_window_without_changing_eligibility(tmp_path, matched):
+    async def exercise():
+        clock = Clock("2026-10-17T13:40:00+09:00")
+        hub = Scenario(tmp_path, clock, episode="ep_9031")
+        install_birthday(hub)
+        hub.boot()
+        await hub.reconcile()
+        if matched:
+            guest(hub.world, clock)
+        clock.now = clock.now.replace(hour=17, minute=0, second=0)
+        state = (await hub.dashboard.get("/state")).json()
+        mood = next(row for row in state["waiting"] if row["task_id"] == "t_mood#3")
+        assert mood["status"] == "waiting"
+        clock.advance(seconds=1)
+        state = (await hub.dashboard.get("/state")).json()
+        assert state == await hub.state()
+        mood = next(row for row in state["waiting"] if row["task_id"] == "t_mood#3")
+        assert state["plan_summaries"][0]["window_passed"] == (0 if matched else 1)
+        if matched:
+            assert mood["status"] == "waiting"
+        else:
+            assert mood["status"] == "window_passed"
+            assert mood["window_passed_at"] == "2026-10-17T17:00:00+09:00"
+            assert mood["trigger"]["event"] == "guest_arrived"
+            assert "Window passed · 2026-10-17T17:00:00+09:00" in (await hub.dashboard.get("/")).text
+            guest(hub.world, clock)
+        await hub.cycle()
+        assert any(row["target"] == "mqtt:light_01" for row in hub.world.commands) == matched
+        if not matched:
+            clock.advance(hours=4)
+            await hub.cycle()
+            mood = next(row for row in (await hub.state())["waiting"] if row["task_id"] == "t_mood#3")
+            assert mood["status"] == "window_passed"
+        await hub.close()
+    run(exercise)
+
+
+def test_dashboard_records_release_cancellation_and_removal_across_restart(tmp_path):
+    async def exercise():
+        clock = Clock("2026-10-16T18:04:00+09:00")
+        v1 = fixture("plan.v1.json")
+        v3 = fixture("plan.v3.json")
+        fridge = next(task for task in v1["tasks"] if task["task_id"] == "t_fridge#5")
+        released = next(task for task in v3["tasks"] if task["task_id"] == fridge["task_id"])
+        cleaning, safety = v1["tasks"][:2]
+        stub = Stub(clock, fridge, cleaning, safety)
+        hub = Scenario(tmp_path, clock, stub=stub)
+        install_birthday(hub)
+        hub.boot()
+        await hub.reconcile()
+        received = clock.advance(minutes=2)
+        stub.advance(released, cancelled=[{"task_id": cleaning["task_id"], "restore": False}])
+        assert await hub.runtime.refresh()
+        state = (await hub.dashboard.get("/state")).json()
+        initial, updated = state["plan_history"]
+        assert initial["ack"]["delivered"] is True
+        assert updated == {
+            "plan_id": "ep_test", "plan_version": 2, "previous_version": 1, "received_at": received,
+            "ack": {"delivered": False, "delivery_error": None, "packet": {
+                "plan_version": 2, "status": "admitted", "rejected_tasks": [],
+            }},
+            "changes": {
+                "added": [], "removed": ["t_clean#1", "t_safe#2"],
+                "cancelled": [{"task_id": "t_clean#1", "restore": False}],
+                "triggers_changed": [{"task_id": fridge["task_id"],
+                                      "from": fridge["trigger"], "to": released["trigger"]}],
+            },
+        }
+        await hub.shutdown()
+        hub.boot()
+        await hub.reconcile()
+        await hub.cycle()
+        state = (await hub.dashboard.get("/state")).json()
+        assert [row["plan_version"] for row in state["plan_history"]] == [1, 2]
+        assert state["plan_history"][1]["ack"]["delivered"] is True
+        assert state["plan_history"][1]["changes"] == updated["changes"]
+        notice = next(row["steps"] for row in state["task_stories"] if row["task_id"] == fridge["task_id"])
+        assert [step["kind"] for step in notice] == [
+            "admitted", "waiting", "admitted", "waiting", "triggered", "command",
+        ]
+        assert notice[-2]["how"] == "server_release"
+        assert notice[-2]["at"] == released["trigger"]["at"]
+        assert notice[-1]["status"] == "completed"
+        page = (await hub.dashboard.get("/")).text
+        assert "Plan history" in page and "triggers_changed" in page
+        await hub.close()
+    run(exercise)
+
+
+def test_dashboard_orders_birthday_mood_story(tmp_path):
+    async def exercise():
+        clock = Clock("2026-10-17T13:40:00+09:00")
+        hub = Scenario(tmp_path, clock, episode="ep_9031")
+        install_birthday(hub)
+        hub.boot()
+        await hub.reconcile()
+        guest(hub.world, clock)
+        await hub.cycle()
+        clock.advance(minutes=10)
+        hub.world.change("mqtt:light_01", {"color": {"kelvin": 2700}}, local=True)
+        clock.advance(minutes=30)
+        hub.world.signal("presence.room_empty", "mqtt:sim_presence")
+        await hub.cycle()
+        clock.advance(minutes=1)
+        hub.world.change("mqtt:light_01", {"color": {"kelvin": 2900}}, local=True)
+        await hub.cycle()
+        await hub.shutdown()
+        hub.boot()
+        await hub.reconcile()
+        state = (await hub.dashboard.get("/state")).json()
+        mood = next(row["steps"] for row in state["task_stories"] if row["task_id"] == "t_mood#3")
+        assert [step["kind"] for step in mood] == [
+            "admitted", "waiting", "triggered", "command", "command",
+            "person_change", "end", "command", "restore_result",
+        ]
+        admitted, waiting, triggered, display, light, person, end, restore, result = mood
+        assert admitted["plan_version"] == 1
+        assert waiting["trigger"]["event"] == "guest_arrived"
+        events = {row["packet"][0]["event_id"]: row["packet"][0] for row in state["events"]}
+        assert triggered["at"] == events[triggered["event_id"]]["at"]
+        assert triggered["event_type"] == "guest_arrived"
+        assert (display["device"], light["device"]) == ("display_01", "light_01")
+        for command in (display, light, restore):
+            assert command["acknowledgement"]["status"] == "ACCEPTED"
+            assert {prop: command["read_back"]["values"][prop] for prop in command["desired"]} == command["desired"]
+        assert (display["status"], light["status"], restore["status"]) == ("completed", "completed", "restored")
+        assert person["by"] == "user"
+        assert person["payload"]["to"] == {"kelvin": 2700}
+        assert person["device"] == "light_01"
+        assert end["how"] == "event" and events[end["event_id"]]["type"] == "event_end"
+        assert restore["phase"] == "restore" and restore["desired"] == {"play_mood": None}
+        assert {item["device"]: item["status"] for item in result["items"]} == {
+            "display_01": "restored", "light_01": "skipped_user_changed",
+        }
+        page = (await hub.dashboard.get("/")).text
+        assert "Task stories" in page and "Person change" in page
+        await hub.close()
+    run(exercise)
+
+
+def test_dashboard_keeps_prior_ack_after_database_upgrade(tmp_path):
+    async def exercise():
+        clock = Clock()
+        original = task(clock, trigger={"time": (clock() + timedelta(minutes=5)).isoformat()})
+        stub = Stub(clock, original)
+        hub = Scenario(tmp_path, clock, stub=stub)
+        install_light(hub)
+        hub.boot()
+        await hub.reconcile()
+        # Before the dashboard recorded versions, the Hub kept only current tasks and ack packets.
+        with hub.store.db:
+            hub.store.db.execute("DROP TABLE plan_versions")
+        await hub.shutdown()
+        hub.boot()
+        await hub.reconcile()
+        prior, = (await hub.state())["plan_history"]
+        assert prior["ack"]["delivered"] is True and prior["changes"] is None
+        assert prior["plan_version"] == 1
+        clock.advance(minutes=1)
+        changed = task(clock, trigger={"time": (clock() + timedelta(minutes=10)).isoformat()})
+        stub.advance(changed)
+        await hub.reconcile()
+        earlier, latest = (await hub.state())["plan_history"]
+        assert earlier == prior
+        assert latest["previous_version"] == 1
+        assert latest["changes"]["triggers_changed"] == [
+            {"task_id": original["task_id"], "from": original["trigger"], "to": changed["trigger"]},
+        ]
         await hub.close()
     run(exercise)
