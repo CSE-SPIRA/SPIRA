@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from .profile import Device, Profile
@@ -15,6 +15,7 @@ SEOUL = ZoneInfo("Asia/Seoul")
 PEOPLE = frozenset({"resident", "child", "guest"})
 LOCAL_ACTORS = PEOPLE | {"external_automation", "device_self"}
 READBACK = frozenset({"current", "stale", "missing", "unavailable"})
+ActionPath = Literal["device_panel", "other_app"]
 
 
 def wall_time() -> datetime:
@@ -172,35 +173,37 @@ class World:
         with self.store.lock:
             return self._observation(target)[0]
 
-    def snapshot(self) -> dict:
+    def snapshot(self, *, include_operator_actions: bool = False) -> dict:
         with self.store.lock:
             devices = []
             for target, device in self.devices.items():
                 report, freshness = self._observation(target)
-                devices.append(
-                    {
-                        **self._discovery(device, self.store.state(target)),
-                        **{
-                            key: report[key]
-                            for key in (
-                                "values",
-                                "revisions",
-                                "available",
-                                "occurred_at",
-                                "observed_at",
-                                "job_id",
-                            )
-                        },
-                        "logical_id": device.logical_id,
-                        "label": device.label,
-                        "observation": freshness,
-                        "qualification": (
-                            "virtual_only"
-                            if device.substrate == "virtual"
-                            else "unqualified"
-                        ),
-                    }
-                )
+                state = self.store.state(target)
+                tile = {
+                    **self._discovery(device, state),
+                    **{
+                        key: report[key]
+                        for key in (
+                            "values",
+                            "revisions",
+                            "available",
+                            "occurred_at",
+                            "observed_at",
+                            "job_id",
+                        )
+                    },
+                    "logical_id": device.logical_id,
+                    "label": device.label,
+                    "observation": freshness,
+                    "qualification": (
+                        "virtual_only"
+                        if device.substrate == "virtual"
+                        else "unqualified"
+                    ),
+                }
+                if include_operator_actions:
+                    tile["last_operator_action"] = state.get("last_operator_action")
+                devices.append(tile)
             return {
                 "household_id": self.profile.household_id,
                 "world_epoch": self.epoch,
@@ -218,6 +221,7 @@ class World:
         *,
         event_type: str,
         operation_id: str | None = None,
+        operator_action: dict | None = None,
         **state_fields: Any,
     ) -> tuple[dict, list[dict]]:
         after = {
@@ -230,7 +234,15 @@ class World:
             },
             "occurred_at": at.isoformat(),
         }
-        self._record(device, actor, event_type, before, after)
+        details = operator_action or {}
+        if operator_action is not None:
+            after["last_operator_action"] = {
+                "actor": actor,
+                **details,
+                "event_type": event_type,
+                "occurred_at": after["occurred_at"],
+            }
+        self._record(device, actor, event_type, before, after, **details)
         self.store.save_state(device.target, after)
         signals = []
         if self._available(device, after) and device.target not in self.read_faults:
@@ -243,13 +255,20 @@ class World:
                     event_type=event_type,
                     operation_id=operation_id,
                     local_operation=device.local_operation_reporting
-                    and actor in PEOPLE,
+                    and actor in PEOPLE
+                    and details.get("action_path") != "other_app",
                 )
             )
         return after, signals
 
     def _record(
-        self, device: Device, actor: str, event_type: str, before: dict, after: dict
+        self,
+        device: Device,
+        actor: str,
+        event_type: str,
+        before: dict,
+        after: dict,
+        **details: Any,
     ):
         return self.store.append_truth(
             {
@@ -261,6 +280,7 @@ class World:
                 "before": before["values"],
                 "after": after["values"],
                 "job_id": after["job_id"],
+                **details,
             }
         )
 
@@ -385,6 +405,7 @@ class World:
         operation_id: str | None = None,
         *,
         start: bool = False,
+        operator_action: dict | None = None,
     ) -> tuple[str | None, list[dict]]:
         at = self.clock()
         trigger = device.job.trigger_property if device.job else None
@@ -419,15 +440,30 @@ class World:
             at,
             event_type=event_type,
             operation_id=operation_id,
+            operator_action=operator_action,
             **job_fields,
         )
         return job_id, signals
 
     def local_change(
-        self, target: str, actor: str, values: dict, *, start: bool = False
+        self,
+        target: str,
+        actor: str,
+        values: dict,
+        *,
+        start: bool = False,
+        actor_name: str | None = None,
+        action_path: ActionPath | None = None,
     ) -> list[dict]:
         if actor not in LOCAL_ACTORS:
             raise InvalidMutation("unknown local actor")
+        action = {}
+        if actor in PEOPLE:
+            action["action_path"] = action_path or "device_panel"
+            if actor_name is not None:
+                action["actor_name"] = actor_name
+        elif actor == "external_automation":
+            action["action_path"] = "other_app"
         with self.store.transaction():
             device = self._device(target)
             if device.substrate != "virtual":
@@ -440,7 +476,9 @@ class World:
             status = self._validation(device, values, local=True) if not start else None
             if status:
                 raise InvalidMutation(status)
-            return self._effect(device, state, values, actor, start=start)[1]
+            return self._effect(
+                device, state, values, actor, start=start, operator_action=action
+            )[1]
 
     def home_event(self, action: str) -> list[dict]:
         facts = self.profile.home_signals.get(action)

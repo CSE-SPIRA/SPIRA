@@ -33,9 +33,16 @@ function button(text, action) {
   return control;
 }
 
-const write = (values, start = false) => request("/operator/device", {
-  target: byId("device").value, actor: byId("actor").value, values, start,
-});
+const personSelected = () => ["resident", "child", "guest"].includes(byId("actor").value);
+
+function write(values, start = false) {
+  const action = { target: byId("device").value, actor: byId("actor").value, values, start };
+  if (personSelected()) {
+    action.actor_name = byId("actor-name").value.trim() || null;
+    action.action_path = byId("action-path").value;
+  }
+  return request("/operator/device", action);
+}
 
 async function evidence(path, output = "evidence", body) {
   byId(output).textContent = "";
@@ -50,6 +57,9 @@ async function init() {
   }
   for (const actor of options.actors) byId("actor").add(new Option(label(actor), actor));
   byId("actor").value = "resident";
+  byId("actor").addEventListener("change", () => {
+    byId("person-action").hidden = !personSelected();
+  });
   for (const device of options.devices) {
     const title = device.label || label(device.device_type);
     for (const id of ["device", "fault-device"]) byId(id).add(new Option(title, device.target));
@@ -78,6 +88,7 @@ async function init() {
     return request("/operator/fault", { target: byId("fault-device").value, fault, mode });
   }));
   byId("journal").addEventListener("click", () => report(() => evidence("/operator/truth")));
+  byId("operator-snapshot").addEventListener("click", () => report(() => evidence("/operator/snapshot")));
   byId("judge").addEventListener("click", () => report(() => evidence("/operator/judge")));
   byId("command-marker").addEventListener("click", () => report(
     () => evidence("/operator/judge/marker", "command-evidence", {}),

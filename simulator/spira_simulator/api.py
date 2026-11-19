@@ -16,7 +16,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from .mqtt import Broker, DeviceProtocol
 from .profile import DEFAULT_PROFILE, Profile, load_profile
 from .sources import JsonSource, Source, judge, stage_overlay
-from .world import LOCAL_ACTORS, InvalidMutation, World
+from .world import LOCAL_ACTORS, ActionPath, InvalidMutation, World
 
 UI = Path(__file__).with_name("ui")
 basic = HTTPBasic(auto_error=False)
@@ -34,6 +34,8 @@ class HomeAction(OperatorInput):
 class DeviceAction(OperatorInput):
     target: str
     actor: str
+    actor_name: str | None = None
+    action_path: ActionPath | None = None
     values: dict = Field(default_factory=dict)
     start: bool = False
 
@@ -242,6 +244,8 @@ def create_app(
             body.actor,
             body.values,
             start=body.start,
+            actor_name=body.actor_name,
+            action_path=body.action_path,
         )
 
     @application.post("/operator/fault", dependencies=[Depends(require_operator)])
@@ -261,6 +265,10 @@ def create_app(
         limit: int = Query(100, ge=1, le=1000),
     ):
         return request.app.state.world.store.truth(after, limit)
+
+    @application.get("/operator/snapshot", dependencies=[Depends(require_operator)])
+    def operator_snapshot(request: Request):
+        return request.app.state.world.snapshot(include_operator_actions=True)
 
     @application.get("/operator/judge", dependencies=[Depends(require_operator)])
     async def compare(request: Request):

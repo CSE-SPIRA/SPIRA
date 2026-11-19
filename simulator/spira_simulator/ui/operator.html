@@ -24,6 +24,15 @@
         <select id="device"></select>
         <label for="actor">Actor</label>
         <select id="actor"></select>
+        <div id="person-action">
+          <label for="actor-name">Display name (optional)</label>
+          <input id="actor-name" type="text">
+          <label for="action-path">Action path</label>
+          <select id="action-path">
+            <option value="device_panel">Device panel</option>
+            <option value="other_app">Other app</option>
+          </select>
+        </div>
         <div id="quick-actions"></div>
         <label for="values">Property values (JSON)</label>
         <textarea id="values" spellcheck="false">{}</textarea>
@@ -53,6 +62,7 @@
     <section class="evidence">
       <h2>Private evidence</h2>
       <button id="journal">Refresh truth journal</button>
+      <button id="operator-snapshot">Refresh operator snapshot</button>
       <button id="judge">Read received C-3 and compare</button>
       <pre id="evidence" aria-live="polite"></pre>
       <h3>Hub command counts</h3>

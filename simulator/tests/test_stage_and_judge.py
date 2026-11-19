@@ -401,6 +401,91 @@ def test_judge_counts_command_arrivals_by_marker_and_time(tmp_path, monkeypatch,
         assert client.get(counts_url, auth=AUTH).json()["total"] == empty["total"]
 
 
+def test_named_operator_actions_keep_path_and_identity_private(
+    tmp_path, monkeypatch, clock
+):
+    monkeypatch.setattr(
+        "spira_simulator.api.World", lambda path, profile: World(path, profile, clock)
+    )
+    received = []
+    app = operator_app(tmp_path, received_source=SourceStub(received))
+    snapshot_url = "/operator/snapshot"
+    actions = [
+        ("엄마", "device_panel", 2700, "user", "match"),
+        ("아빠", "other_app", 3200, "unknown", "person-reported-unknown"),
+    ]
+    with TestClient(app) as client:
+        signals = []
+        monkeypatch.setattr(
+            app.state.protocol,
+            "publish",
+            lambda topic, payload, **kwargs: signals.append(json.loads(payload)),
+        )
+        assert client.get(snapshot_url).status_code == 401
+        prior = Wire(app.state.world).read(LIGHT)
+        for i, (name, path, kelvin, by, _) in enumerate(actions):
+            clock.advance()
+            color = {"kelvin": kelvin}
+            post(
+                client,
+                "/operator/device",
+                target=LIGHT,
+                actor="resident",
+                actor_name=name,
+                action_path=path,
+                values={"color": color},
+            )
+            signal = signals[-1]
+            assert signal["local_operation"] is (path == "device_panel")
+            assert signal["operation_id"] is None and public_value(signal)
+            assert signal["values"]["color"] == color
+            assert signal["revisions"]["color"] != prior["revisions"]["color"]
+            received.append(
+                {
+                    "event_id": f"ev_named_{i}",
+                    "household_id": "h_042",
+                    "source": "light_01",
+                    "type": signal["event_type"],
+                    "at": signal["occurred_at"],
+                    "payload": {
+                        "by": by,
+                        "property": "color",
+                        "from": prior["values"]["color"],
+                        "to": color,
+                    },
+                }
+            )
+            prior = signal
+
+        truth = client.get("/operator/truth", auth=AUTH).json()
+        assert [(f["actor"], f["actor_name"], f["action_path"]) for f in truth] == [
+            ("resident", name, path) for name, path, _, _, _ in actions
+        ]
+        compared = client.get("/operator/judge", auth=AUTH).raise_for_status().json()
+        assert [(r["truth"]["actor_name"], r["verdict"]) for r in compared["results"]] == [
+            (name, verdict) for name, _, _, _, verdict in actions
+        ]
+        # A later Hub command does not erase the most recent operator action.
+        Wire(app.state.world).command(LIGHT, {"power": False})
+
+    with TestClient(operator_app(tmp_path)) as client:
+        snapshot = client.get(snapshot_url, auth=AUTH).json()
+        light = next(d for d in snapshot["devices"] if d["target"] == LIGHT)
+        assert light["last_operator_action"] == {
+            "actor": "resident",
+            "actor_name": "아빠",
+            "action_path": "other_app",
+            "event_type": "light.changed",
+            "occurred_at": truth[-1]["occurred_at"],
+        }
+        public = client.get("/sim/snapshot").json()
+        assert all("last_operator_action" not in d for d in public["devices"])
+        wire = Wire(client.app.state.world)
+        for body in (public, wire.read(LIGHT), wire.request("discover")[0]):
+            assert public_value(body)
+            assert all(name not in str(body) for name, *_ in actions)
+
+
 def test_raw_home_signals_and_wall_clock_sim_at18_local_evidence(tmp_path, monkeypatch):
     app = operator_app(tmp_path)
     with TestClient(app) as client:
