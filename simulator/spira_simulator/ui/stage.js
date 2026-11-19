@@ -96,7 +96,8 @@ function renderOverlay(overlay) {
     const outcome = row.status === "withheld_end_not_observed"
       ? "Release withheld (end event unobserved)"
       : label(row.status);
-    return `${row.device} · ${outcome} · ${row.substrate || "substrate unknown"} · ${label(row.qualification || "qualification unknown")} · ${time(row.at)}`;
+    const delivery = row.delivery === "not_delivered" ? " · pending delivery" : "";
+    return `${row.device} · ${outcome} · ${row.substrate || "substrate unknown"} · ${label(row.qualification || "qualification unknown")} · ${time(row.at)}${delivery}`;
   }, "No restore reports");
   byId("plan-status").textContent = overlay.errors.join(" · ");
 }

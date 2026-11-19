@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import Protocol
 
 import httpx
-from pydantic import TypeAdapter
+from pydantic import AwareDatetime, BaseModel, StrictBool, TypeAdapter
+from spira_contracts.common import ExecutionStatus, Substrate
 from spira_contracts.event import Event
 from spira_contracts.event_batch import EventBatch
-from spira_contracts.execution_result import ExecutionResult, RestoreResult
+from spira_contracts.execution_result import ExecutionResult, RestoreResult, RunResult
 from spira_contracts.plan import Plan, TimeTrigger
 from spira_contracts.plan_pull import PlanPull
 
@@ -36,20 +37,79 @@ class JsonSource:
         return json.loads(Path(self.location).read_text(encoding="utf-8"))
 
 
+class HubEvidence[Packet](BaseModel):
+    delivered: StrictBool
+    delivery_error: str | None
+    packet: Packet
+
+
+class HubTaskStory(BaseModel):
+    plan_id: str
+    task_id: str
+    steps: list[dict]
+
+
+class RunEvidence(BaseModel):
+    plan_id: str
+    task_id: str
+    device: str
+    at: AwareDatetime
+    substrate: Substrate
+
+
 received_events = TypeAdapter(list[Event])
 received_batches = TypeAdapter(list[EventBatch])
 execution_records = TypeAdapter(list[ExecutionResult])
 plan_source = TypeAdapter(Plan | PlanPull)
+hub_events = TypeAdapter(list[HubEvidence[EventBatch]])
+hub_restores = TypeAdapter(list[HubEvidence[RestoreResult]])
+hub_stories = TypeAdapter(list[HubTaskStory])
+
+
+def hub_rows(payload, field: str):
+    if not isinstance(payload, dict) or field not in payload:
+        raise ValueError(f"Hub state is missing {field}")
+    return payload[field]
+
+
+def execution_evidence(payload, *, from_hub: bool):
+    if from_hub:
+        stories = hub_stories.validate_python(hub_rows(payload, "task_stories"))
+        # Task stories expose local run outcomes. Their C-4 delivery is not in /state.
+        runs = [
+            RunEvidence.model_validate(
+                {**step, "plan_id": story.plan_id, "task_id": story.task_id}
+            )
+            for story in stories
+            for step in story.steps
+            if step.get("kind") in ("command", "execution_block")
+            and step.get("phase") == "run"
+            and step.get("status") in ExecutionStatus
+        ]
+        reports = hub_restores.validate_python(hub_rows(payload, "restoration"))
+        return runs, [(row.packet, row.delivered) for row in reports]
+
+    if isinstance(payload, dict):
+        payload = payload.get("executions")
+    records = [row.root for row in execution_records.validate_python(payload)]
+    runs = [
+        RunEvidence.model_validate(record, from_attributes=True)
+        for record in records
+        if isinstance(record, RunResult)
+    ]
+    return runs, [(record, None) for record in records if isinstance(record, RestoreResult)]
 
 
 async def stage_overlay(
     household_id: str,
     plans: Source | None,
     executions: Source | None,
+    *,
+    from_hub: bool = False,
 ) -> dict:
     errors = []
     plan_payload = None
-    records = []
+    run_evidence, restore_evidence = [], []
     if plans:
         try:
             plan_payload = plan_source.validate_python(await plans.fetch())
@@ -57,12 +117,9 @@ async def stage_overlay(
             errors.append("Plan source unavailable")
     if executions:
         try:
-            payload = await executions.fetch()
-            if isinstance(payload, dict):
-                payload = payload.get("executions")
-            records = [
-                record.root for record in execution_records.validate_python(payload)
-            ]
+            run_evidence, restore_evidence = execution_evidence(
+                await executions.fetch(), from_hub=from_hub
+            )
         except (OSError, ValueError, httpx.HTTPError):
             errors.append("Execution source unavailable")
 
@@ -71,13 +128,10 @@ async def stage_overlay(
         stage_plans = plan_payload.plans
 
     runs = {}
-    for record in records:
-        if record.kind == "run":
-            key = (record.plan_id, record.task_id, record.device)
-            if key not in runs or datetime.fromisoformat(
-                record.at
-            ) > datetime.fromisoformat(runs[key].at):
-                runs[key] = record
+    for record in run_evidence:
+        key = (record.plan_id, record.task_id, record.device)
+        if key not in runs or record.at > runs[key].at:
+            runs[key] = record
     preparation = []
     item_notices = []
     for plan in stage_plans:
@@ -112,26 +166,25 @@ async def stage_overlay(
                     )
 
     restores = []
-    for record in records:
-        if not isinstance(record, RestoreResult):
-            continue
+    for record, delivered in restore_evidence:
         for item in record.items:
             run = runs.get((record.plan_id, record.task_id, item.device))
             substrate = run.substrate.value if run else None
             qualification = {"virtual": "virtual_only", "physical": "unqualified"}.get(
                 substrate
             )
-            restores.append(
-                {
-                    "plan_id": record.plan_id,
-                    "task_id": record.task_id,
-                    "at": record.at,
-                    "device": item.device,
-                    "status": item.status.value,
-                    "substrate": substrate,
-                    "qualification": qualification,
-                }
-            )
+            row = {
+                "plan_id": record.plan_id,
+                "task_id": record.task_id,
+                "at": record.at,
+                "device": item.device,
+                "status": item.status.value,
+                "substrate": substrate,
+                "qualification": qualification,
+            }
+            if delivered is not None:
+                row["delivery"] = "delivered" if delivered else "not_delivered"
+            restores.append(row)
     return {
         "preparation": preparation,
         "item_notices": item_notices,
@@ -156,9 +209,27 @@ def _verdict(actor: str, by: str) -> str | None:
     return None
 
 
-async def judge(household_id: str, truth: list[dict], source: Source) -> dict:
+async def judge(
+    household_id: str, truth: list[dict], source: Source, *, from_hub: bool = False
+) -> dict:
     payload = await source.fetch()
-    if isinstance(payload, dict):
+    pending = []
+    if from_hub:
+        rows = hub_events.validate_python(hub_rows(payload, "events"))
+        received = [event for row in rows if row.delivered for event in row.packet.root]
+        pending = [
+            {
+                "event_id": event.event_id,
+                "device": event.source,
+                "event_type": event.type,
+                "at": event.at,
+                "delivery_error": row.delivery_error,
+            }
+            for row in rows if not row.delivered
+            for event in row.packet.root
+            if event.household_id == household_id and event.source != "hub"
+        ]
+    elif isinstance(payload, dict):
         batches = received_batches.validate_python(payload.get("events"))
         received = [event for batch in batches for event in batch.root]
     else:
@@ -206,4 +277,9 @@ async def judge(household_id: str, truth: list[dict], source: Source) -> dict:
             )
         else:
             results.append({**comparison, "truth": fact, "verdict": verdict})
-    return {"results": results, "unresolved": unresolved}
+    return {
+        "source": "hub_state" if from_hub else "fixture_receipts",
+        "results": results,
+        "unresolved": unresolved,
+        "not_delivered": [row for row in pending if row["event_id"] not in seen],
+    }

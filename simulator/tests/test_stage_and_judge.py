@@ -93,24 +93,37 @@ def test_overlay_reads_authenticated_plan_and_fixture_executions(
     }
 
 
-def test_judge_reads_events_from_multiple_fixture_receipt_batches(
-    tmp_path, monkeypatch, captured_receipts
+@pytest.mark.parametrize("from_hub", [False, True], ids=["fixture", "hub"])
+def test_judge_reads_delivery_evidence(
+    tmp_path, monkeypatch, captured_receipts, from_hub
 ):
     monkeypatch.setenv("WORLD_RECEIVED_URL", "http://fixture.invalid/_fixture/receipts")
-
-    def handle(request):
-        assert request.method == "GET"
-        assert request.url.path == "/_fixture/receipts"
-        return httpx.Response(200, json=captured_receipts)
-
-    mock_http_source(monkeypatch, handle)
     light, oven = [
         event
         for batch in captured_receipts["events"]
         for event in batch
         if event["payload"].get("by") == "user"
     ]
+    if from_hub:
+        monkeypatch.setenv("WORLD_HUB_STATE_URL", "http://hub.invalid/state")
+        hub_rows = [
+            {"packet": batch, "delivered": True, "delivery_error": None}
+            for batch in captured_receipts["events"]
+        ]
+        pending = next(row for row in hub_rows if row["packet"] == [oven])
+        pending.update(delivered=False, delivery_error="HTTP 503")
+
+    def handle(request):
+        assert request.method == "GET"
+        if from_hub:
+            assert request.url.host == "hub.invalid" and request.url.path == "/state"
+            return httpx.Response(200, json={"events": hub_rows})
+        assert request.url.path == "/_fixture/receipts"
+        return httpx.Response(200, json=captured_receipts)
+
+    mock_http_source(monkeypatch, handle)
     app = operator_app(tmp_path)
+    url = "/operator/judge"
     with TestClient(app) as client:
         monkeypatch.setattr(
             app.state.world, "clock", lambda: datetime.fromisoformat(light["at"])
@@ -126,8 +139,25 @@ def test_judge_reads_events_from_multiple_fixture_receipt_batches(
             app.state.world, "clock", lambda: datetime.fromisoformat(oven["at"])
         )
         post(client, "/operator/device", target=OVEN, actor="resident", start=True)
-        result = client.get("/operator/judge", auth=AUTH).raise_for_status().json()
+        result = client.get(url, auth=AUTH).raise_for_status().json()
+        if from_hub:
+            assert result["source"] == "hub_state"
+            assert result["not_delivered"] == [
+                {
+                    "event_id": oven["event_id"],
+                    "device": oven["source"],
+                    "event_type": oven["type"],
+                    "at": oven["at"],
+                    "delivery_error": "HTTP 503",
+                }
+            ]
+            assert [row["event_id"] for row in result["results"]] == [light["event_id"]]
+            assert all(row["event_id"] != oven["event_id"] for row in result["unresolved"])
+            pending.update(delivered=True, delivery_error=None)
+            result = client.get(url, auth=AUTH).raise_for_status().json()
 
+    assert result["source"] == ("hub_state" if from_hub else "fixture_receipts")
+    assert result["not_delivered"] == []
     comparisons = [
         (row["event_id"], row["by"], row["verdict"]) for row in result["results"]
     ]
@@ -135,6 +165,75 @@ def test_judge_reads_events_from_multiple_fixture_receipt_batches(
         (light["event_id"], "user", "match"),
         (oven["event_id"], "user", "match"),
     ]
+
+
+def test_overlay_prefers_live_plans_and_uses_hub_task_stories_and_restoration(
+    tmp_path, monkeypatch, captured_receipts
+):
+    monkeypatch.setenv("WORLD_HUB_STATE_URL", "http://hub.invalid/state")
+    monkeypatch.setenv("WORLD_EXECUTIONS", "http://fixture.invalid/_fixture/receipts")
+    monkeypatch.setenv("WORLD_PLANS", "http://fixture.invalid/plan")
+    monkeypatch.setenv(
+        "WORLD_PLANS_URL", "http://server.invalid/v1/hub/plans?household=h_042"
+    )
+    hub_key = uuid4().hex
+    monkeypatch.setenv("WORLD_PLANS_TOKEN", hub_key)
+
+    stories = {}
+    restoration = []
+    for record in captured_receipts["executions"]:
+        task_id = record["task_id"]
+        if record["kind"] == "run":
+            story = stories.setdefault(
+                task_id, {"task_id": task_id, "plan_id": record["plan_id"], "steps": []}
+            )
+            status = "dispatching" if record["device"] == "oven_01" else record["status"]
+            story["steps"].append(
+                {
+                    "kind": "command",
+                    "phase": "run",
+                    "device": record["device"],
+                    "at": record["at"],
+                    "status": status,
+                    "substrate": record["substrate"],
+                }
+            )
+        else:
+            delivered = task_id == "t_safe#2"
+            restoration.append(
+                {"packet": record, "delivered": delivered, "delivery_error": None}
+            )
+
+    def handle(request):
+        assert request.method == "GET"
+        if request.url.host == "server.invalid":
+            assert request.url.path == "/v1/hub/plans"
+            assert request.url.params["household"] == "h_042"
+            assert request.headers["X-API-Key"] == hub_key
+            return httpx.Response(200, json=fixture_json("ep_9031/pull.json"))
+        assert request.url.host == "hub.invalid" and request.url.path == "/state"
+        assert "X-API-Key" not in request.headers
+        return httpx.Response(
+            200, json={"task_stories": list(stories.values()), "restoration": restoration}
+        )
+
+    mock_http_source(monkeypatch, handle)
+    with TestClient(operator_app(tmp_path)) as client:
+        overlay = client.get("/sim/overlay").raise_for_status().json()
+
+    assert overlay["errors"] == []
+    assert [row["device"] for row in overlay["preparation"]] == ["oven_01"]
+    assert len(overlay["item_notices"]) == 2
+    assert {
+        (row["device"], row["status"], row["substrate"], row["delivery"])
+        for row in overlay["restores"]
+    } == {
+        ("cooktop_01", "restored", "virtual", "delivered"),
+        ("plug_kettle", "restored", "virtual", "delivered"),
+        ("light_01", "skipped_user_changed", "virtual", "not_delivered"),
+        ("display_01", "restored", "virtual", "not_delivered"),
+    }
+    assert public_value(overlay)
 
 
 @pytest.mark.provisional
