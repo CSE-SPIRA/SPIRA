@@ -1,7 +1,7 @@
 import asyncio
 import json
 from copy import deepcopy
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import httpx2 as httpx
@@ -313,6 +313,10 @@ def test_hub_at08_and_at17_property_ownership_and_dashboard_provisional(tmp_path
         state = await hub.state()
         by = [item["packet"][0]["payload"].get("by") for item in state["events"] if item["delivered"]]
         assert "user" in by and "unknown" in by and "spira" in by
+        assert [row["by"] for row in state["ledger"]
+                if row.get("device") == "light_02" and row["kind"] == "event"] == ["unknown", "unknown"]
+        kept = next(row for row in state["ledger"] if row["kind"] == "restore" and row["device"] == "light_02")
+        assert kept["what"] == "그대로 (기기 상태가 바뀜)" and kept["by"] == "hub"
         page = (await hub.dashboard.get("/")).text
         order = [page.index(title) for title in ("Waiting work", "Command acknowledgement and read-back",
                  "Person actions and C-3 events", "Restoration and skips")]
@@ -435,6 +439,10 @@ def test_hub_at09_dispatch_crash_and_byte_stable_resend(tmp_path):
         await hub.cycle()
         assert len(stub.packets) == 2
         originals = stub.packets.copy()
+        pending = (await hub.state())["ledger"][-1]["reports"]
+        assert [report["kind"] for report in pending] == ["run", "event"]
+        assert all(not report["delivered"] and report["delivery_error"] == "HTTP 503" for report in pending)
+        assert "재전송 대기" in (await hub.dashboard.get("/")).text
 
         can_crash = asyncio.Event()
         keep_waiting = asyncio.Event()
@@ -1107,6 +1115,117 @@ def test_dashboard_orders_birthday_mood_story(tmp_path):
         }
         page = (await hub.dashboard.get("/")).text
         assert "Task stories" in page and "Person change" in page
+        await hub.close()
+    run(exercise)
+
+
+def test_hub_at20_birthday_seen_ledger(tmp_path):
+    async def exercise():
+        clock = Clock("2026-10-15T21:11:55+09:00")
+        hub = Scenario(tmp_path, clock, episode="ep_9031")
+        install_birthday(hub)
+        hub.world.native["mqtt:fridge_01"].spec.update(
+            local_operation_reporting=True, assumption="Virtual panel assumed",
+        )
+        hub.boot()
+        await hub.runtime.discover()
+        assert await hub.runtime.refresh()
+        pending, = (await hub.state())["ledger"]
+        assert pending["reports"] == [
+            {"kind": "ack", "id": "ep_9031/1", "delivered": False, "delivery_error": None},
+        ]
+        assert "ack 전송 대기" in (await hub.dashboard.get("/")).text
+        await hub.runtime.flush()
+
+        def at(instant):
+            clock.now = datetime.fromisoformat(instant)
+
+        at("2026-10-16T08:40:00+09:00")
+        response = await hub.http.post("/v1/cards/nc_331/reactions", json=fixture("reactions.json")[0])
+        assert response.status_code == 200
+        await hub.reconcile()
+        at("2026-10-16T18:05:10+09:00")
+        hub.world.signal("camera.package_removed", "mqtt:sim_camera", removed_count=1, remaining_count=0)
+        await hub.runtime.flush()
+        await hub.cycle()
+        at("2026-10-16T18:07:44+09:00")
+        hub.world.change("mqtt:fridge_01", {}, event="fridge.door_opened", local=True)
+        await hub.cycle()
+        at("2026-10-17T13:30:00+09:00")
+        await hub.cycle()
+        at("2026-10-17T13:52:29+09:00")
+        guest(hub.world, clock)
+        await hub.cycle()
+        at("2026-10-17T14:00:00+09:00")
+        await hub.cycle()
+        at("2026-10-17T14:20:02+09:00")
+        hub.world.change("mqtt:oven_01", {"in_use": True}, event="oven.started", local=True, job="job_person")
+        at("2026-10-17T15:10:05+09:00")
+        hub.world.change("mqtt:light_01", {"color": {"kelvin": 2700}}, local=True)
+        await hub.cycle()
+        at("2026-10-17T17:50:00+09:00")
+        hub.world.signal("presence.room_empty", "mqtt:sim_presence")
+        await hub.runtime.step()
+        pending = (await hub.state())["ledger"][-5:]
+        assert [row["reports"][0]["kind"] for row in pending] == ["event", "restore", "restore", "restore", "restore"]
+        assert all(not report["delivered"] for row in pending for report in row["reports"])
+        await hub.runtime.flush()
+        await hub.shutdown()
+        hub.boot()
+        await hub.reconcile()
+
+        response = await hub.dashboard.get("/state")
+        assert response.status_code == 200
+        state = response.json()
+        assert state["household"] == "h_042"
+        assert state["current_plans"] == [{"plan_id": "ep_9031", "plan_version": 3, "task_count": 5}]
+        assert state["server_confirmed"]
+        ledger = state["ledger"]
+        assert [row["at"] for row in ledger] == sorted(row["at"] for row in ledger)
+        assert [(row["label"], row["what"], row["by"], [item["kind"] for item in row["reports"]])
+                for row in ledger] == [
+            ("—", "계획 v1 받음 · 할 일 6", "hub", ["ack"]),
+            ("—", "계획 v2 받음 · 할 일 5 · 청소기 취소", "hub", ["ack"]),
+            ("현관", "택배 들임", "hub", ["event"]),
+            ("—", "계획 v3 받음 · 할 일 5 · 택배 기다림 해제", "hub", ["ack"]),
+            ("냉장고", "안내 표시", "spira", ["run", "event"]),
+            ("냉장고", "안내 표시", "spira", ["run", "event"]),
+            ("냉장고", "문 열림", "user", ["event"]),
+            ("인덕션", "잠금", "spira", ["run", "event"]),
+            ("전기포트", "끔", "spira", ["run", "event"]),
+            ("현관", "손님 도착", "hub", ["event"]),
+            ("TV", "어린이 파티 화면", "spira", ["run", "event"]),
+            ("조명", "색조 330°", "spira", ["run", "event"]),
+            ("오븐", "170° 20분 대기", "spira", ["run", "event"]),
+            ("오븐", "시작", "user", ["event"]),
+            ("조명", "색조 330° → 2700K", "user", ["event"]),
+            ("—", "일정 끝 관찰", "hub", ["event"]),
+            ("인덕션", "되돌림 → 잠금 해제", "spira", ["restore", "event"]),
+            ("전기포트", "되돌림 → 켜짐", "spira", ["restore", "event"]),
+            ("TV", "되돌림 → 꺼짐", "spira", ["restore", "event"]),
+            ("조명", "그대로 (사람이 바꿈)", "hub", ["restore"]),
+        ]
+        assert ledger[12]["acknowledgement"]["status"] == "ACCEPTED"
+        assert ledger[12]["read_back"]["preset"] == {"temp_c": 170, "minutes": 20}
+        assert ledger[-1]["status"] == "skipped_user_changed"
+        reports = [report for row in ledger for report in row["reports"]]
+        assert all(report["delivered"] and report["delivery_error"] is None for report in reports)
+        receipts = await hub.receipts()
+        events = {event["event_id"]: event for batch in receipts["events"] for event in batch}
+        assert [events[row["reports"][0]["id"]]["payload"]["by"] for row in ledger[13:15]] == ["user", "user"]
+        assert {report["id"] for report in reports if report["kind"] == "event"} == events.keys()
+        assert {report["id"] for report in reports if report["kind"] in {"run", "restore"}} == {
+            item["result_id"] for item in receipts["executions"]
+        }
+
+        page = (await hub.dashboard.get("/")).text
+        assert page.index("Hub · 이 집이 본 것") < page.index("Waiting work")
+        assert "h_042 · ep_9031 계획 v3 · 할 일 5 · Server 연결됨" in page
+        assert 'href="#detail"' in page and 'id="detail"' in page
+        assert page.count('<tr class="recent">') == 3
+        assert all(f'<th scope="col">{label}</th>' in page for label in ("시각", "기기", "일", "누가", "Server로"))
+        assert all(label in page for label in ("ack 204", "event 보냄", "결과 보냄", "restore 보냄", "사람이 바꿈"))
+        assert 'class="by user">사람' in page and 'class="by hub">집' in page
         await hub.close()
     run(exercise)
 
