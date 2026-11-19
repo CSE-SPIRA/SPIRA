@@ -404,7 +404,7 @@ Column types are binding; extra internal columns are allowed.
 | `episodes` | `id text pk`, `household_id`, `status` (§5.2), `shared_at`, `received_at`, `source_ids text[]`, `judged bool`, `stage` (`s1`/`s2`/`s5`/`done`, last committed step, §2.4), `quiet_due null`, `plan_version int`, `context jsonb` (S2), `intent jsonb` (S3), `error jsonb`, `closed_at`, `created_at`, `updated_at` | Index (`household_id`, `status`), (`household_id`, `shared_at`) |
 | `episode_images` | `id`, `episode_id`, `path`, `read bool`, `created_at` | Deleted after the extraction of its pass is committed (≤ 1 day) |
 | `orders` | `episode_id`, `order_no text null`, `mall text null`, `eta_text text null` | eta is stored only |
-| `order_items` | `id text pk` (`it_…`), `episode_id`, `order_no null`, `name null`, `type null`, `grp null`, `label`, `qty int null`, `deal null`, `attributes jsonb`, `masked bool`, `created_at` | Masked rows: name/type/attributes null |
+| `order_items` | `episode_id`, `id text` (`it_…`, numbered inside the episode); pk (`episode_id`, `id`), `order_no null`, `name null`, `type null`, `grp null`, `label`, `qty int null`, `deal null`, `attributes jsonb`, `masked bool`, `created_at` | Masked rows: name/type/attributes null |
 | `tasks` | `episode_id`, `task_id`, `card_id null`, `source`, `way`, `status` (§5.2), `need`, `line`, `actions jsonb`, `trigger jsonb`, `end jsonb`, `target_room null`, `end_after_start_minutes null`, `meta jsonb` (item, kind, point, intent_change, rule ids), `started_at null`, `ended_at null`, `drop_reason null`; pk (`episode_id`, `task_id`) | One row per task; values in contract form |
 | `plans` | `episode_id`, `version int`, `body jsonb` (C-1), `devices_revision`, `created_at`, `ack jsonb null`, `acked_at null`; pk (`episode_id`, `version`) | Every published version; `plan_id` → episode → household for hub auth (§12.1) |
 | `cards` | `id text pk`, `episode_id`, `bundle_index int`, `ordinal int` (1, 2, 3 … per episode, never reused), `intent_id`, `template`, `text`, `starts_at null`, `stopped bool`, `archived bool`, `notify bool`, `updated_at`, `seq bigint` | At most 2 non-archived cards per episode (§14). `seq` from a household sequence, set on every write (§12.2 cards) |
@@ -508,8 +508,8 @@ The exact texts are in those files; each stage section below gives the schema, t
 
 1. Under the episode lock: if `quiet_due > now` (a capture arrived meanwhile) → stop; the newer timer runs. Else status → `reading`, take unread images, up to `max_images_per_call` (10); the rest run in a second pass right after. Commit.
 2. LLM call `s1` (§7.3) with those images, outside any lock.
-3. Post-process every returned item (§7.4) and dedupe **inside this pass** by (`order_no`, `name`) or exact `name` — before masking drops the name.
-4. Lock the household, then the episode (§2.4). Merge into the episode: unmasked items dedupe against stored items by (`order_no`, `type`) or exact `type`; masked items are never merged across passes (a masked item seen in two passes counts twice, known limit). If an `order_no` already belongs to another open episode of the household, merge into that one instead (APP-07). Store orders (order_no, mall, eta text), set `stage = s1`, mark the images read. Commit. **Then** delete the image files.
+3. Post-process every returned item (§7.4) and dedupe **inside this pass** — before masking drops the name. Same item = same `name`, and the shown `qty` and the `order_no` are **each equal or missing on one side** (overlapping screenshots often show one of them only). Same name with a different `qty` is a second purchase and stays separate. When merging, a missing `qty` / `order_no` / `deal` is filled from the other copy.
+4. Lock the household, then the episode (§2.4). Merge into the episode: unmasked items dedupe against stored items with the same rule (`name`, `qty`, `order_no`); masked items are never merged across passes (a masked item seen in two passes counts twice, known limit). If an `order_no` already belongs to another open episode of the household, merge into that one instead (APP-07). Store orders (order_no, mall, eta text), set `stage = s1`, mark the images read. Commit. **Then** delete the image files.
 5. If the episode has no items at all (this and earlier passes) → status `read_failed`, card-less notification flag for the app (APP-14), stop.
 6. If every item is masked → no S2–S5; status `judged`, `intent = {bundles: [], none_reason: "all_masked"}`; the app shows only `masked_count`.
 7. Not judged yet → run S2 → S5 now (do not wait 8 h). Already judged and new items were added → re-run from S2 (§14).
@@ -796,7 +796,7 @@ Order: `[의도 n]` per bundle (unclassified first line added) → `[관리법 �
 
 - Intent block: situation fields "모름" when empty; time `"{요일}요일 {start}~{end} ({days}일 뒤)"` or `"모름 (일정이 아직 없음)"`; items with qty and attributes.
 - Device line: `- {id} · {Korean name} · {room or 방 모름} · {cmd}({param} {lo}~{hi} / {a}/{b}/…), …`; text commands as `{cmd}(글자)`; commands without values as the name only.
-- Reaction lines: off → line text + action keys; changed → `"손님 도착 뒤 조명을 색온도 2700K로 바꿈"` style text from `changes`.
+- Reaction lines: off → line text + action keys; changed → `"{일정 시작 n분 뒤 }{Korean device name}을 {property}({param value, …})로 바꿈"` from `changes` (the time part only when `after_start_minutes` is set), e.g. `"일정 시작 70분 뒤 조명을 color_temp(kelvin 2700)로 바꿈"`.
 
 ### 10.6 Schema
 
@@ -851,13 +851,13 @@ Needs first, then tasks only where a listed device fulfils a need, then notice t
 
 ### 11.1 Confirm (`finalize(episode)`)
 
-Runs under the household lock (§2.4) on the state as it is now. Household paused → every not-started task `cancelled`, nothing new goes live.
+Runs under the household lock (§2.4) on the state as it is now; `now` is read after the lock is taken, so a card's `updated_at` is never earlier than a `server_time` already returned by the card poll (§12.2). Household paused → every not-started task `cancelled`, nothing new goes live.
 
 1. **Safety net** (drop the task, record `drop_reason`):
    - a command not allowed by `command_policy.yaml` for the task's `way` (run → `run` list; standby → `standby_pattern`; notice → `notice`), or containing a `deny_words` word → `unsafe_cmd`. Applied to situation and per-item tasks; an unknown command is unsafe (fail closed);
    - device or cmd not in the current hub list / in `never` → `not_delegated`;
    - a value outside `value_schema` → `value_out_of_range`;
-   - `target_room` set and ≠ every chosen device's room, or the device room is null for a room-specific task → `room_mismatch`;
+   - `target_room` set: actions on a device whose room is not `target_room` (or null) are removed from the task and kept in `meta.room_removed` (not shown on the card); only a task left with no action is dropped `room_mismatch`;
    - a noisy device whose `time` trigger falls in `quiet_hours` (22:00–08:00) → `quiet_hours` (event triggers are guarded by the hub, `blocked: quiet_hours`);
    - a `time` trigger earlier than `now − late_grace_min`, or an event window whose `to` is in the past → `late` (re-runs, restart recovery and late packages all use this rule);
    - an end time not after its trigger time → `late`.
@@ -915,7 +915,7 @@ lines:
 
 Recompute a line whenever an ack, execution result, user event or reaction for its task arrives:
 
-1. `off` if unchecked; `stopped` if the card is stopped; `cancelled` / `dropped` from the task status; `held` if held.
+1. `off` if unchecked; `stopped` if the card is stopped; `failed` (`rejected_note`) if the ack rejected the task or no ack came in time (checked before the task status, since such a task is `dropped` with `rejected`); `cancelled` / `dropped` from the task status; `held` if held.
 2. Else from the task's **expected actions** (each (device, cmd) in the published task). For each action take its latest result of the latest operation (by `at`, then `received_at`); a final result (`completed`, `failed`, `blocked`, `unknown`, `unverifiable`) is never replaced by a later `running`. An action with no result is pending. Then: every action `completed` → `done`; some `completed` and every other action final → `partial`; some `completed` and others pending/running → `running`; none completed and every action final: any `failed` → `failed`, any `blocked` → `blocked` (note from `blocked_note`), else `unknown`; any `running` → `running`; nothing yet → `scheduled`. Ack rejection of the task, or no ack within `ack_timeout_min` → `failed` + `rejected_note` (§12.2).
 3. `user_changed` overrides `done`/`partial` when, after the task's first `completed` result and before the window closes, an event `{type}.changed` with `by: user` arrives for one of the line's devices.
 4. Priority when several apply: off, stopped > user_changed > done, partial > running > failed, unknown, blocked > scheduled.
@@ -987,16 +987,16 @@ The API surface, paths, bodies and status codes are in `contracts/openapi/app.ya
 | `PUT …/calendar` | §8.5 |
 | `POST …/pause` | Household lock. true: cancel not-started tasks of every open episode (publish each, same transaction); later orders become `paused_skip` (§7.1); re-runs and S5 add nothing while paused (§11.1). false: later orders judged again. Return the state |
 | `GET …/episodes` | Newest first by `shared_at`, `limit` (≤ 100), `before` cursor |
-| `GET …/cards?since=` | Every card write takes the household lock and sets `updated_at = now()` and `seq` inside it; this read takes the same lock (shared), so no write can commit with an `updated_at` at or before the returned `server_time`. Return cards with `updated_at > since` (or all non-archived cards of open episodes), `server_time` = the time read under the lock. Archived cards are returned once more with their final state, then never |
+| `GET …/cards?since=` | `since` with a `+` left unencoded (arrives as a space) is accepted. Every card write takes the household lock and sets `updated_at = now()` and `seq` inside it; this read takes the same lock (shared), so no write can commit with an `updated_at` at or before the returned `server_time`. Return cards with `updated_at > since` (or all non-archived cards of open episodes), `server_time` = the time read under the lock. Archived cards are returned once more with their final state, then never |
 | `GET …/memory`, `DELETE …/memory/{case_id}` | §13.5 |
 | `POST /v1/orders` | §7.1 |
 | `GET /v1/episodes/{id}` | Items (unmasked), `item_count`, `masked_count`, item tasks with state, `card_ids` = non-archived cards (≤ 2, `episode.json`) |
 | `PUT /v1/episodes/{id}/order` | §14 (order edit) → 202 |
 | `GET /v1/episodes/{id}/rationale` | Assemble from stored values only (no LLM): intents (+card ids, basis), evidence from `context`, unbundled, masked count, tasks (+devices with type and room), item tasks, executions (latest final result per task and device), observations (verdict and feedback per card) |
 | `POST /v1/cards/{id}/reactions` | §11.7 |
-| `PUT /v1/hub/households/{hid}/devices` | Revision lower than stored → 409 `stale_revision`; equal → 200 no change; higher → store. Plans already published keep their `devices_revision` (the hub checks delegation at run time) |
+| `PUT /v1/hub/households/{hid}/devices` | The same device `id` twice in one list → 422 `validation_error` (`details.path` = the second one). Revision lower than stored → 409 `stale_revision`; equal → 200 no change; higher → store. Plans already published keep their `devices_revision` (the hub checks delegation at run time) |
 | `GET /v1/hub/plans?household=` | Latest version of every episode that §11.3 says is still pulled + `paused` + `devices_revision` |
-| `POST /v1/hub/plans/{plan_id}/ack` | Same `plan_version` already acked with the same body → 200, nothing else. `plan_version` older than the latest → stored on that version only; never changes tasks of a newer version. Unknown task ids in `rejected_tasks` → 422. `status: rejected` (whole plan unreadable) → every task of that version that is new in it fails; otherwise only the listed tasks fail. A failed task → `dropped` (`rejected`), line `failed` with `rejected_note`, never re-planned. An ack arriving after `ack_timeout_min` for the latest version: lines failed only by the timeout and whose trigger is still ahead go back to `live` |
+| `POST /v1/hub/plans/{plan_id}/ack` | Every accepted ack answers `204` (`hub.yaml`). Same `plan_version` already acked with the same body → 204, nothing else; with a different body → 204, ignored (the first ack stands). Unknown `plan_version` → 404. `plan_version` older than the latest → stored on that version only; never changes tasks of a newer version. Unknown task ids in `rejected_tasks` → 422. `status: rejected` (whole plan unreadable) → every task of that version that is new in it fails; otherwise only the listed tasks fail. A failed task → `dropped` (`rejected`), line `failed` with `rejected_note`, never re-planned. An ack arriving after `ack_timeout_min` for the latest version: lines failed only by the timeout and whose trigger is still ahead go back to `live` |
 | `POST /v1/hub/events` | The outer body is validated as an object with an `events` array (else 422). **Each element is validated on its own** with `event.json` + `validate` (no whole-body model): invalid (schema, unknown device, other household) → `rejected` with code (an element without a usable `event_id` is reported by its array index); valid → one transaction per event (§2.4): duplicate → accepted, skip; else store, then `package.brought_in` → §12.4, others → S7 (§13). `plans_changed` = a new version was published while handling the batch |
 | `POST /v1/hub/executions` | Duplicate `result_id` → `{duplicate: true}`. Else, in one transaction: store; `task_id` must be a task of that `plan_version` and `device`/`cmd` one of its actions, else 422; set `started_at` / `start_uncertain` (§5.2); late start of a cancelled task → restore true and a new version (§11.3); recompute the line (§11.5); pass to S7. A result for an older `plan_version` updates its task's state and observation the same way (results are per task, not per version); it never re-lives a cancelled task |
 
@@ -1337,3 +1337,17 @@ Not yet in the Notion server spec (synchronised in one pass later). B.2 lists th
 | R23 | `summary.waiting_for` only after the trigger window opens | §11.2, T22 |
 | R24 | `EMBED_MODE=mock` for tests; `spira-kb[embed]` is an optional extra | §3.1, §3.2, §17 |
 | R25 | Draft tasks are never stored (wording aligned with §5.2) | §10 |
+| R26 | Duplicate items: same name, and qty and order_no each equal or missing on one side; same rule inside a pass and across passes (11-19, 서진) | §7.2, T4 |
+| R27 | `order_items` pk (`episode_id`, `id`): `it_n` is numbered inside the episode | §5.1 |
+| R28 | Room check per action: only the actions in another room are removed (recorded in `meta.room_removed`, not on the card); the task is dropped only when none remain (11-19, 서진) | §11.1, T23 |
+| R29 | `pick_reps`: when the list is already full, `none` (share ≥ `none_min`) takes the last place | §8.3 |
+| R30 | Calendar tagging: ids missing from the LLM answer get `[]` with `tagged = true` (not retried); the retry text is `s1_retry.txt` | §8.5, T12 |
+| R31 | `episodes.stage` stays `s2` after S3 and S4 (their results live in `intent`); S5 sets `done` when it commits | §2.4, T44 |
+| R32 | A held run task carries the end `{on: event_end, restore: true}` (cleaner only: `false`) until its time is found (§14) | §10.4, §11.6 |
+| R33 | A situation `notice` task uses the fridge rule of `item_tasks.yaml`: trigger `package.brought_in` (released false) and the fridge end | §10.4 |
+| R34 | Shared-screen word check (`public_text`): words = every bundle's `intent_text`, intent name, `situation.event` / `guests` / `theme` and calendar tags | §10.4, T66 |
+| R35 | Drops are kept: S4 drops in `episodes.intent.s4` (`dropped`, `skipped_bundles`); S5 drops as `tasks` rows with status `dropped` and `drop_reason` (shown in the rationale) | §10.9, §11.9 |
+| R36 | `finalize` reads `now` after the household lock (card `updated_at` vs the poll's `server_time`) | §11.1, §12.2 |
+| R37 | Line state: an ack rejection is checked before the task status (`dropped` + `rejected` → `failed`) | §11.5, T31 |
+| R38 | Ack answers 204 as `hub.yaml` says (the spec said 200 for a repeat); a different body for an acked version is ignored; duplicate device ids → 422; unencoded `+` in `since` accepted (11-19, 서진) | §12.2, T50 |
+| R39 | Build order (11-19, 서진): S1–S5 → dry run tool → S6 minimal API (households, profile, calendar, cards, devices, plan pull, ack) → dry run A/B → review → rest of S6 and S7 → hub integration 11/27 | §12, §13 |
