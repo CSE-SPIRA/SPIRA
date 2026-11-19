@@ -31,7 +31,7 @@ Each instance starts at the first plan and card fixtures for its selected
 episode. Restart to replay from the beginning. The birthday line-off advances
 to v2 and a package event advances the fixture to its released plan. The
 committed birthday event and execution transcript unlocks the final card,
-rationale, and memory snapshots. Posting the committed family calendar
+episode, and memory snapshots. Posting the committed family calendar
 advances the held card and plan. Initial and derived polling timestamps use
 fixture time. The task trigger times stay at their committed values.
 
@@ -42,9 +42,11 @@ cancellations. Order uploads and edits return acknowledgement for the selected
 episode. Profile writes and device registrations exercise their contract
 responses without re-planning the fixture. The onboarding response uses the
 selected household ID and the committed demo key. Rationale returns 404 when
-there is no snapshot at the current step. Memory is empty before the birthday
-final snapshot and in the other episodes. The family episode detail uses the
-initial plan timestamp and held card ID with empty item lists.
+there is no committed snapshot for the published episode. The birthday and
+groceries episodes serve their committed rationale as soon as they are published.
+Memory is empty before the birthday final snapshot and in the other episodes.
+The family episode detail uses the initial plan timestamp and held card ID with
+empty item lists.
 
 The Simulator judge can read `GET /_fixture/receipts`. Its `events` array
 contains posted JSON batches and its `executions` array contains posted JSON

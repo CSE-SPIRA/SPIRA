@@ -2,10 +2,17 @@
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
 from . import create_app
-from .test_fixture_server import HEADERS, check_schema
+from .test_fixture_server import (
+    EPISODE,
+    HEADERS,
+    ContractClient,
+    check_schema,
+    share_order,
+)
 
 SELECT = "/_fixture/scene/next-order"
 ACKS = "/_fixture/scene/acks"
@@ -50,6 +57,25 @@ def test_scene_selection_publishes_on_the_next_valid_new_order():
     assert client.get(CARDS).json()["cards"] == []
     assert client.get("/v1/episodes/ep_9150").json()["household_id"] == "h_042"
     assert client.get(PLANS).json()["plans"][0]["plan_id"] == "ep_9150"
+
+
+@pytest.mark.parametrize("episode_id", ["ep_9031", "ep_9150"])
+def test_scene_order_exposes_rationale_at_first_card_poll(episode_id):
+    http = TestClient(create_app(scene_controls=True, demo_mode=True), headers=HEADERS)
+    client = ContractClient(http, episode_id, set())
+    rationale = f"{EPISODE}/rationale"
+    assert http.post(SELECT, json={"episode_id": episode_id}).status_code == 202
+    initial = client.cards()
+    assert initial["cards"] == []
+    assert client.request("GET", rationale, 404)["code"] == "not_found"
+
+    assert share_order(client, 202, "scene-share") == {
+        "episode_id": episode_id,
+        "status": "received",
+    }
+    cards = client.cards(since=initial["server_time"])["cards"]
+    assert [card["card_id"] for card in cards] == client.fixture("episode.json")["card_ids"]
+    assert client.request("GET", rationale) == client.fixture("rationale.json")
 
 
 def test_scene_demo_wall_times_and_live_revisions():

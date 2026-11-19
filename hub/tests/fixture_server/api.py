@@ -325,11 +325,7 @@ def create_app(
     @app.get("/v1/episodes/{episode_id}/rationale", dependencies=app_auth)
     async def get_rationale(episode_id: str):
         require_episode(episode_id)
-        rationale = (
-            replay.load(Rationale, "rationale.json")
-            if replay.finished or replay.final_card is None
-            else None
-        )
+        rationale = replay.load(Rationale, "rationale.json")
         if rationale is None:
             raise FixtureError(
                 404, "not_found", "No rationale snapshot at this fixture step"

@@ -224,7 +224,7 @@ def replay_birthday(client):
     initial = client.cards()
     assert initial["cards"] == [fixture("card.v1.json")]
     assert client.cards(since=initial["server_time"])["cards"] == []
-    assert request("GET", f"{EPISODE}/rationale", 404)["code"] == "not_found"
+    assert request("GET", f"{EPISODE}/rationale") == fixture("rationale.json")
     request("POST", ACK, 204, json=fixture("ack.v1.json"))
     assert fixture("reactions.json") == [{"reaction": "line_off", "task_id": "t_clean#1"}]
     updated = client.react(fixture("reactions.json")[0])
