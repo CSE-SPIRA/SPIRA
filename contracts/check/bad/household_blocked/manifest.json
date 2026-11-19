@@ -1,0 +1,9 @@
+{
+  "$comment": "맞벌이 without 부부·커플 is a blocked combination (kb/household_types.json); the app could never store it (APP-12)",
+  "expect": "household types",
+  "files": {
+    "household.create.json": {
+      "schema": "household_create.json"
+    }
+  }
+}

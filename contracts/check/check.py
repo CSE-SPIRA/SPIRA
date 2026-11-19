@@ -2,7 +2,8 @@
 
 1. enums.json == enum lists in schemas/common.json, and every enums.json used_in path exists.
 2. kb/ lists: ids unique, related tags exist, counts.
-3. Every fixture (fixtures/*/manifest.json) passes its schema and the cross-file rules below.
+3. Every fixture (fixtures/*/manifest.json) passes its schema and the cross-file rules below,
+   including household types (known values, one per pick-one axis, no blocked combination).
 4. Every case in check/bad/ fails (proves the checks bite).
 5. openapi/*.yaml are valid OpenAPI 3.1 and all $refs resolve.
 """
@@ -136,6 +137,49 @@ def check_kb() -> None:
             err(f"kb/household_types.json: intent_requirements '{intent}' not in intents.json")
 
 
+# ---------- household types (kb/household_types.json) ----------
+HOUSE = load(ROOT / "kb/household_types.json")
+
+
+def min_people(t: set[str]) -> int:
+    n = (2 if "부부·커플" in t else 1) + sum(c in t for c in HOUSE["child_types"]) + (1 if "부모 + 성인 자녀" in t else 0)
+    return max(n, 3) if "3대 함께" in t else n
+
+
+def household_problem(types: list[str]) -> str | None:
+    """None if the app could store these types; else why not. Same rules as SPIRA_KB spira/household.py rule_level
+    (blocked only; rare is allowed) and server/spira_server/kb/household.py."""
+    known = {x for a in HOUSE["axes"].values() for x in a["types"]}
+    unknown = [x for x in types if x not in known]
+    if unknown:
+        return f"unknown household type {unknown}"
+    for axis, spec in HOUSE["axes"].items():
+        if spec["pick"] == "one" and sum(x in spec["types"] for x in types) > 1:
+            return f"more than one {axis}"
+    t = set(types)
+    size = next((x for x in HOUSE["axes"]["size"]["types"] if x in t), None)
+    kids = {c for c in HOUSE["child_types"] if c in t}
+    cap = HOUSE["size_max"].get(size)
+    if cap is not None and min_people(t) > cap:
+        return f"blocked: at least {min_people(t)} people but size is {size}"
+    if "룸메이트·셰어하우스" in t and (t & {"부부·커플", "부모 + 성인 자녀", "3대 함께"} or kids):
+        return "blocked: 룸메이트·셰어하우스 with a family type"
+    if "맞벌이" in t and "부부·커플" not in t:
+        return "blocked: 맞벌이 without 부부·커플"
+    if "은퇴·노년" in t and t & {"맞벌이", "재택근무"}:
+        return "blocked: 은퇴·노년 with 맞벌이 or 재택근무"
+    return None
+
+
+def household_types_of(schema: str, doc) -> list[list[str]]:
+    if schema in ("household_create.json", "profile.json"):
+        return [doc["household_types"]]
+    if schema == "case_row.json":
+        types = doc["household"]["types"]
+        return [types] if types else []
+    return []
+
+
 # ---------- 3. cross-file rules ----------
 def device_map(devices: dict) -> dict:
     return {d["id"]: d for d in devices["devices"]}
@@ -238,6 +282,10 @@ def check_scenario(folder: Path, manifest: dict, data: dict) -> None:
     for n, d in data.items():
         schema = manifest["files"][n]["schema"]
         where = f"{folder.name}/{n}"
+        for types in household_types_of(schema, d):
+            problem = household_problem(types)
+            if problem:
+                err(f"{where}: household types {types}: {problem}")
         if schema == "plan_pull.json":
             for p in d["plans"]:
                 check_plan(where, p, devices)
