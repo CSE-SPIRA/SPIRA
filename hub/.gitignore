@@ -1,0 +1,3 @@
+*.sqlite3.lock
+*.sqlite3-shm
+*.sqlite3-wal
