@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 
+import pytest
 from spira_contracts.validate import validate
 from sqlalchemy import select
 
@@ -12,6 +13,14 @@ from spira_server.pipeline import s1_extract
 
 from .factories import data, household, png
 from .s1_helpers import THU_2100, client, post, record_s1, run_quiet
+
+
+@pytest.fixture(autouse=True)
+def downstream(monkeypatch):
+    """S1 tests stop at S1: record which episodes would go on to S2-S5."""
+    called: list[str] = []
+    monkeypatch.setattr(s1_extract.runner, "after_s1", called.append)
+    return called
 
 
 def _items(episode_id: str) -> list[OrderItem]:
@@ -54,7 +63,7 @@ def test_t2_two_captures_one_episode_one_call(mock_llm, app_headers):
     assert mock_llm.calls("s1") == 1
 
 
-def test_t4_ep9031_items(mock_llm, app_headers):
+def test_t4_ep9031_items(mock_llm, app_headers, downstream):
     r1, _ = _two_captures(mock_llm, app_headers)
     ep = r1.json()["episode_id"]
     run_quiet(ep, THU_2100 + timedelta(minutes=12))
@@ -68,7 +77,8 @@ def test_t4_ep9031_items(mock_llm, app_headers):
     assert by_type["컵케이크 믹스"].qty is None
     assert by_type["케이크 토퍼"].attributes == [{"key": "테마", "value": "디즈니 공주", "source": "디즈니 공주"}]
     e = _episode(ep)
-    assert (e.stage, e.status) == ("s2", "reading")         # S3-S5 not installed yet
+    assert (e.stage, e.status) == ("s1", "reading")
+    assert downstream == [ep]                                 # handed on to S2-S5 once
     with session_scope() as s:
         assert s.execute(select(EpisodeImage).where(EpisodeImage.read.is_(False))).first() is None
         paths = [i.path for i in s.execute(select(EpisodeImage)).scalars()]

@@ -1,0 +1,296 @@
+{
+  "note": "ep_9031 S2 context (C2) as in the expected S3 message, the items, and the S3 decision of rationale.json",
+  "context": {
+    "for_intent": {
+      "order_time": {
+        "shared_at": "2026-10-15T21:00:08+09:00",
+        "weekday": "목"
+      },
+      "this_home": {
+        "household_types": [
+          "3~4인",
+          "부부·커플",
+          "영유아 자녀",
+          "맞벌이"
+        ],
+        "unusual_items": {
+          "status": "list",
+          "items": [
+            {
+              "item": "케이크 토퍼",
+              "why": "이 집이 산 적 없는 종류"
+            },
+            {
+              "item": "고깔모자",
+              "why": "이 집이 산 적 없는 종류"
+            },
+            {
+              "item": "풍선",
+              "why": "이 집이 산 적 없는 종류"
+            },
+            {
+              "item": "아이싱 펜",
+              "why": "이 집이 산 적 없는 종류"
+            },
+            {
+              "item": "컵케이크 믹스",
+              "why": "90일에 1번 산 드문 물건"
+            },
+            {
+              "item": "휘핑크림",
+              "why": "90일에 1번 산 드문 물건"
+            },
+            {
+              "item": "딸기",
+              "why": "평소 1개 → 이번 2개"
+            }
+          ],
+          "usual": [
+            "세탁 세제",
+            "로션"
+          ]
+        },
+        "calendar": [
+          {
+            "id": "c1",
+            "days_after": 2,
+            "day": "토",
+            "tags": [
+              "생일"
+            ],
+            "start": "14:00",
+            "end": "17:00"
+          },
+          {
+            "id": "c2",
+            "days_after": 8,
+            "day": "금",
+            "tags": [
+              "가족 모임"
+            ],
+            "start": "19:00",
+            "end": "21:00"
+          }
+        ]
+      },
+      "kb_neighbors": {
+        "similar_count": 12,
+        "intent_counts": [
+          {
+            "intent_id": "kid_birthday_party",
+            "name": "아이 생일 파티",
+            "n": 9
+          },
+          {
+            "intent_id": "home_baking",
+            "name": "홈베이킹",
+            "n": 2
+          },
+          {
+            "intent_id": "none",
+            "name": "의도 없음",
+            "n": 1
+          }
+        ],
+        "examples": [
+          {
+            "case_id": "syn_A1-3_0018",
+            "items": [
+              "고깔모자",
+              "답례품 봉투",
+              "딸기",
+              "생일 초",
+              "케이크 토퍼",
+              "풍선"
+            ],
+            "intent_id": "kid_birthday_party",
+            "intent_text": "아이 친구들을 집에 초대해 생일 파티를 여는 준비",
+            "situation": {
+              "event": "생일",
+              "guests": "아이 친구들",
+              "activity": null,
+              "theme": null
+            },
+            "calendar_tags": [
+              "생일"
+            ],
+            "case_household_types": [
+              "3~4인",
+              "초등 자녀"
+            ],
+            "overlap": {
+              "k": 4,
+              "n": 6,
+              "items": [
+                "고깔모자",
+                "딸기",
+                "케이크 토퍼",
+                "풍선"
+              ]
+            }
+          },
+          {
+            "case_id": "syn_B1-2_0002",
+            "items": [
+              "딸기",
+              "버터",
+              "짤주머니",
+              "컵케이크 믹스",
+              "휘핑크림"
+            ],
+            "intent_id": "home_baking",
+            "intent_text": "주말에 컵케이크를 구워 보려는 홈베이킹",
+            "situation": {
+              "event": null,
+              "guests": null,
+              "activity": "컵케이크 굽기",
+              "theme": null
+            },
+            "calendar_tags": [],
+            "case_household_types": [
+              "2인",
+              "부부·커플"
+            ],
+            "overlap": {
+              "k": 3,
+              "n": 5,
+              "items": [
+                "딸기",
+                "컵케이크 믹스",
+                "휘핑크림"
+              ]
+            }
+          }
+        ],
+        "note": null
+      }
+    },
+    "snapshot": [
+      "syn_A1-3_0018",
+      "syn_B1-2_0002"
+    ]
+  },
+  "items": [
+    {
+      "item_id": "it_1",
+      "type": "딸기",
+      "qty": 2,
+      "attributes": [
+        {
+          "key": "보관",
+          "value": "냉장",
+          "source": "냉장"
+        }
+      ]
+    },
+    {
+      "item_id": "it_2",
+      "type": "컵케이크 믹스",
+      "qty": null,
+      "attributes": []
+    },
+    {
+      "item_id": "it_3",
+      "type": "휘핑크림",
+      "qty": 1,
+      "attributes": [
+        {
+          "key": "보관",
+          "value": "냉장",
+          "source": "냉장"
+        }
+      ]
+    },
+    {
+      "item_id": "it_4",
+      "type": "세탁 세제",
+      "qty": 1,
+      "attributes": []
+    },
+    {
+      "item_id": "it_5",
+      "type": "로션",
+      "qty": 1,
+      "attributes": []
+    },
+    {
+      "item_id": "it_6",
+      "type": "풍선",
+      "qty": 1,
+      "attributes": []
+    },
+    {
+      "item_id": "it_7",
+      "type": "케이크 토퍼",
+      "qty": 1,
+      "attributes": [
+        {
+          "key": "테마",
+          "value": "디즈니 공주",
+          "source": "디즈니 공주"
+        }
+      ]
+    },
+    {
+      "item_id": "it_8",
+      "type": "고깔모자",
+      "qty": 6,
+      "attributes": []
+    },
+    {
+      "item_id": "it_9",
+      "type": "아이싱 펜",
+      "qty": 1,
+      "attributes": []
+    }
+  ],
+  "decision": {
+    "bundles": [
+      {
+        "intent_id": "kid_birthday_party",
+        "intent_text": "디즈니 공주 테마로 손님 여럿이 오는 아이 생일 파티를 열고, 컵케이크를 굽고 꾸미려는 준비",
+        "items": [
+          "케이크 토퍼",
+          "고깔모자",
+          "풍선",
+          "아이싱 펜",
+          "컵케이크 믹스",
+          "휘핑크림",
+          "딸기"
+        ],
+        "situation": {
+          "event": "생일",
+          "guests": "손님 여러 명",
+          "activity": "컵케이크 굽고 꾸미기",
+          "theme": "디즈니 공주"
+        },
+        "basis": {
+          "intent": [
+            "케이크 토퍼",
+            "고깔모자",
+            "풍선",
+            "가구 유형"
+          ],
+          "event": [
+            "c1",
+            "케이크 토퍼"
+          ],
+          "guests": [
+            "고깔모자",
+            "가구 유형"
+          ],
+          "activity": [
+            "컵케이크 믹스",
+            "아이싱 펜",
+            "휘핑크림"
+          ],
+          "theme": [
+            "케이크 토퍼"
+          ]
+        },
+        "calendar_event_id": "c1"
+      }
+    ],
+    "none_reason": null
+  }
+}
