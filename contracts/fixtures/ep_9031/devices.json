@@ -200,6 +200,154 @@
       ],
       "never": [],
       "noisy": false
+    },
+    {
+      "id": "air_purifier_01",
+      "type": "purifier",
+      "room": "거실",
+      "substrate": "virtual",
+      "commands": [
+        {
+          "cmd": "mode",
+          "value_schema": {
+            "mode": {
+              "enum": [
+                "CLEAN",
+                "AUTO",
+                "CIRCULATOR",
+                "DUAL_CLEAN"
+              ],
+              "default": "CLEAN"
+            }
+          }
+        },
+        {
+          "cmd": "wind_strength",
+          "value_schema": {
+            "wind_strength": {
+              "enum": [
+                "LOW",
+                "MID",
+                "HIGH",
+                "AUTO",
+                "POWER"
+              ],
+              "default": "MID"
+            }
+          }
+        }
+      ],
+      "events": [
+        "changed"
+      ],
+      "never": [],
+      "noisy": false
+    },
+    {
+      "id": "dishwasher_01",
+      "type": "dishwasher",
+      "room": "주방",
+      "substrate": "virtual",
+      "commands": [
+        {
+          "cmd": "set_course_standby",
+          "value_schema": {
+            "course": {
+              "enum": [
+                "DELICATE",
+                "TURBO",
+                "RINSE",
+                "REFRESH",
+                "HEAVY",
+                "NORMAL",
+                "AUTO",
+                "EXPRESS",
+                "MACHINE_CLEAN",
+                "DOWNLOAD_CYCLE"
+              ],
+              "default": "NORMAL"
+            }
+          }
+        },
+        {
+          "cmd": "delayed_start",
+          "value_schema": {
+            "hours": {
+              "range": [
+                1,
+                12
+              ],
+              "default": 1
+            }
+          }
+        }
+      ],
+      "events": [
+        "changed"
+      ],
+      "never": [
+        "start"
+      ],
+      "noisy": true
+    },
+    {
+      "id": "washer_01",
+      "type": "washer",
+      "room": "세탁실",
+      "substrate": "virtual",
+      "commands": [
+        {
+          "cmd": "set_course_standby",
+          "value_schema": {
+            "course": {
+              "enum": [
+                "NORMAL",
+                "DELICATES"
+              ],
+              "default": "NORMAL"
+            }
+          }
+        }
+      ],
+      "events": [
+        "changed"
+      ],
+      "never": [
+        "start"
+      ],
+      "noisy": true
+    },
+    {
+      "id": "plug_iron",
+      "type": "smart_plug",
+      "room": "세탁실",
+      "label": "다리미",
+      "substrate": "virtual",
+      "commands": [
+        {
+          "cmd": "off"
+        }
+      ],
+      "events": [
+        "changed"
+      ],
+      "never": [],
+      "noisy": false
+    },
+    {
+      "id": "plug_router",
+      "type": "smart_plug",
+      "room": "거실",
+      "label": "공유기",
+      "substrate": "virtual",
+      "commands": [],
+      "events": [
+        "changed"
+      ],
+      "never": [
+        "off"
+      ],
+      "noisy": false
     }
   ]
 }

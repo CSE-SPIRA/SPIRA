@@ -119,6 +119,48 @@
       ],
       "never": [],
       "noisy": false
+    },
+    {
+      "id": "air_purifier_01",
+      "type": "purifier",
+      "room": "거실",
+      "substrate": "virtual",
+      "commands": [
+        {
+          "cmd": "mode",
+          "value_schema": {
+            "mode": {
+              "enum": [
+                "CLEAN",
+                "AUTO",
+                "CIRCULATOR",
+                "DUAL_CLEAN"
+              ],
+              "default": "CLEAN"
+            }
+          }
+        },
+        {
+          "cmd": "wind_strength",
+          "value_schema": {
+            "wind_strength": {
+              "enum": [
+                "LOW",
+                "MID",
+                "HIGH",
+                "AUTO",
+                "POWER"
+              ],
+              "default": "MID"
+            }
+          }
+        }
+      ],
+      "events": [
+        "changed"
+      ],
+      "never": [],
+      "noisy": false
     }
   ]
 }
