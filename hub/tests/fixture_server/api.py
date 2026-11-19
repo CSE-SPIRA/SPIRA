@@ -296,7 +296,9 @@ def create_app(episode_id: str = "ep_9031") -> FastAPI:
     async def get_rationale(episode_id: str):
         require_episode(episode_id)
         rationale = (
-            replay.load(Rationale, "rationale.json") if replay.finished else None
+            replay.load(Rationale, "rationale.json")
+            if replay.finished or replay.final_card is None
+            else None
         )
         if rationale is None:
             raise FixtureError(

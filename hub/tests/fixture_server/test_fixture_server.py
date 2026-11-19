@@ -224,18 +224,20 @@ def replay_birthday(client):
     initial = client.cards()
     assert initial["cards"] == [fixture("card.v1.json")]
     assert client.cards(since=initial["server_time"])["cards"] == []
+    assert request("GET", f"{EPISODE}/rationale", 404)["code"] == "not_found"
     request("POST", ACK, 204, json=fixture("ack.v1.json"))
-    reactions = fixture("reactions.json")
-    for reaction in reactions:
-        updated = client.react(reaction)
-        line = next(
-            line for line in updated["lines"] if line["task_id"] == reaction["task_id"]
-        )
-        assert line["state"] == "off"
-        assert line["checked"] is False
-        assert updated["notify"] is False
+    assert fixture("reactions.json") == [{"reaction": "line_off", "task_id": "t_clean#1"}]
+    updated = client.react(fixture("reactions.json")[0])
+    lines = {line["task_id"]: line for line in updated["lines"]}
+    assert lines["t_clean#1"]["state"] == "off"
+    assert lines["t_clean#1"]["checked"] is False
+    assert lines["t_safe#2"]["checked"] is True
+    assert updated["notify"] is False
     assert client.cards(since=initial["server_time"])["cards"] == [updated]
-    assert client.pull()["plans"] == [fixture("plan.v2.json")]
+    plans = client.pull()["plans"]
+    assert plans == [fixture("plan.v2.json")]
+    assert plans[0]["cancelled"] == [{"task_id": "t_clean#1", "restore": False}]
+    assert next(task for task in plans[0]["tasks"] if task["task_id"] == "t_safe#2")["protective"] is True
     client.ack(2)
 
     events = fixture("events.json")
@@ -295,11 +297,23 @@ def replay_birthday(client):
 def replay_groceries(client):
     assert share_order(client, 202, "grocery-share")["episode_id"] == "ep_9150"
     client.register_devices()
-    assert client.pull()["plans"] == [client.fixture("plan.v1.json")]
+    plans = client.pull()["plans"]
+    assert plans == [client.fixture("plan.v1.json")]
     client.ack()
-    assert client.request("GET", EPISODE) == client.fixture("episode.json")
+    episode = client.request("GET", EPISODE)
+    assert episode == client.fixture("episode.json")
     assert client.cards()["cards"] == []
-    assert client.request("GET", f"{EPISODE}/rationale", 404)["code"] == "not_found"
+    rationale = client.request("GET", f"{EPISODE}/rationale")
+    assert rationale == client.fixture("rationale.json")
+    assert not rationale["intents"] and rationale["none_reason"]
+    strawberry = next(item for item in episode["item_tasks"] if item["task_id"] == "t_fridge#2")
+    assert strawberry in rationale["item_tasks"]
+    task = next(task for task in plans[0]["tasks"] if task["task_id"] == strawberry["task_id"])
+    assert task["trigger"]["released"] is False
+    assert task["actions"][0]["value"] == strawberry["text"]
+    birthday = read_json(FIXTURES / "ep_9031" / "episode.json")
+    assert strawberry["text"] != next(item["text"] for item in birthday["item_tasks"]
+                                     if item["item"] == strawberry["item"])
     paused = client.request("POST", f"{APP_HOUSEHOLD}/pause", json={"paused": True})
     assert paused == {"household_id": client.household, "paused": True}
     pull = client.pull()
@@ -380,7 +394,7 @@ def test_line_on_and_stop_derive_versions_from_fixture_actions(peer):
     result = next(
         result
         for result in client.fixture("executions.json")
-        if result.get("status") == "running"
+        if result["kind"] == "run" and result["task_id"] == "t_safe#2"
     )
     assert client.request("POST", "/v1/hub/executions", json=result) == {
         "duplicate": False
@@ -457,7 +471,8 @@ def test_judge_receives_actual_bodies_and_retries(peer):
         "plans_changed": False,
     }
     result = client.fixture("executions.json")[2]
-    assert "observed" not in result
+    result["status"] = "running"
+    result.pop("observed")
     assert client.request("POST", "/v1/hub/executions", json=result) == {
         "duplicate": False
     }
