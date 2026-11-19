@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from . import scheduler
-from .api import app_routes, errors
+from .api import app_routes, errors, hub_routes
 from .db.engine import db_ready
 from .kb import embedding
 from .settings import get_settings
@@ -48,6 +48,7 @@ def create_app(*, start_background: bool = True) -> FastAPI:
     app = FastAPI(title="SPIRA Server", version="0.1.0", lifespan=lifespan)
     errors.install(app)
     app.include_router(app_routes.router)
+    app.include_router(hub_routes.router)
 
     @app.get("/health")
     def health() -> JSONResponse:

@@ -45,7 +45,7 @@ def body(code: str, message: str, details: dict[str, Any] | None = None) -> dict
     return out
 
 
-def _path(loc: tuple) -> str:
+def loc_path(loc: tuple) -> str:
     parts = [str(p) for p in loc if p not in ("body", "query", "path", "header", "form")]
     out = ""
     for p in parts:
@@ -63,7 +63,7 @@ def install(app: FastAPI) -> None:
         first = exc.errors()[0] if exc.errors() else {"loc": (), "msg": "invalid"}
         return JSONResponse(
             body("validation_error", "Request does not match the schema.",
-                 {"path": _path(tuple(first.get("loc", ()))), "reason": first.get("msg", "")}),
+                 {"path": loc_path(tuple(first.get("loc", ()))), "reason": first.get("msg", "")}),
             status_code=422,
         )
 

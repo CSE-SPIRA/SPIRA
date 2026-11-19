@@ -38,3 +38,11 @@ def data(name: str) -> dict:
 
 def fixture(path: str) -> dict:
     return json.loads((FIXTURES / path).read_text(encoding="utf-8"))
+
+
+def hub_key(hid: str = "h_042") -> str:
+    """Give an existing household a known hub key and return it (the factory above discards the plain key)."""
+    key, digest = new_hub_key()
+    with session_scope() as s:
+        s.get(Household, hid).hub_key_hash = digest
+    return key

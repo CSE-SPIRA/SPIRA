@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .. import clock
@@ -90,10 +90,10 @@ def line_state(x: LineInput) -> tuple[str, str | None]:
         return "off", None
     if x.card_stopped:
         return "stopped", None
+    if x.rejected:                             # rejected by ack or ack timeout: task dropped, line failed (§12.2)
+        return "failed", "rejected"
     if x.task_status in ("cancelled", "dropped", "held"):
         return x.task_status, None
-    if x.rejected:
-        return "failed", "rejected"
     latest = [_latest(x.results, d, c) for d, c in x.actions]
     statuses = [r.status if r else None for r in latest]
     completed = [s == "completed" for s in statuses]
@@ -137,6 +137,13 @@ def end_state(items: list[str], restore: bool, ended: bool) -> str | None:
 
 
 # ------------------------------------------------------------------------------------------ card body (§11.2)
+
+def touch(s: Session, card: Card, now: datetime, *, notify: bool = False) -> None:
+    """A later change of the card (§11.2): new updated_at and seq, notify false unless told. Call under the
+    household lock (§12.2 cards)."""
+    card.updated_at, card.notify = now, notify
+    card.seq = s.execute(text("SELECT nextval('card_write_seq')")).scalar_one()
+
 
 def line_when(task: Task) -> dict | None:
     if task.status == "held" or task.trigger is None:

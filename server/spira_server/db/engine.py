@@ -73,10 +73,11 @@ def reset_engines() -> None:
         cached.cache_clear()
 
 
-def lock_household(session: Session, household_id: str) -> Household | None:
-    """Household lock first, then episode rows in id order (spec §2.4)."""
+def lock_household(session: Session, household_id: str, *, shared: bool = False) -> Household | None:
+    """Household lock first, then episode rows in id order (spec §2.4). `shared` (FOR SHARE) is for readers that
+    must not see a write half done, such as the card poll (§12.2)."""
     return session.execute(
-        select(Household).where(Household.id == household_id).with_for_update()
+        select(Household).where(Household.id == household_id).with_for_update(read=shared)
     ).scalar_one_or_none()
 
 
