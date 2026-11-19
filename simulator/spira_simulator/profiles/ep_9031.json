@@ -1,0 +1,384 @@
+{
+  "household_id": "h_042",
+  "devices": [
+    {
+      "target": "mqtt:cleaner_01",
+      "logical_id": "cleaner_01",
+      "device_type": "cleaner",
+      "room": "living_room",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": true,
+      "assumption": "Virtual LG local-operation reporting",
+      "commands": [
+        "clean"
+      ],
+      "properties": {
+        "clean": {
+          "initial": null,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "room": {
+                    "enum": [
+                      "거실",
+                      "주방"
+                    ]
+                  }
+                },
+                "required": [
+                  "room"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "in_use": {
+          "initial": false,
+          "schema": {
+            "type": "boolean"
+          },
+          "hub_write": false,
+          "local_write": false
+        },
+        "job_status": {
+          "initial": "idle",
+          "schema": {
+            "enum": [
+              "idle",
+              "running",
+              "completed",
+              "stopped"
+            ]
+          },
+          "hub_write": false,
+          "local_write": false
+        }
+      },
+      "job": {
+        "trigger_property": "clean",
+        "duration_seconds": 30
+      }
+    },
+    {
+      "target": "mqtt:light_01",
+      "logical_id": "light_01",
+      "device_type": "light",
+      "room": "living_room",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": true,
+      "assumption": "Virtual light panel local-operation reporting",
+      "commands": [
+        "color",
+        "color_temp"
+      ],
+      "properties": {
+        "color": {
+          "initial": {
+            "kelvin": 3000
+          },
+          "schema": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "hue": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 360
+                  },
+                  "saturation": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "brightness": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  }
+                },
+                "required": [
+                  "hue",
+                  "saturation",
+                  "brightness"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kelvin": {
+                    "type": "number",
+                    "minimum": 2700,
+                    "maximum": 6500
+                  }
+                },
+                "required": [
+                  "kelvin"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "power": {
+          "initial": true,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      },
+      "label": "Virtual light panel"
+    },
+    {
+      "target": "mqtt:display_01",
+      "logical_id": "display_01",
+      "device_type": "display",
+      "room": "living_room",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": true,
+      "assumption": "Virtual LG local-operation reporting",
+      "commands": [
+        "play_mood",
+        "off"
+      ],
+      "properties": {
+        "play_mood": {
+          "initial": null,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "scene": {
+                    "enum": [
+                      "kids_party",
+                      "party",
+                      "calm",
+                      "cinema"
+                    ]
+                  }
+                },
+                "required": [
+                  "scene"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "target": "mqtt:cooktop_01",
+      "logical_id": "cooktop_01",
+      "device_type": "cooktop",
+      "room": "kitchen",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": true,
+      "assumption": "Virtual LG local-operation reporting",
+      "commands": [
+        "child_lock"
+      ],
+      "properties": {
+        "child_lock": {
+          "initial": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        "in_use": {
+          "initial": false,
+          "schema": {
+            "type": "boolean"
+          },
+          "hub_write": false
+        }
+      },
+      "prohibited_properties": [
+        "heat"
+      ]
+    },
+    {
+      "target": "mqtt:oven_01",
+      "logical_id": "oven_01",
+      "device_type": "oven",
+      "room": "kitchen",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": true,
+      "assumption": "Virtual LG local-operation reporting",
+      "commands": [
+        "set_cook_standby"
+      ],
+      "properties": {
+        "preset": {
+          "initial": null,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "temp_c": {
+                    "type": "number",
+                    "minimum": 40,
+                    "maximum": 250
+                  },
+                  "minutes": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 180
+                  }
+                },
+                "required": [
+                  "temp_c",
+                  "minutes"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "in_use": {
+          "initial": false,
+          "schema": {
+            "type": "boolean"
+          },
+          "hub_write": false,
+          "local_write": false
+        },
+        "job_status": {
+          "initial": "idle",
+          "schema": {
+            "enum": [
+              "idle",
+              "running",
+              "completed",
+              "stopped"
+            ]
+          },
+          "hub_write": false,
+          "local_write": false
+        }
+      },
+      "job": {
+        "duration_seconds": 1200,
+        "minutes_property": "preset"
+      },
+      "prohibited_properties": [
+        "start",
+        "in_use"
+      ]
+    },
+    {
+      "target": "mqtt:fridge_01",
+      "logical_id": "fridge_01",
+      "device_type": "fridge",
+      "room": "kitchen",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": true,
+      "assumption": "Virtual LG local-operation reporting",
+      "commands": [
+        "show_notice"
+      ],
+      "properties": {
+        "show_notice": {
+          "initial": null,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "door_open": {
+          "initial": false,
+          "schema": {
+            "type": "boolean"
+          },
+          "hub_write": false,
+          "event_type": "fridge.door_opened"
+        }
+      }
+    },
+    {
+      "target": "mqtt:plug_kettle",
+      "logical_id": "plug_kettle",
+      "device_type": "smart_plug",
+      "room": "kitchen",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": false,
+      "commands": [
+        "off"
+      ],
+      "properties": {
+        "power": {
+          "initial": true,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      },
+      "label": "Kettle plug"
+    }
+  ],
+  "home_signals": {
+    "delivery": [
+      {
+        "target": "mqtt:sim_camera",
+        "event_type": "camera.package_removed",
+        "payload": {
+          "removed_count": 1,
+          "remaining_count": 0
+        }
+      }
+    ],
+    "guests_arrive": [
+      {
+        "target": "mqtt:sim_doorbell",
+        "event_type": "doorbell.pressed",
+        "payload": {}
+      },
+      {
+        "target": "mqtt:sim_door_lock",
+        "event_type": "door_lock.opened",
+        "payload": {}
+      },
+      {
+        "target": "mqtt:sim_presence",
+        "event_type": "presence.room_occupied",
+        "payload": {}
+      }
+    ],
+    "event_end": [
+      {
+        "target": "mqtt:sim_presence",
+        "event_type": "presence.room_empty",
+        "payload": {}
+      }
+    ]
+  }
+}
