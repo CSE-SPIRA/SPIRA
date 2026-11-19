@@ -4,6 +4,7 @@ store, publish a plan version, episode status. No LLM.
     finalize(episode_id, s4_result)   one transaction under the household lock
     publish(s, episode, now)          new plan version from the stored tasks
     pulled_plans(s, household_id)     latest versions the hub still pulls (spec §11.3; used by GET /v1/hub/plans)
+    apply_ack(plan_id, ack)           hub ack of a plan version (spec §12.2; POST /v1/hub/plans/{plan_id}/ack)
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ from ..db.models import (
 )
 from ..kb.lists import get_lists
 from .s4_tasks import Catalog, Draft, S4Result, catalog_from
-from .s5_cards import card_text
+from .s5_cards import card_text, touch
 
 log = logging.getLogger(__name__)
 
@@ -192,11 +193,11 @@ class Outcome:
 
 def finalize(episode_id: str, s4: S4Result, *, now: datetime | None = None) -> Outcome:
     cfg = get_config()
-    now = now or clock.now()
     out = Outcome()
     with session_scope() as s:
         ep0 = s.get(Episode, episode_id)
         household = lock_household(s, ep0.household_id)
+        now = now or clock.now()                   # read under the lock: card updated_at vs the poll (§12.2)
         ep = s.execute(select(Episode).where(Episode.id == episode_id).with_for_update()).scalar_one()
         dl = s.get(DeviceList, ep.household_id)
         body = dl.body if dl else {"devices": []}
@@ -452,6 +453,64 @@ def pulled_plans(s: Session, household_id: str) -> list[dict]:
         if live or pending_restore or plan.ack is None:
             out.append(plan.body)
     return out
+
+
+# ----------------------------------------------------------------------------------------------- ack (§12.2)
+
+class AckError(ValueError):
+    """A task id in rejected_tasks that is not a task of that version (422)."""
+
+    def __init__(self, path: str, message: str) -> None:
+        super().__init__(message)
+        self.path = path
+
+
+def apply_ack(plan_id: str, ack: dict, *, now: datetime | None = None) -> str:
+    """Store a hub ack; one transaction under the household lock. Returns what happened:
+    `applied` (latest version), `stale` (older version: stored on it only), `repeat` (same body again) or
+    `ignored` (that version was already acked with another body; the first ack stands).
+    Raises LookupError for an unknown plan version and AckError for an unknown rejected task id."""
+    cfg = get_config()
+    with session_scope() as s:
+        ep0 = s.get(Episode, plan_id)
+        if ep0 is None:
+            raise LookupError(plan_id)
+        lock_household(s, ep0.household_id)
+        ep = s.execute(select(Episode).where(Episode.id == plan_id).with_for_update()).scalar_one()
+        now = now or clock.now()
+        plan = s.get(Plan, (plan_id, ack["plan_version"]))
+        if plan is None:
+            raise LookupError(f"{plan_id} v{ack['plan_version']}")
+        ids = [t["task_id"] for t in plan.body["tasks"]]
+        for i, r in enumerate(ack["rejected_tasks"]):
+            if r["task_id"] not in ids:
+                raise AckError(f"rejected_tasks[{i}].task_id", f"{r['task_id']} is not a task of version "
+                                                               f"{plan.version}.")
+        if plan.ack is not None:
+            return "repeat" if plan.ack == ack else "ignored"
+        plan.ack, plan.acked_at = ack, now
+        if plan.version < ep.plan_version:
+            return "stale"                       # never changes tasks of a newer version
+        if ack["status"] == "rejected":          # whole plan unreadable: every task new in this version fails
+            prev = s.get(Plan, (plan_id, plan.version - 1))
+            before = {t["task_id"] for t in prev.body["tasks"]} if prev else set()
+            failed = [t for t in ids if t not in before]
+        else:
+            failed = [r["task_id"] for r in ack["rejected_tasks"]]
+        note = cfg.card_templates["lines"]["rejected_note"]
+        touched: dict[str, Card] = {}
+        for tid in dict.fromkeys(failed):
+            task = s.get(Task, (plan_id, tid))
+            if task is None or task.status != "live":
+                continue
+            task.status, task.drop_reason = "dropped", "rejected"     # never re-planned (§14 keeps it dropped)
+            for line, card in s.execute(select(CardLine, Card).join(Card, Card.id == CardLine.card_id).where(
+                    Card.episode_id == plan_id, CardLine.task_id == tid)).all():
+                line.state, line.note = "failed", note
+                touched[card.id] = card
+        for card in touched.values():
+            touch(s, card, now)
+        return "applied"
 
 
 def household_paused(s: Session, household_id: str) -> bool:

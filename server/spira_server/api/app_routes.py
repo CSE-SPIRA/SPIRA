@@ -1,23 +1,105 @@
-"""App routes (contracts/openapi/app.yaml). This batch: POST /v1/orders. The rest come with S6."""
+"""App routes (contracts/openapi/app.yaml). This batch: households, profile, calendar, cards and orders.
+Pause, episodes, rationale, order edit, reactions and memory come with the rest of S6."""
 
 from __future__ import annotations
 
 import re
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Path, Query, UploadFile
 from fastapi.responses import JSONResponse
+from spira_contracts.calendar import Calendar
+from spira_contracts.household_create import HouseholdCreate
+from spira_contracts.profile import Profile
+from sqlalchemy import select
 
 from .. import clock
 from ..config import get_config
-from ..pipeline import s1_extract
+from ..db.engine import lock_household, next_id, session_scope
+from ..db.models import Card, Episode, Household
+from ..kb.household import check_types
+from ..pipeline import s1_extract, s2_calendar
+from ..pipeline.s5_cards import card_body
 from ..store.images import image_kind
-from .auth import require_app
+from .auth import new_hub_key, require_app
+from .bodies import body
 from .errors import ApiError
 
 router = APIRouter(dependencies=[Depends(require_app)])
 
-HOUSEHOLD_ID = re.compile(r"^h_[0-9a-z]+$")
+HOUSEHOLD = r"^h_[0-9a-z]+$"
 
+
+def _types(types: list[str]) -> None:
+    reason = check_types(types)
+    if reason:
+        raise ApiError("household_types_invalid", reason, {"path": "household_types"})
+
+
+def _time(value: str | None, name: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return clock.parse(value.replace(" ", "+"))      # a '+' left unencoded in the query arrives as a space
+    except ValueError:
+        raise ApiError("validation_error", f"{name} needs ISO 8601 with offset.", {"path": name}) from None
+
+
+# ------------------------------------------------------------------------------------------------ households
+
+@router.post("/v1/households")
+def post_household(data: dict = body(HouseholdCreate, "household_create.json")) -> JSONResponse:
+    _types(data["household_types"])
+    key, digest = new_hub_key()
+    now = clock.now()
+    with session_scope() as s:
+        hid = next_id(s, "h", "household_id_seq")
+        s.add(Household(id=hid, household_types=data["household_types"], paused=False, hub_key_hash=digest,
+                        created_at=now, updated_at=now))
+    return JSONResponse({"household_id": hid, "hub_api_key": key}, status_code=201)
+
+
+@router.put("/v1/households/{household_id}/profile")
+def put_profile(household_id: str = Path(pattern=HOUSEHOLD),
+                data: dict = body(Profile, "profile.json")) -> dict:
+    _types(data["household_types"])
+    with session_scope() as s:
+        h = lock_household(s, household_id)
+        if h is None:
+            raise ApiError("not_found", "Unknown household.")
+        h.household_types, h.updated_at = data["household_types"], clock.now()    # later orders only
+    return {"household_id": household_id, "household_types": data["household_types"]}
+
+
+@router.put("/v1/households/{household_id}/calendar")
+def put_calendar(background: BackgroundTasks, household_id: str = Path(pattern=HOUSEHOLD),
+                 data: dict = body(Calendar, "calendar.json")) -> JSONResponse:
+    events = [s2_calendar.CalendarInput(**e) for e in data["events"]]
+    try:
+        accepted = s2_calendar.receive_calendar(household_id, events)
+    except LookupError:
+        raise ApiError("not_found", "Unknown household.") from None
+    background.add_task(s2_calendar.tag_events, accepted)               # titles stay in this task's memory only
+    return JSONResponse({"accepted": accepted.accepted}, status_code=202)
+
+
+@router.get("/v1/households/{household_id}/cards")
+def get_cards(household_id: str = Path(pattern=HOUSEHOLD), since: str | None = Query(None)) -> dict:
+    after = _time(since, "since")
+    with session_scope() as s:
+        if lock_household(s, household_id, shared=True) is None:     # no card write commits around server_time
+            raise ApiError("not_found", "Unknown household.")
+        now = clock.now()
+        q = select(Card).join(Episode, Episode.id == Card.episode_id).where(Episode.household_id == household_id)
+        if after is not None:
+            q = q.where(Card.updated_at > after)                        # archived cards come once more, then never
+        else:
+            q = q.where(Card.archived.is_(False), Episode.status != "closed")
+        cards = [card_body(s, c, now) for c in s.execute(q.order_by(Card.seq)).scalars()]
+    return {"cards": cards, "server_time": clock.iso(now)}
+
+
+# ---------------------------------------------------------------------------------------------------- orders
 
 @router.post("/v1/orders")
 async def post_orders(
@@ -26,7 +108,7 @@ async def post_orders(
     shared_at: str | None = Form(None),
     source_id: str | None = Form(None),
 ) -> JSONResponse:
-    if not HOUSEHOLD_ID.match(household_id):
+    if not re.match(HOUSEHOLD, household_id):
         raise ApiError("validation_error", "household_id has the wrong format.", {"path": "household_id"})
     when = None
     if shared_at:
@@ -52,5 +134,5 @@ async def post_orders(
         accepted = s1_extract.receive_capture(household_id, payloads, when, source_id or None)
     except s1_extract.UnknownHousehold:
         raise ApiError("not_found", "Unknown household.") from None
-    body = {"episode_id": accepted.episode_id, "status": accepted.status}
-    return JSONResponse(body, status_code=200 if accepted.duplicate else 202)
+    out = {"episode_id": accepted.episode_id, "status": accepted.status}
+    return JSONResponse(out, status_code=200 if accepted.duplicate else 202)
