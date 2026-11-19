@@ -380,7 +380,7 @@ A holiday matches a bundle when the tag is one of the intent's `related_tags` (`
 ### 4.5 Other files
 
 - `sensitive_words.yaml`: `words` (starting list `[의약품, 상비약, 감기약, 소화제, 진통제, 연고, 수면유도, 피임, 콘돔, 윤활, 임신테스트, 배란, 혈당, 성인용 기저귀, 요실금, 탈모, 보청기, 성인용품, 다이어트 약]`) and `exempt` (`[치약, 약산성, 약알칼리, 약콩]`). Match = case-insensitive substring of the raw product name after removing every `exempt` word. No single-syllable words. Daily supplements and hygiene goods (비타민, 유산균, 휴지, 치약, 샴푸, 생리대) are never added. Test cases: 치약 → not masked, 감기약 → masked (T6).
-- `command_policy.yaml`: server-side command allow list (§11.1). `run` = commands S4 may run; `standby` = preset commands (`set_*_standby`); `notice` = `show_notice`. A command in none of them is dropped `unsafe_cmd`, whatever the LLM wrote; `deny_words` (`start`, `ignite`, `heat`, `unlock`, `open`, `buy`, `order`, `pay`, `delete`, `reset`) block a command even if listed.
+- `command_policy.yaml`: server-side command allow list (§11.1). `run` = commands S4 may run; `standby` = preset commands (`set_*_standby`); `notice` = `show_notice`. A command in none of them is dropped `unsafe_cmd`, whatever the LLM wrote; `deny_words` (`start`, `ignite`, `heat`, `unlock`, `open`, `buy`, `order`, `pay`, `delete`, `reset`) block a command even if listed. `protective` = `{device type}.{cmd}` patterns of safety actions (`*.child_lock`, `smart_plug.off`); a task with any matching action is sent with `protective: true` (§11.3). The LLM never sets it.
 - `device_names.yaml`: `cleaner: 로봇청소기, light: 조명, display: TV, cooktop: 인덕션, oven: 오븐, fridge: 냉장고, smart_plug: 스마트 플러그, purifier: 공기청정기, styler: 스타일러, shoe_care: 신발관리기`. Unknown types show the type string.
 - `material_courses.yaml`: `{울: 울케어, 캐시미어: 울케어, 니트: 울케어, 면: 표준, 가죽: 표준}`; used only if the course is in the device's enum.
 - `card_templates.yaml`: §11.4.
@@ -748,7 +748,7 @@ def build_schema(item_types, cal_ids, intent_ids):
 6. No bundles and no `notice_items` → done (no LLM).
 7. `reactions` per bundle (§10.2). Build the schema (§10.6) and message (§10.5); call `s4`; check (§10.7); retry once; failing → no situation tasks (per-item tasks stay; notices without text are not created).
 8. Drop run tasks of `unclassified` bundles.
-9. Turn `fridge_notices` into per-item notice tasks (text set, `kind`, `intent_change` kept in `meta`).
+9. Turn `fridge_notices` into per-item notice tasks (text set, `kind`, `intent_change` kept in `meta`). **Shared-screen rule** (fridge and TV are seen by guests): a notice text must not name the occasion. Drop the notice (no task, recorded `public_text`) if its text contains, as a substring, the bundle's `intent_text`, the intent label name, `situation.event`, `situation.guests`, `situation.theme`, or any of the bundle's `calendar_tags`. A weekday is allowed ("토요일").
 10. For each situation task (§10.4): `task_id`, trigger, end, value fill, drop switched-off actions.
 11. Cap at `max_lines` (4) per bundle, in `needs` order.
 
@@ -823,7 +823,7 @@ def build_task_schema(catalog, bundle_ids, notice_items):
 
 ### 10.8 Prompt summary (`s4_system.txt`)
 
-Needs first, then tasks only where a listed device fulfils a need, then notice texts. Only what the day needs (usually 1–3, never more than 4 per intent; zero is normal). Do not make per-item tasks (fridge, freeze, styler, mattress). One task = one purpose the user switches off. Never run money, heat-starting, door-opening or irreversible actions: use standby. `way` run/standby/notice; triggers before_start / guest_arrived / event_end as minutes only, no dates; guest_arrived only when guests is known. `target_room` = the device's room. Values are numbers or enum values inside the listed ranges, never words. `slug` is one lowercase English word. Notices: `kind` prep/storage, only sure facts, skip what is already processed or obvious, adapt to the intent with `intent_change`.
+Needs first, then tasks only where a listed device fulfils a need, then notice texts. Only what the day needs (usually 1–3, never more than 4 per intent; zero is normal). Do not make per-item tasks (fridge, freeze, styler, mattress). One task = one purpose the user switches off. Never run money, heat-starting, door-opening or irreversible actions: use standby. `way` run/standby/notice; triggers before_start / guest_arrived / event_end as minutes only, no dates; guest_arrived only when guests is known. `target_room` = the device's room. Values are numbers or enum values inside the listed ranges, never words. `slug` is one lowercase English word. Notices: `kind` prep/storage, only sure facts, skip what is already processed or obvious, adapt to the intent with `intent_change` — but the text is shown on a shared screen, so never name the occasion, guests or theme (a weekday is fine).
 
 ### 10.9 Failure handling
 
@@ -840,7 +840,7 @@ Needs first, then tasks only where a listed device fulfils a need, then notice t
 
 ### 10.10 Example
 
-`ep_9031` → `t_clean#1` (run, cleaner 거실, 12:30), `t_safe#2` (run, cooktop child_lock + plug off, 13:30), `t_mood#3` (run, display kids_party + light hue 330/45/70, guest_arrived 13:30–17:00), `t_oven#4` (standby, oven 170 °C 20 min, 14:00), `t_fridge#5` 딸기 (storage) and `t_fridge#6` 휘핑크림 (prep) waiting for the package → `contracts/fixtures/ep_9031/plan.v1.json`. The air purifier, styler and fridge in the prompt's device list are not chosen (decoys in the prompt test).
+`ep_9031` → `t_clean#1` (run, cleaner 거실, 12:30), `t_safe#2` (run, protective, cooktop child_lock + plug off, 13:30), `t_mood#3` (run, display kids_party + light hue 330/45/70, guest_arrived 13:30–17:00), `t_oven#4` (standby, oven 170 °C 20 min, 14:00), `t_fridge#5` 딸기 (storage) and `t_fridge#6` 휘핑크림 (prep) waiting for the package → `contracts/fixtures/ep_9031/plan.v1.json`. The air purifier, styler and fridge in the prompt's device list are not chosen (decoys in the prompt test).
 
 ---
 
@@ -884,7 +884,7 @@ body = {plan_id, household_id, plan_version: version, devices_revision: current 
 store plans(version, body); episode.plan_version = version
 ```
 
-`line`, `need`, `target_room`, `meta` are never sent. Held tasks are not sent. `tasks` and `cancelled` never share a `task_id`.
+`line`, `need`, `target_room`, `meta` are never sent. Held tasks are not sent. Each task carries `protective: true` when any of its actions matches `command_policy.yaml` `protective` (omitted otherwise). The hub releases a protective task only on an observed end event or a cancellation with `restore: true`; at a time fallback it keeps it and reports `withheld_end_not_observed` (`contracts/rules.md`). `tasks` and `cancelled` never share a `task_id`.
 
 **Restore of a cancelled task** = it had started (§5.2: `started_at` or `start_uncertain`) and its end has `restore: true`; otherwise false. When an execution result arrives for a task that is already cancelled with `restore: false` and the result shows a start (`running` / `completed`, or `failed` / `unknown` after dispatch), the server sets its restore to true and publishes a new version in the same transaction; a duplicate of that result changes nothing (§2.4).
 
@@ -905,6 +905,7 @@ lines:
                  quiet_hours: "조용한 시간이라 실행하지 않았어요", default: "실행하지 못했어요"}
   user_changed_note: "사용자가 {device_name}{을/를} 바꿔 현재 상태를 유지했어요"   # 을 after a final consonant, else 를
   rejected_note: "허브가 받지 못한 할 일이에요"
+  withheld_note: "행사 끝을 확인하지 못해 잠금을 그대로 두었어요"
 ```
 
 `{event}` = the bundle's first calendar tag, else `situation.event`, else the intent's Korean name cut at the first "·". `ep_9031` → "토요일 생일(디즈니 공주 테마)에 맞춰 집을 준비해 둘게요"; `ep_9120` held → "가족 모임 준비를 알아챘어요. …", after the calendar arrives → "토요일 가족 모임에 맞춰 집을 준비해 둘게요".
@@ -917,7 +918,7 @@ Recompute a line whenever an ack, execution result, user event or reaction for i
 2. Else from the task's **expected actions** (each (device, cmd) in the published task). For each action take its latest result of the latest operation (by `at`, then `received_at`); a final result (`completed`, `failed`, `blocked`, `unknown`, `unverifiable`) is never replaced by a later `running`. An action with no result is pending. Then: every action `completed` → `done`; some `completed` and every other action final → `partial`; some `completed` and others pending/running → `running`; none completed and every action final: any `failed` → `failed`, any `blocked` → `blocked` (note from `blocked_note`), else `unknown`; any `running` → `running`; nothing yet → `scheduled`. Ack rejection of the task, or no ack within `ack_timeout_min` → `failed` + `rejected_note` (§12.2).
 3. `user_changed` overrides `done`/`partial` when, after the task's first `completed` result and before the window closes, an event `{type}.changed` with `by: user` arrives for one of the line's devices.
 4. Priority when several apply: off, stopped > user_changed > done, partial > running > failed, unknown, blocked > scheduled.
-5. `end_state` from the task's restore result: all `restored`/`not_needed` → `restored`; any `skipped_user_changed` → `kept_user_change`; any `failed`/`unknown` → `restore_failed`; task with `restore: false` that ended → `none`; otherwise null.
+5. `end_state` from the task's restore result: all `restored`/`not_needed` → `restored`; any `skipped_user_changed` → `kept_user_change`; any `failed`/`unknown` → `restore_failed`; any `withheld_end_not_observed` (and none failed/unknown) → `withheld`, note from `card_templates.yaml` `withheld_note` ("행사 끝을 확인하지 못해 잠금을 그대로 두었어요"); task with `restore: false` that ended → `none`; otherwise null. Priority: `restore_failed` > `withheld` > `kept_user_change` > `restored`.
 
 ### 11.6 Held tasks
 
@@ -950,7 +951,7 @@ Each change records `checked_changed_at`. Switching every line off is not stop. 
 | Per-item task never released | 14 days after judging |
 | Rejected by ack / ack timeout | immediately `dropped` (`rejected`), line `failed` |
 
-A task that must restore stays live until its restore result arrives (or 24 h, then `restore_failed`). `close_episodes` (every 10 min): an episode is `closed` when every task is ended / cancelled / dropped, every cancelled task with `restore: true` has a restore result, every card's window is `closed`, and every window's `memory` is `written` or `ineligible`.
+A task that must restore stays live until its restore result arrives (or 24 h, then `restore_failed`). A protective task that ended at its `or_time` / `or_after` gets a restore result with `withheld_end_not_observed`: it ends at once (`withheld`); a later observed `event_end` for that window does not re-open it (the hub releases what it still holds and reports it as a new restore result, which updates `end_state` to `restored`). `close_episodes` (every 10 min): an episode is `closed` when every task is ended / cancelled / dropped, every cancelled task with `restore: true` has a restore result, every card's window is `closed`, and every window's `memory` is `written` or `ineligible`.
 
 ### 11.9 Failure handling
 
@@ -1096,7 +1097,7 @@ Per-item tasks are never written to memory. Writing fails (e.g. embedding error)
 
 ### 13.6 Example
 
-`ep_9031`: window 12:30 → 17:50 (event_end); signals: oven started by user 14:20, guest_arrived 13:52 → `match`; feedback: clean kept, safety off (before_run, 10-16), mood changed (light color_temp 2700 K, 70 min after 14:00), oven kept → `contracts/fixtures/ep_9031/case_row.json` and `memory.json`.
+`ep_9031`: window 13:30 → 17:50 (event_end; cleaning was switched off on Friday, so the first run is child safety); signals: oven started by user 14:20, guest_arrived 13:52 → `match`; feedback: clean off (before_run, 10-16), safety kept (protective, released at the observed event_end), mood changed (light color_temp 2700 K, 70 min after 14:00), oven kept → `contracts/fixtures/ep_9031/case_row.json` and `memory.json`.
 
 ---
 
@@ -1192,7 +1193,7 @@ pytest, LLM `mock` (§6.1), DB = Postgres with pgvector (docker compose service 
 | T15 | S3 field without basis | that field null, no retry |
 | T16 | S4 `find_time`: calendar / holiday / habit (2 matches same slot) / none | window or held |
 | T17 | S4 for `ep_9031` (mock) | tasks equal `ep_9031/plan.v1.json` tasks (ids per §10.4 numbering, triggers, ends, values; needs the fixture renumbering in `contracts/`) |
-| T18 | S4 second birthday after `ep_9031` memory | no child-safety task (switched off), light uses color_temp 2700 |
+| T18 | S4 second birthday after `ep_9031` memory | no cleaning task (switched off), child-safety task present, light uses color_temp 2700 |
 | T19 | S4 stopped before / later match | no situation tasks / tasks again |
 | T20 | S4 unclassified bundle | no run tasks |
 | T21 | S4 value out of range after retry | task dropped |
@@ -1238,6 +1239,9 @@ pytest, LLM `mock` (§6.1), DB = Postgres with pgvector (docker compose service 
 | T61 | Paused household, same `source_id` twice | same `paused_skip` episode |
 | T62 | `event_end`-triggered task: one `event_end` both starts it and anchors `end {on: event_end, after: 60m}` (shared fixture with the hub) | plan carries that end; `end_tasks` does not end the task at that same event, ends it 60 min later and expects the restore result; no second `event_end` needed |
 | T63 | Hub unreachable for more than `ack_timeout_min`, then acks the old version and pulls | lines failed by timeout whose trigger is still ahead go back to `live`; past ones stay `failed`; no duplicate effects |
+| T64 | S5 for `ep_9031` | `t_safe#2` has `protective: true`, `t_mood#3` has no `protective` |
+| T65 | Protective task, restore result `withheld_end_not_observed` at `or_time` | task ended, line `end_state` `withheld` with the note; no 24 h wait |
+| T66 | S4 notice text containing `situation.theme` or a calendar tag | notice dropped (`public_text`); a text with only a weekday is kept |
 
 ---
 
@@ -1314,3 +1318,11 @@ Not yet in the Notion server spec (synchronised in one pass later). B.2 lists th
 | R15 | Windows created with the card; home events linked by time bounds; memory retried until written | §13 |
 | R16 | Masking before cross-pass dedupe; all-masked orders skip S2–S5; failed retype → masked | §7.2, §14 |
 | R17 | Event batches validated per element; `/health` 503 uses `health.json` | §12 |
+
+### B.3 From the hub spec review (11-19, hub PR #19)
+
+| # | Decision | Where |
+| --- | --- | --- |
+| R18 | `protective` tasks (child lock, power cut) from `command_policy.yaml`; released only on an observed end or a cancellation; at a time fallback the hub reports `withheld_end_not_observed` → `end_state` `withheld` | §4.5, §11.3, §11.5, §11.8 |
+| R19 | Shared-screen notices never name the occasion, guests or theme (prompt + code check) | §10.1 step 9, §10.6 |
+| R20 | `ep_9031`: the line switched off on Friday is cleaning, not child safety (hub owner's choice) | examples, T18 |
