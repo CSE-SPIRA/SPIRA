@@ -9,7 +9,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from .api import errors
+from . import scheduler
+from .api import app_routes, errors
 from .db.engine import db_ready
 from .kb import embedding
 from .settings import get_settings
@@ -29,15 +30,21 @@ def create_app(*, start_background: bool = True) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         embedding.warm_up_in_background()
         if start_background:
+            from .pipeline.s1_extract import recover
+
+            scheduler.start()
+            recover()
             for hook in on_start:
                 hook(app)
         yield
         if start_background:
             for hook in on_stop:
                 hook(app)
+            scheduler.stop()
 
     app = FastAPI(title="SPIRA Server", version="0.1.0", lifespan=lifespan)
     errors.install(app)
+    app.include_router(app_routes.router)
 
     @app.get("/health")
     def health() -> JSONResponse:

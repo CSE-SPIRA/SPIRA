@@ -46,3 +46,18 @@ def test_same_as_spira_kb():
         assert rule_level(types) == kb.rule_level(types), types
         n += 1
     assert n > 10000
+
+
+def test_same_as_contracts_check():
+    """contracts/check/check.py has its own copy of the blocked rules (CI guard for fixtures); keep them equal."""
+    import importlib.util
+
+    from .factories import FIXTURES
+
+    spec = importlib.util.spec_from_file_location("contracts_check", FIXTURES.parent / "check" / "check.py")
+    check = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(check)
+    if not hasattr(check, "household_problem"):
+        pytest.skip("contracts/check without the household check")
+    for types in _combinations():
+        assert (check.household_problem(types) is None) == (check_types(types) is None), types
