@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
@@ -30,10 +31,12 @@ def create_app(*, start_background: bool = True) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         embedding.warm_up_in_background()
         if start_background:
+            from .pipeline.runner import resume
             from .pipeline.s1_extract import recover
 
             scheduler.start()
             recover()
+            threading.Thread(target=resume, name="resume-episodes", daemon=True).start()
             for hook in on_start:
                 hook(app)
         yield

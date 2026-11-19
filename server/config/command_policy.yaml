@@ -1,6 +1,6 @@
 # Commands the server allows per way (server/spec.md §11.1). Anything else is dropped `unsafe_cmd`.
 # The hub's delegation (`never`) is checked as well; this list never widens it.
-run: [clean, color, color_temp, play_mood, off, child_lock, mode, super_freeze]
+run: [clean, color, color_temp, play_mood, play, off, child_lock, mode, super_freeze]
 standby_pattern: "^set_[a-z0-9_]*_standby$"
 notice: [show_notice]
 deny_words: [start, ignite, heat, unlock, open, buy, order, pay, delete, reset]
