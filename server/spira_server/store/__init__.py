@@ -1,0 +1,1 @@
+"""Local stores (temporary images)."""
