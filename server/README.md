@@ -38,6 +38,38 @@ pytest
 
 Tests create and wipe their own databases `spira_test` and `spira_kb_test` on the same Postgres (override with `TEST_DATABASE_URL`, `TEST_KB_DATABASE_URL`). They set every environment variable themselves, so `server/.env` does not affect them.
 
+## Dry run (S1–S5 without the hub)
+
+`scripts/dry_run.py` sends one folder of order screenshots through S1–S5 with the settings in `server/.env`
+(real LLM, `EMBED_MODE=bge`, local Postgres) and writes `out/<folder>/` with the result of every stage and `checks.txt`.
+
+```bash
+docker compose up -d db
+pip install -e ../contracts/generated/python -e ".[dev,embed]"
+cp dev/home.example.yaml dev/home.yaml
+python scripts/dry_run.py --images orders/01_birthday --home dev/home.yaml --kb off
+```
+
+| Option | Use |
+| --- | --- |
+| `--kb on` | KB search (needs `KB_DATABASE_URL`, `KB_VERSION`) |
+| `--now 2026-11-20T21:00:00+09:00` | Run as if at that time (calendar dates in `home.yaml` are relative to it) |
+| `--split` | Post each image as its own share (grouping) |
+| `--resend` | Post the first share again with the same `source_id` |
+
+Each order folder holds 1–3 jpg/png screenshots (names, addresses and phone numbers cut out: the images go to the
+LLM provider) and optionally `answer.txt`:
+
+```text
+딸기 · 2
+컵케이크 믹스 · ?
+감기약 · 1 · 가림
+제외: 위쪽 배송지 영역은 가림
+```
+
+`orders/`, `out/` and `dev/home.yaml` are git-ignored. The household in `home.yaml` is deleted and written again on
+every run.
+
 ## Migrations
 
 The same migrations create the `cases` table in two databases.
