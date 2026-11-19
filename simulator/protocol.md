@@ -8,11 +8,10 @@ protocol and generated Server-contract models.
 
 Protocol version: `spira.device.v1`.
 
-**Placement — approval requested.** Team rules put values shared between parts
-in `contracts/`. This protocol is shared only by `hub/` and `simulator/`, which
-have the same code owner, and no Server or App code reads it, so it lives here
-and the Hub references it. If the team prefers it under `contracts/`, it moves
-there unchanged in a separate contracts PR.
+**Placement.** Team rules put values shared between parts in `contracts/`. This
+protocol is read only by `hub/` and `simulator/`, so it lives here and the Hub
+references it. If the Server or the App ever reads it, it moves to `contracts/`
+(agreed with the Server, 2026-11-19).
 
 ## 1. Boundary and actor rule
 
