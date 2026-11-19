@@ -1,0 +1,1 @@
+../../contracts/generated/dart/spira_contracts.dart
