@@ -1,0 +1,159 @@
+{
+  "note": "S4 output for ep_9031 (plan.v1): four situation tasks, two fridge notices; the purifier/styler decoys are not in this home's list",
+  "output": {
+    "needs": [
+      {
+        "id": "n1",
+        "bundle": 1,
+        "need": "손님 오기 전 거실 정리",
+        "from": [
+          "guests"
+        ]
+      },
+      {
+        "id": "n2",
+        "bundle": 1,
+        "need": "파티 동안 아이가 주방 기기에 다치지 않게",
+        "from": [
+          "가구 유형",
+          "guests"
+        ]
+      },
+      {
+        "id": "n3",
+        "bundle": 1,
+        "need": "손님이 오면 공주 테마 분위기",
+        "from": [
+          "theme",
+          "guests"
+        ]
+      },
+      {
+        "id": "n4",
+        "bundle": 1,
+        "need": "파티 중 오븐을 바로 쓰기",
+        "from": [
+          "activity"
+        ]
+      }
+    ],
+    "tasks": [
+      {
+        "need_id": "n1",
+        "slug": "clean",
+        "way": "run",
+        "target_room": "거실",
+        "actions": [
+          {
+            "key": "cleaner_01.clean",
+            "value": {
+              "room": "거실"
+            }
+          }
+        ],
+        "trigger": {
+          "kind": "before_start",
+          "minutes": 90
+        },
+        "end_after_start_minutes": null,
+        "line": "손님 오기 전 거실 청소"
+      },
+      {
+        "need_id": "n2",
+        "slug": "safe",
+        "way": "run",
+        "target_room": "주방",
+        "actions": [
+          {
+            "key": "cooktop_01.child_lock"
+          },
+          {
+            "key": "plug_kettle.off"
+          }
+        ],
+        "trigger": {
+          "kind": "before_start",
+          "minutes": 30
+        },
+        "end_after_start_minutes": null,
+        "line": "아이 안전 모드 (인덕션 잠금·전기포트 차단)"
+      },
+      {
+        "need_id": "n3",
+        "slug": "mood",
+        "way": "run",
+        "target_room": "거실",
+        "actions": [
+          {
+            "key": "display_01.play_mood",
+            "value": {
+              "scene": "kids_party"
+            }
+          },
+          {
+            "key": "light_01.color",
+            "value": {
+              "hue": 330,
+              "saturation": 45,
+              "brightness": 70
+            }
+          }
+        ],
+        "trigger": {
+          "kind": "guest_arrived",
+          "minutes": null
+        },
+        "end_after_start_minutes": null,
+        "line": "손님 오시면 공주 분위기 화면·조명"
+      },
+      {
+        "need_id": "n4",
+        "slug": "oven",
+        "way": "standby",
+        "target_room": "주방",
+        "actions": [
+          {
+            "key": "oven_01.set_cook_standby",
+            "value": {
+              "temp_c": 170,
+              "minutes": 20
+            }
+          }
+        ],
+        "trigger": null,
+        "end_after_start_minutes": null,
+        "line": "오븐 컵케이크 설정 대기"
+      }
+    ],
+    "fridge_notices": [
+      {
+        "item": "딸기",
+        "kind": "storage",
+        "point": "미리 씻어 두면 금방 무른다",
+        "intent_change": "토요일 꾸미기 직전에 씻도록",
+        "text": "씻지 말고 키친타월을 깔아 냉장 보관하고, 토요일 꾸미기 직전에 씻어 주세요"
+      },
+      {
+        "item": "컵케이크 믹스",
+        "kind": null,
+        "point": null,
+        "intent_change": null,
+        "text": null
+      },
+      {
+        "item": "휘핑크림",
+        "kind": "prep",
+        "point": "차가워야 잘 휘핑된다",
+        "intent_change": "꾸미기 직전까지 차갑게",
+        "text": "꾸미기 직전까지 냉장고 안쪽에 두고, 휘핑할 때 볼도 차갑게 해 두면 잘 올라와요"
+      },
+      {
+        "item": "아이싱 펜",
+        "kind": null,
+        "point": null,
+        "intent_change": null,
+        "text": null
+      }
+    ]
+  }
+}

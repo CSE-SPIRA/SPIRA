@@ -78,11 +78,12 @@ def databases():
     yield
 
 
-def reset_caches() -> None:
+def reset_caches(keep_llm: bool = False) -> None:
     get_settings.cache_clear()
     get_config.cache_clear()
     db_engine.reset_engines()
-    llm_client.set_llm(None)
+    if not keep_llm:
+        llm_client.set_llm(None)
 
 
 @pytest.fixture(autouse=True)
@@ -109,7 +110,7 @@ def env(monkeypatch):
     def set_(**values: str) -> None:
         for k, v in values.items():
             monkeypatch.setenv(k, v)
-        reset_caches()
+        reset_caches(keep_llm=True)
     return set_
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -12,9 +13,24 @@ import yaml
 from .paths import CONFIG_DIR
 
 
+class _Loader(yaml.SafeLoader):
+    """YAML 1.2 booleans: only true/false. Keys like `on` / `off` (item_tasks end, s4_blocks) stay strings."""
+
+
+_Loader.yaml_implicit_resolvers = {
+    k: [(tag, rx) for tag, rx in v if tag != "tag:yaml.org,2002:bool"]
+    for k, v in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+_Loader.add_implicit_resolver("tag:yaml.org,2002:bool", re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"),
+                              list("tTfF"))
+
+
+def load_yaml(text: str) -> Any:
+    return yaml.load(text, Loader=_Loader)  # noqa: S506 - SafeLoader subclass
+
+
 def _load(name: str, folder: Path = CONFIG_DIR) -> Any:
-    with open(folder / name, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    return load_yaml((folder / name).read_text(encoding="utf-8"))
 
 
 class Numbers:

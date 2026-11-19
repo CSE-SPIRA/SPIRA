@@ -5,9 +5,7 @@ from __future__ import annotations
 
 from functools import cache
 
-import yaml
-
-from ..config import get_config
+from ..config import get_config, load_yaml
 from ..kb.lists import get_lists
 from ..paths import PROMPTS_DIR
 
@@ -20,7 +18,7 @@ def text(name: str) -> str:
 
 @cache
 def blocks(name: str) -> dict:
-    return yaml.safe_load((PROMPTS_DIR / name).read_text(encoding="utf-8"))
+    return load_yaml((PROMPTS_DIR / name).read_text(encoding="utf-8"))
 
 
 def fill(template: str, **values: object) -> str:
