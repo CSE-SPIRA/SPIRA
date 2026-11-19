@@ -1,0 +1,169 @@
+"""Versioned admission and trigger/lifecycle frontiers."""
+
+import json
+
+from spira_contracts.ack import Ack, RejectedTask
+from spira_contracts.common import HomeEvent
+
+from .contracts import duration, offset_time, packet, value_reason, wire
+from .store import encode
+
+HOME_EVENTS = {event.value for event in HomeEvent}
+
+
+def admit(store, plan, malformed, installation, now):
+    plan_id, version = plan.plan_id, plan.plan_version
+    if version <= store.floor(plan_id):
+        return
+    rejected = {task_id: "schema" for task_id in malformed}
+    current = {}
+    for task in plan.tasks:
+        reason = task_reason(task, installation.delegates)
+        if reason:
+            rejected[task.task_id] = reason
+        else:
+            current[task.task_id] = wire(task)
+    ack = Ack(
+        plan_version=version, status="admitted",
+        rejected_tasks=[RejectedTask(task_id=task_id, reason=reason)
+                        for task_id, reason in sorted(rejected.items())],
+    )
+    cancelled = {entry.task_id: entry.restore for entry in plan.cancelled}
+    previous = {task["id"]: task for task in store.tasks(plan_id)}
+    frontier = store.frontier()
+    for task_id in dict.fromkeys([*current, *previous, *cancelled]):
+        task = previous.get(task_id, {
+            "plan": plan_id, "id": task_id, "body": None, "cancel": None,
+            "triggered_at": None, "admitted_at": now.isoformat(), "frontier": frontier,
+            "closed": None, "restore_reported": [], "restore_items": {},
+        })
+        if task_id in cancelled:
+            task["cancel"] = cancelled[task_id]
+        body = current.get(task_id)
+        if body and task["cancel"] is None:
+            if not task["body"] or task["body"]["trigger"] != body["trigger"]:
+                # Started work keeps its original trigger and base time.
+                if not any(attempt["before"] for attempt in store.attempts(task=task)):
+                    task.update(admitted_at=now.isoformat(), frontier=frontier, triggered_at=None)
+            task["body"] = body
+            task["substrates"] = {
+                action["device"]: installation.delegates[action["device"]].substrate.value
+                for action in body["actions"]
+            }
+        task["active"] = body is not None and task["cancel"] is None
+        if task["cancel"] is False:
+            for attempt in store.attempts(task=task):
+                if attempt["claims"]:
+                    attempt["claims"] = {}
+                    store.save_attempt(attempt)
+        task["version"] = version
+        store.save_task(task)
+    store.advance(plan_id, version)
+    store.queue(
+        f"{plan_id}/{version}", "ack", f"/v1/hub/plans/{plan_id}/ack",
+        now.timestamp(), packet(ack, "ack.json"),
+    )
+
+
+def task_reason(task, devices):
+    for action in task.actions:
+        device = devices.get(action.device)
+        if device is None:
+            return "unknown_device"
+        command = delegated(device, action.cmd)
+        if command is None:
+            return "unsupported_cmd"
+        if reason := value_reason(action, command):
+            return reason
+    return None
+
+
+def delegated(device, command):
+    if device is None or command in device.never:
+        return None
+    return next((entry for entry in device.commands if entry.cmd == command), None)
+
+
+def action_keys(task):
+    counts = {}
+    for action in task["body"]["actions"]:
+        body = encode(action)
+        count = counts.get(body, 0)
+        counts[body] = count + 1
+        yield encode([action, count]), action
+
+
+def trigger_time(store, task, now):
+    if task["triggered_at"]:
+        return offset_time(task["triggered_at"])
+    trigger = task["body"]["trigger"]
+    if "time" in trigger:
+        at = offset_time(trigger["time"])
+        return at if at <= now else None
+    if trigger.get("released") is False:
+        return None
+    if trigger["event"] == "package.brought_in":
+        # The Server alone links a brought-in package to an order.
+        if trigger.get("released") is not True or not trigger.get("at"):
+            return None
+        at = offset_time(trigger["at"])
+        return at if at <= now else None
+    window = trigger.get("window")
+    earliest = offset_time(task["admitted_at"])
+    latest = now
+    if window:
+        earliest = max(earliest, offset_time(window["from"]))
+        latest = min(latest, offset_time(window["to"]))
+    for row in store.facts(after=task["frontier"], earliest=earliest.timestamp()):
+        event = json.loads(row["body"])
+        at = offset_time(event["at"])
+        if at > latest:
+            break
+        if (event["source"] == "hub" and event["type"] == trigger["event"]
+                and offset_time(event.get("evidence_from", event["at"])) >= earliest):
+            return at
+    return None
+
+
+def end_status(store, task, now, *, started_at=None):
+    """Return the disposition of the task's effect when its lifecycle ends."""
+    end = task["body"]["end"]
+    if task["cancel"] is False:
+        return "relinquished"
+    if task["cancel"] is True:
+        return "restore"
+    # A withheld task has ended, but its claims can still serve explicit cancellation.
+    if task["closed"] == "withheld_end_not_observed":
+        return None
+
+    absolute = end.get("or_time", end.get("time"))
+    deadline = offset_time(absolute) if absolute else None
+    if task["triggered_at"] and "or_after" in end:
+        relative = offset_time(task["triggered_at"]) + duration(end["or_after"])
+        deadline = min(deadline, relative) if deadline is not None else relative
+    if started_at and end.get("on"):
+        earliest = max(offset_time(task["admitted_at"]), started_at)
+        devices = {action["device"] for action in task["body"]["actions"]}
+        for row in store.facts(after=task["frontier"], earliest=earliest.timestamp()):
+            event = json.loads(row["body"])
+            if event["type"] != end["on"]:
+                continue
+            if offset_time(event.get("evidence_from", event["at"])) < earliest:
+                continue
+            if end["on"] not in HOME_EVENTS and event["source"] not in devices:
+                continue
+            if end.get("by") and event["payload"].get("by") != end["by"]:
+                continue
+            at = offset_time(event["at"])
+            if at > now or (deadline is not None and at > deadline):
+                break
+            if "after" in end:
+                at += duration(end["after"])
+            if at > now:
+                return None
+            return "restore" if end["restore"] else "relinquished"
+    if deadline is not None and deadline <= now:
+        if not end["restore"]:
+            return "relinquished"
+        return "withheld_end_not_observed" if task["body"].get("protective") else "restore"
+    return None
