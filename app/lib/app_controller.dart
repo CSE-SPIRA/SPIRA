@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -55,6 +56,7 @@ class AppController extends ChangeNotifier {
   String get _scope => jsonEncode([_environment, household]);
   String get _setupKey => 'spira.setup.v1.$_environment';
   String get _snapshotKey => 'spira.snapshot.v1.$_scope';
+  String get _calendarKey => 'spira.calendar.v1.$_scope';
 
   String? household;
   SetupStep step = SetupStep.household;
@@ -88,7 +90,11 @@ class AppController extends ChangeNotifier {
   Timer? _timer;
   StreamSubscription<void>? _shareSubscription;
   Future<void> _queue = Future<void>.value();
+  Future<void> _calendarQueue = Future<void>.value();
   Future<void>? _sync;
+  String? _calendarFingerprint;
+  bool _calendarFingerprintDirty = false;
+  bool _calendarConnected = false;
   bool _inboxChanged = false;
   bool _disposed = false;
 
@@ -107,6 +113,7 @@ class AppController extends ChangeNotifier {
   bool stopPending(String cardId) => _pendingStops.containsKey(cardId);
   bool stopUncertain(String cardId) => _uncertainStops.contains(cardId);
   bool get canControl => !stale && !pausePending;
+  bool get canResendCalendar => _calendarConnected && readCalendar != null;
 
   Future<void> start() async {
     _shareSubscription = platform.sharesChanged.listen((_) {
@@ -123,7 +130,7 @@ class AppController extends ChangeNotifier {
     if (step == SetupStep.ready) _requestNotificationPermission();
     _change();
     _startTimer();
-    await sync();
+    await Future.wait([resendCalendar(), sync()]);
   }
 
   void _startTimer() {
@@ -134,6 +141,7 @@ class AppController extends ChangeNotifier {
     if (_disposed || starting) return;
     if (foreground) {
       _startTimer();
+      unawaited(resendCalendar());
       unawaited(sync());
     } else {
       _timer?.cancel();
@@ -147,6 +155,7 @@ class AppController extends ChangeNotifier {
       final setup = jsonDecode(saved) as Map<String, dynamic>;
       household = setup['household'] as String?;
       step = SetupStep.values.byName(setup['step'] as String);
+      _calendarConnected = setup['calendarConnected'] as bool? ?? false;
       householdTypes.addAll((setup['types'] as List<dynamic>).cast<String>());
       for (final entry in (setup['choices'] as Map<String, dynamic>).entries) {
         deviceChoices[entry.key] = (entry.value as Map<String, dynamic>).map(
@@ -203,6 +212,7 @@ class AppController extends ChangeNotifier {
     jsonEncode({
       'household': household,
       'step': step.name,
+      'calendarConnected': _calendarConnected,
       'types': householdTypes.toList(),
       'choices': deviceChoices.map(
         (key, value) => MapEntry(
@@ -267,11 +277,57 @@ class AppController extends ChangeNotifier {
       if (connect) {
         final reader = readCalendar;
         if (reader == null) throw StateError('Calendar unavailable');
-        await api.calendar(household!, await reader());
+        await _sendCalendar(household!, await reader(interactive: true));
       }
+      _calendarConnected = connect;
       step = SetupStep.devices;
       await _saveSetup();
     });
+  }
+
+  Future<void> resendCalendar() {
+    final id = household;
+    final reader = readCalendar;
+    if (starting ||
+        _disposed ||
+        !_calendarConnected ||
+        id == null ||
+        reader == null) {
+      return Future<void>.value();
+    }
+    // Each trigger reads after the previous request completes, so an older
+    // full list can't replace a newer one.
+    return _calendarQueue = _calendarQueue.then((_) async {
+      if (_disposed) return;
+      try {
+        final calendar = await reader(interactive: false);
+        if (!_disposed) await _sendCalendar(id, calendar);
+      } catch (_) {
+        // Leave calendar failures silent. The next trigger reads again.
+      }
+    });
+  }
+
+  Future<void> _sendCalendar(String id, wire.Calendar calendar) async {
+    // The peer replaces the list, so event order alone is immaterial.
+    final events =
+        calendar.events.map((event) => jsonEncode(event.toJson())).toList()
+          ..sort();
+    final fingerprint = sha256
+        .convert(utf8.encode(jsonEncode(events)))
+        .toString();
+    final key = _calendarKey;
+    final previous = _calendarFingerprint ??= await store.read(key);
+    if (_disposed) return;
+    if (previous != fingerprint) {
+      await api.calendar(id, calendar);
+      _calendarFingerprint = fingerprint;
+      _calendarFingerprintDirty = true;
+    }
+    if (_calendarFingerprintDirty) {
+      await store.write(key, fingerprint);
+      _calendarFingerprintDirty = false;
+    }
   }
 
   Future<void> finishDevices(

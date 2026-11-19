@@ -12,6 +12,7 @@ import 'package:spira_app/app_controller.dart';
 import 'package:spira_app/contracts.dart' as wire;
 import 'package:spira_app/main.dart';
 import 'package:spira_app/platform/android_bridge.dart';
+import 'package:spira_app/platform/google_calendar.dart';
 
 Map<String, dynamic> fixture(String file, {String episode = 'ep_9031'}) =>
     jsonDecode(File('../contracts/fixtures/$episode/$file').readAsStringSync())
@@ -43,7 +44,7 @@ class TestStore implements AppStore {
   @override
   Future<void> write(String key, String value) async {
     values[key] = value;
-    saved.add(jsonDecode(value));
+    if (value.startsWith('{')) saved.add(jsonDecode(value));
   }
 }
 
@@ -104,6 +105,7 @@ class Peer {
   final reactions = <(String, Map<String, dynamic>)>[];
   final pauses = <Object?>[];
   final edits = <Object?>[];
+  final calendars = <wire.Calendar>[];
   List<Map<String, dynamic>> cards = [];
   Map<String, dynamic> memory = fixture('memory.json');
   final rationales = {
@@ -114,6 +116,7 @@ class Peer {
   bool failDelete = false;
   bool keepDeletedUntilRead = false;
   bool unavailable = false;
+  bool failCalendar = false;
   int rationaleReads = 0;
   int pollCount = 0;
   Future<http.Response> Function(http.Request)? reaction;
@@ -148,7 +151,12 @@ class Peer {
       });
     }
     if (method == 'PUT' && path == '$householdPath/calendar') {
-      return response({'accepted': 5}, 202);
+      final calendar = wire.calendarFromJson(request.body);
+      calendars.add(calendar);
+      if (failCalendar) {
+        return response({'code': 'internal', 'message': 'offline'}, 503);
+      }
+      return response({'accepted': calendar.events.length}, 202);
     }
     if (method == 'POST' && path == '$householdPath/pause') {
       final body = jsonDecode(request.body) as Map<String, dynamic>;
@@ -241,7 +249,7 @@ AppController controller(
   TestPlatform? platform,
   TestStore? store,
   wire.Devices? discovered,
-  Future<wire.Calendar> Function()? calendar,
+  CalendarReader? calendar,
   bool setup = false,
   bool fixture = true,
 }) => AppController(
@@ -272,6 +280,21 @@ Future<void> tapText(WidgetTester tester, String text, {int index = 0}) async {
 
 Future<void> settings(WidgetTester tester) async {
   await tester.tap(find.byTooltip('설정'));
+  await tester.pumpAndSettle();
+}
+
+Future<void> connectCalendar(WidgetTester tester, AppController app) async {
+  await openApp(tester, app);
+  await tapText(tester, '2인');
+  await tapText(tester, '우리 집 만들기');
+  await tapText(tester, 'Google 캘린더 연결');
+  await tapText(tester, '설정 완료');
+}
+
+Future<void> resumeApp(WidgetTester tester) async {
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+  await tester.pump();
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
   await tester.pumpAndSettle();
 }
 
@@ -328,7 +351,8 @@ void main() {
         controller(
           peer,
           setup: true,
-          calendar: () async => wire.Calendar.fromJson(calendar),
+          calendar: ({required interactive}) async =>
+              wire.Calendar.fromJson(calendar),
         ),
       );
       await tapText(tester, '2인');
@@ -345,6 +369,183 @@ void main() {
       await tapText(tester, '설정 완료');
     },
   );
+
+  testWidgets('APP-03 startup sends the full list after an event is added', (
+    tester,
+  ) async {
+    final peer = Peer();
+    final store = TestStore();
+    var calendar = wire.Calendar.fromJson(fixture('calendar.json'));
+    final modes = <bool>[];
+    Future<wire.Calendar> read({required bool interactive}) async {
+      modes.add(interactive);
+      return calendar;
+    }
+
+    await connectCalendar(
+      tester,
+      controller(peer, setup: true, store: store, calendar: read),
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    final added = wire.Calendar.fromJson(
+      fixture('calendar.json', episode: 'ep_9120'),
+    ).events.single;
+    calendar = wire.Calendar(events: [...calendar.events, added]);
+    await openApp(
+      tester,
+      controller(peer, setup: true, store: store, calendar: read),
+    );
+
+    expect(modes, [true, false]);
+    expect(peer.calendars, hasLength(2));
+    expect(peer.calendars.last.toJson(), calendar.toJson());
+    final saved = store.values.values.join('\n');
+    for (final event in calendar.events) {
+      expect(saved, isNot(contains(event.title)));
+    }
+    expect(store.values.values, contains(matches(RegExp(r'^[0-9a-f]{64}$'))));
+  });
+
+  testWidgets('APP-03 rereads an unchanged list without resending it', (
+    tester,
+  ) async {
+    final peer = Peer();
+    final store = TestStore();
+    var calendar = wire.Calendar.fromJson(fixture('calendar.json'));
+    var reads = 0;
+    Future<wire.Calendar> read({required bool interactive}) async {
+      reads++;
+      return calendar;
+    }
+
+    await connectCalendar(
+      tester,
+      controller(peer, setup: true, store: store, calendar: read),
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    calendar = wire.Calendar(events: calendar.events.reversed.toList());
+    await openApp(
+      tester,
+      controller(peer, setup: true, store: store, calendar: read),
+    );
+    await resumeApp(tester);
+    await settings(tester);
+    await tapText(tester, '캘린더 다시 보내기');
+
+    expect(reads, 4);
+    expect(peer.calendars, hasLength(1));
+  });
+
+  testWidgets('APP-03 foreground sends a title edit while paused', (
+    tester,
+  ) async {
+    final peer = Peer();
+    var calendar = wire.Calendar.fromJson(fixture('calendar.json'));
+    await connectCalendar(
+      tester,
+      controller(
+        peer,
+        setup: true,
+        calendar: ({required interactive}) async => calendar,
+      ),
+    );
+    await settings(tester);
+    await tapText(tester, '자동 준비 일시정지');
+    final first = calendar.events.first;
+    calendar = wire.Calendar(
+      events: [
+        wire.EventElement(
+          id: first.id,
+          title: '생일 모임',
+          start: first.start,
+          end: first.end,
+        ),
+        ...calendar.events.skip(1),
+      ],
+    );
+    expect(peer.calendars, hasLength(1));
+
+    await resumeApp(tester);
+
+    expect(peer.pauses, [
+      {'paused': true},
+    ]);
+    expect(peer.calendars, hasLength(2));
+    expect(peer.calendars.last.toJson(), calendar.toJson());
+  });
+
+  testWidgets(
+    'APP-03 settings sends an empty replacement and retries quietly',
+    (tester) async {
+      final peer = Peer();
+      final platform = TestPlatform();
+      var failRead = false;
+      var calendar = wire.Calendar.fromJson(fixture('calendar.json'));
+      await connectCalendar(
+        tester,
+        controller(
+          peer,
+          setup: true,
+          platform: platform,
+          calendar: ({required interactive}) async {
+            if (failRead) throw StateError('Calendar read failed');
+            return calendar;
+          },
+        ),
+      );
+      await settings(tester);
+      calendar = wire.Calendar(events: []);
+      failRead = true;
+      await tapText(tester, '캘린더 다시 보내기');
+      expect(peer.calendars, hasLength(1));
+
+      failRead = false;
+      peer.failCalendar = true;
+      await tapText(tester, '캘린더 다시 보내기');
+      expect(peer.calendars, hasLength(2));
+
+      peer.failCalendar = false;
+      await tapText(tester, '캘린더 다시 보내기');
+      expect(peer.calendars, hasLength(3));
+      expect(peer.calendars.last.events, isEmpty);
+      await tapText(tester, '캘린더 다시 보내기');
+      expect(peer.calendars, hasLength(3));
+      expect(platform.deliveries, isEmpty);
+      expect(find.byType(SnackBar), findsNothing);
+    },
+  );
+
+  testWidgets('APP-03 skipped calendar stays disconnected after restart', (
+    tester,
+  ) async {
+    final peer = Peer();
+    final store = TestStore();
+    var reads = 0;
+    Future<wire.Calendar> read({required bool interactive}) async {
+      reads++;
+      return wire.Calendar(events: []);
+    }
+
+    await openApp(
+      tester,
+      controller(peer, setup: true, store: store, calendar: read),
+    );
+    await tapText(tester, '2인');
+    await tapText(tester, '우리 집 만들기');
+    await tapText(tester, '건너뛰기');
+    await tapText(tester, '설정 완료');
+    await tester.pumpWidget(const SizedBox.shrink());
+    await openApp(
+      tester,
+      controller(peer, setup: true, store: store, calendar: read),
+    );
+    await resumeApp(tester);
+    await settings(tester);
+
+    expect(reads, 0);
+    expect(peer.calendars, isEmpty);
+    expect(find.text('캘린더 다시 보내기'), findsNothing);
+  });
 
   test('APP-AT-02 Dart boundary sends one and three in order and retries the same source after lost response', () async {
     final folder = Directory.systemTemp.createTempSync('spira-shares-');

@@ -5,7 +5,13 @@ import 'package:http/http.dart' as http;
 
 import '../contracts.dart' as wire;
 
-typedef CalendarReader = Future<wire.Calendar> Function();
+typedef CalendarReader = Future<wire.Calendar> Function({
+  required bool interactive,
+});
+
+const _calendarScopes = [
+  'https://www.googleapis.com/auth/calendar.events.readonly',
+];
 
 class GoogleCalendarReader {
   GoogleCalendarReader(this.serverClientId);
@@ -13,15 +19,19 @@ class GoogleCalendarReader {
   final String serverClientId;
   Future<void>? _initialization;
 
-  Future<wire.Calendar> call() async {
+  Future<wire.Calendar> call({required bool interactive}) async {
     final signIn = GoogleSignIn.instance;
     await (_initialization ??= signIn.initialize(
       serverClientId: serverClientId,
     ));
-    final account = await signIn.authenticate();
-    final authorization = await account.authorizationClient.authorizeScopes(
-      const ['https://www.googleapis.com/auth/calendar.events.readonly'],
-    );
+    // Android remembers the default account selected during setup.
+    final authClient = interactive
+        ? (await signIn.authenticate()).authorizationClient
+        : signIn.authorizationClient;
+    final authorization = interactive
+        ? await authClient.authorizeScopes(_calendarScopes)
+        : await authClient.authorizationForScopes(_calendarScopes);
+    if (authorization == null) throw StateError('Calendar unavailable');
     final now = DateTime.now().toUtc();
     final end = now.add(const Duration(days: 14));
     final events = <wire.EventElement>[];
@@ -52,6 +62,11 @@ class GoogleCalendarReader {
             .then(http.Response.fromStream)
             .timeout(const Duration(seconds: 25));
         if (response.statusCode != 200) {
+          if (response.statusCode == 401) {
+            await authClient.clearAuthorizationToken(
+              accessToken: authorization.accessToken,
+            );
+          }
           throw StateError('Calendar unavailable');
         }
         final result =

@@ -58,6 +58,12 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           const Divider(),
+          if (app.canResendCalendar)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('캘린더 다시 보내기'),
+              onTap: app.resendCalendar,
+            ),
           ListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('우리 집 기억'),

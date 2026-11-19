@@ -38,8 +38,11 @@ Optional Dart defines:
 - `SPIRA_GOOGLE_CLIENT_ID` enables Google Calendar setup. Register
   `org.cse_spira.spira_app` and the build's signing SHA-1 as an Android OAuth
   client, enable Calendar API, and set the Web client ID used by the Android
-  sign-in plugin. The setup request sends primary-calendar events in the
-  contract window. The App keeps no Calendar titles or access tokens.
+  sign-in plugin. After connection, the App rereads primary-calendar events
+  for now through the next 14 days at startup, on return to the foreground,
+  and from **캘린더 다시 보내기** in settings. It sends the full list when it
+  changes, including while automatic preparation is paused. The App saves only
+  the connection flag and the last accepted list's hash for calendar sync.
   [Flutter Android sign-in setup](https://pub.dev/packages/google_sign_in_android)
   [Google Calendar events API](https://developers.google.com/workspace/calendar/api/v3/reference/events/list)
 
