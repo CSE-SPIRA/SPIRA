@@ -2,7 +2,7 @@
 
 Owner: Yejoon Kim
 
-The Simulator runs a household with its own SQLite state and an MQTT device interface. It provides a read-only room viewer and a private operator for household occurrences, device actions, faults, and C-3 comparisons. The default profile contains the seven logical devices from the `ep_9031` household `h_042`, all virtual. [Specification](spec.md) · [Device protocol](protocol.md)
+The Simulator runs one household per process, with its own SQLite state and an MQTT device interface. It provides a read-only room viewer and a private operator for household occurrences, device actions, faults, and C-3 comparisons. [Specification](spec.md) · [Device protocol](protocol.md)
 
 ## Run locally
 
@@ -18,17 +18,18 @@ Set `WORLD_OPERATOR_TOKEN` in your local environment to enable the operator. Its
 | Process | Command |
 | --- | --- |
 | MQTT broker | `/opt/homebrew/sbin/mosquitto -p 1883` |
-| Simulator | `WORLD_OPERATOR=1 WORLD_PLANS=../contracts/fixtures/ep_9031/plan.v3.json .venv/bin/uvicorn spira_simulator.api:app --host 127.0.0.1 --port 8730` |
+| Simulator, `h_042` | `WORLD_DB=/private/tmp/spira-h_042.db WORLD_OPERATOR=1 WORLD_PLANS=../contracts/fixtures/ep_9031/plan.v3.json .venv/bin/uvicorn spira_simulator.api:app --host 127.0.0.1 --port 8730` |
+| Simulator, `h_051` | `WORLD_PROFILE=spira_simulator/profiles/ep_9120.json WORLD_DB=/private/tmp/spira-h_051.db MQTT_PREFIX=spira/h_051 WORLD_OPERATOR=1 WORLD_PLANS=../contracts/fixtures/ep_9120/plan.v2.json .venv/bin/uvicorn spira_simulator.api:app --host 127.0.0.1 --port 8731` |
 
 Open `/sim/viewer` and `/operator` on port 8730. Select an actor before using **Set warm white** on the light or **Start oven** on the oven. The operator also has **Bring package inside**, **Guests arrive**, and **Event ends** controls. The fixture plan above supplies a stage overlay. With a live peer, point the overlay at its current plan and execution sources. The Hub decides when to act and dispatches via MQTT.
 
-Use `WORLD_DB` to give a household its own database. Reopen the same file to retain device state, offline state, receipts, witnesses, jobs, and truth. Command and readback fault arms are in memory. `WORLD_PROFILE` selects a native device profile. The supplied [profile](spira_simulator/profiles/ep_9031.json) shows the configurable inventory, property validation, job timings, and home sensor mappings. A physical entry is labelled physical and unqualified and stays unavailable until a driver is provided.
+Select the inventory at startup with `WORLD_PROFILE`. It defaults to [`h_042`](spira_simulator/profiles/ep_9031.json) with seven virtual devices. The [`h_051`](spira_simulator/profiles/ep_9120.json) profile has four virtual devices and the same home event controls. Give each process a separate `WORLD_DB`, MQTT prefix, and HTTP port when running both homes. Reopen the same database for that household to retain device state, offline state, receipts, witnesses, jobs, and truth. Command and readback fault arms are in memory. A physical entry is labelled physical and unqualified and stays unavailable until a driver is provided.
 
 ## Peer inputs and binding
 
 Set the Hub's MQTT endpoint and prefix to match the Simulator. `MQTT_HOST`, `MQTT_PORT`, and `MQTT_PREFIX` default to loopback, `1883`, and `spira/g0`. MQTT credentials, if configured, are separate from the operator credentials.
 
-The [default `h_042` profile protocol](protocol.md#11-default-h_042-profile) defines the Hub command mappings and operator raw signals.
+The [`h_042` protocol](protocol.md#11-default-h_042-profile) and [`h_051` protocol](protocol.md#12-h_051-profile) define the Hub command mappings and operator raw signals.
 
 Read replies carry `operation_id: null` and `local_operation: false`. A stale read retains its cached observation time. Missing readback has empty values and revisions with `available: true`. Unavailable readback uses empty values and revisions with `available: false`. The viewer shows the MQTT connection and last observed gap. Device event delivery after a gap starts with new observations.
 

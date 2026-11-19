@@ -6,8 +6,9 @@ import pytest
 from conftest import CLEANER, LIGHT, OVEN, PLUG, Wire, fixture_json
 from fastapi.testclient import TestClient
 from spira_contracts.devices import Devices
+from spira_contracts.plan import Plan
 from spira_simulator.api import create_app
-from spira_simulator.profile import load_profile
+from spira_simulator.profile import DEFAULT_PROFILE, load_profile
 from spira_simulator.storage import UnsupportedSchema
 from spira_simulator.world import World
 
@@ -36,6 +37,69 @@ def test_sim_at01_configured_household_without_peers(wire, tmp_path):
         assert snapshot["household_id"] == fixture.household_id
         assert len(snapshot["devices"]) == 7
         assert all(d["observation"] == "current" for d in snapshot["devices"])
+
+
+def test_family_gathering_profile_and_speaker_binding(tmp_path, monkeypatch):
+    monkeypatch.setenv("WORLD_PROFILE", str(DEFAULT_PROFILE.with_name("ep_9120.json")))
+    fixture = Devices.model_validate(fixture_json("ep_9120/devices.json"))
+    plan = Plan.model_validate(fixture_json("ep_9120/plan.v2.json"))
+    expected = {f"mqtt:{device.id}": device for device in fixture.devices}
+    speaker = "mqtt:speaker_01"
+
+    app = create_app(tmp_path / "family.db", broker_enabled=False)
+    with TestClient(app) as client:
+        world = app.state.world
+        wire = Wire(world)
+        assert client.get("/sim/snapshot").json()["household_id"] == fixture.household_id
+        discovered, _ = wire.request("discover")
+        assert {device["target"] for device in discovered["devices"]} == set(expected)
+        for device in discovered["devices"]:
+            source = expected[device["target"]]
+            assert device["device_type"] == source.type
+            assert device["capabilities"]["commands"] == [
+                command.cmd for command in source.commands
+            ]
+        assert world.profile.home_signals == load_profile().home_signals
+        for action, facts in load_profile().home_signals.items():
+            assert [
+                (s["target"], s["event_type"], s["payload"])
+                for s in world.home_event(action)
+            ] == [(f.target, f.event_type, f.payload) for f in facts]
+
+        play = next(
+            action
+            for task in plan.tasks
+            for action in task.actions
+            if action.device == expected[speaker].id
+        )
+        before = wire.read(speaker)
+        receipt, (changed,) = wire.command(speaker, {"play": play.value})
+        assert receipt["status"] == "ACCEPTED" and receipt["job_id"] is None
+        assert changed["event_type"] == "speaker.changed"
+        assert changed["operation_id"] == receipt["operation_id"]
+        playing = wire.read(speaker)
+        assert playing["values"] == {"play": play.value}
+        assert playing["revisions"]["play"] != before["revisions"]["play"]
+
+        for invalid in (
+            {"playlist": "birthday", "volume": 25},
+            {"playlist": "family", "volume": 101},
+            {"playlist": "family", "volume": -1},
+            {"playlist": "family"},
+            {"volume": 25},
+        ):
+            receipt, signals = wire.command(speaker, {"play": invalid})
+            assert receipt["status"] == "REJECTED" and not signals
+            assert wire.read(speaker)["revisions"] == playing["revisions"]
+
+        receipt, _ = wire.command(speaker, {"play": None}, expected=before["revisions"])
+        assert receipt["status"] == "CONFLICT"
+        receipt, (stopped,) = wire.command(
+            speaker, {"play": None}, expected=playing["revisions"]
+        )
+        assert receipt["status"] == "ACCEPTED"
+        assert stopped["event_type"] == "speaker.changed"
+        assert wire.read(speaker)["values"] == before["values"] == {"play": None}
 
 
 def test_sim_at03_local_change_survives_restart_and_remains_private(tmp_path, clock):
