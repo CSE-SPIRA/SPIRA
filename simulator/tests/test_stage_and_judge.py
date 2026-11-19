@@ -866,8 +866,11 @@ def test_sim_at19_live_floor_plans_and_household_content(tmp_path, monkeypatch, 
             for room in view.findall(".//section[@data-room]")
         }
         assert rooms == {
-            "거실": {"cleaner_01", "light_01", "display_01"},
-            "주방": {"cooktop_01", "oven_01", "fridge_01", "plug_kettle"},
+            "거실": {
+                "cleaner_01", "light_01", "display_01", "air_purifier_01", "plug_router",
+            },
+            "주방": {"cooktop_01", "oven_01", "fridge_01", "plug_kettle", "dishwasher_01"},
+            "세탁실": {"washer_01", "plug_iron"},
         }
         for device, content in {
             "oven_01": "170° · 19분 남음 · 굽는 중",
@@ -922,7 +925,7 @@ def test_sim_at19_live_floor_plans_and_household_content(tmp_path, monkeypatch, 
             }
             for room in view.findall(".//section[@data-room]")
         } == {
-            "living_room": {"cleaner_01", "speaker_01"},
+            "living_room": {"cleaner_01", "speaker_01", "air_purifier_01"},
             "kitchen": {"oven_01", "fridge_01"},
         }
         assert (
@@ -1044,6 +1047,61 @@ class SurfaceForms(HTMLParser):
             self.buttons.append(
                 (url, {"person": self.person, "control": attrs["value"]})
             )
+
+
+@pytest.mark.parametrize(
+    "device, panel_control, app_control, content, verbs, class_a",
+    [
+        (
+            "air_purifier_01", "mode_clean", "wind_strength_high", "공기청정 · 강",
+            {"청정 모드": "SDK", "바람 세기": "SDK"}, True,
+        ),
+        (
+            "dishwasher_01", "course_normal", "delay_3", "표준 코스 대기 · 3시간 후 예약",
+            {"코스 대기": "LG 가정", "예약 시작": "SDK"}, True,
+        ),
+        (
+            "washer_01", "course_delicates", "course_normal", "표준 코스 대기",
+            {"코스 대기": "LG 가정"}, True,
+        ),
+        ("plug_iron", "power_on", "power_off", "꺼짐", {"끄기": "LG 가정"}, False),
+        ("plug_router", "power_on", "power_off", "꺼짐", {}, False),
+    ],
+)
+def test_expanded_home_tiles_and_person_controls(
+    tmp_path, monkeypatch, device, panel_control, app_control, content, verbs, class_a
+):
+    app = operator_app(tmp_path)
+    with TestClient(app) as client:
+        signals = []
+        monkeypatch.setattr(
+            app.state.protocol, "publish",
+            lambda topic, payload, **kw: signals.append(json.loads(payload)),
+        )
+        for page, person, control, local in (
+            ("/operator", "엄마", panel_control, class_a),
+            ("/app", "아빠", app_control, False),
+        ):
+            html = client.get(page, auth=AUTH).raise_for_status().text
+            url, fields = next(
+                (url, fields)
+                for url, fields in SurfaceForms(html).buttons
+                if url.endswith(f"mqtt%3A{device}")
+                and fields == {"person": person, "control": control}
+            )
+            response = client.post(url, data=fields, auth=AUTH, follow_redirects=False)
+            assert response.status_code == 303
+            assert signals[-1]["local_operation"] is local
+            assert signals[-1]["target"] == f"mqtt:{device}"
+
+        view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
+        tile = view.find(f'.//div[@data-device="{device}"]/article')
+        assert tile.findtext('p[@class="device-value"]') == content
+        assert tile.findtext('p[@class="change-marker"]') == "아빠 · 가전 앱"
+        badges = {row.text.strip(): row.findtext("span") for row in tile.findall("ul/li")}
+        assert badges == verbs
+        expected_note = "부류 A · 패널 조작 보고 가정" if class_a else None
+        assert tile.findtext('p[@class="tile-note"]') == expected_note
 
 
 @pytest.mark.provisional

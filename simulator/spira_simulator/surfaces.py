@@ -19,8 +19,16 @@ DEVICE_NAMES = {
     "fridge": "냉장고",
     "smart_plug": "플러그",
     "speaker": "스피커",
+    "purifier": "공기청정기",
+    "dishwasher": "식기세척기",
+    "washer": "세탁기",
 }
-ROOM_NAMES = {"living_room": "거실", "kitchen": "주방", "bedroom": "침실"}
+ROOM_NAMES = {
+    "living_room": "거실",
+    "kitchen": "주방",
+    "bedroom": "침실",
+    "laundry_room": "세탁실",
+}
 SCENES = {
     "kids_party": "공주 화면",
     "party": "파티 화면",
@@ -28,6 +36,32 @@ SCENES = {
     "cinema": "영화 화면",
 }
 PLAYLISTS = {"calm": "잔잔한 음악", "party": "파티 음악", "family": "가족 모임 음악"}
+PURIFIER_MODES = {
+    "CLEAN": "공기청정",
+    "AUTO": "자동 청정",
+    "CIRCULATOR": "순환 청정",
+    "DUAL_CLEAN": "듀얼 청정",
+}
+WIND_STRENGTHS = {
+    "LOW": "약",
+    "MID": "중",
+    "HIGH": "강",
+    "AUTO": "자동",
+    "POWER": "터보",
+}
+COURSE_NAMES = {
+    "DELICATE": "섬세",
+    "DELICATES": "섬세",
+    "TURBO": "터보",
+    "RINSE": "헹굼",
+    "REFRESH": "리프레시",
+    "HEAVY": "강력",
+    "NORMAL": "표준",
+    "AUTO": "자동",
+    "EXPRESS": "급속",
+    "MACHINE_CLEAN": "통살균",
+    "DOWNLOAD_CYCLE": "다운로드",
+}
 COMMAND_NAMES = {
     "clean": "청소",
     "color": "조명 색상 변경",
@@ -39,7 +73,12 @@ COMMAND_NAMES = {
     "show_notice": "안내 표시",
     "play": "음악 재생",
     "stop": "정지",
+    "mode": "청정 모드",
+    "wind_strength": "바람 세기",
+    "set_course_standby": "코스 대기",
+    "delayed_start": "예약 시작",
 }
+BASIS_LABELS = {"sdk": "SDK", "lg_assumed": "LG 가정"}
 TRIGGER_NAMES = {
     "package.brought_in": "택배를 들이면",
     "guest_arrived": "손님 오면",
@@ -165,6 +204,17 @@ def household_content(tile: dict) -> str | None:
             if play:
                 return f"{PLAYLISTS.get(play['playlist'], '음악 재생')} · 볼륨 {number_text(play['volume'])}"
             return "재생 안 함"
+        case "purifier":
+            mode = PURIFIER_MODES.get(values.get("mode"))
+            wind = WIND_STRENGTHS.get(values.get("wind_strength"))
+            return " · ".join(filter(None, (mode, wind))) or None
+        case "dishwasher" | "washer":
+            course = COURSE_NAMES.get(values.get("course"))
+            delay = values.get("delay_hours")
+            settings = [f"{course} 코스 대기" if course else "대기 중"]
+            if delay is not None:
+                settings.append(f"{number_text(delay)}시간 후 예약")
+            return " · ".join(settings)
     if "power" in values:
         return ON if values["power"] else OFF
     return None
@@ -203,6 +253,14 @@ def tiles(world: World, snapshot: dict, changes: dict | None = None) -> list[dic
                 "physical": device.substrate == "physical",
                 "class_a": device.local_operation_reporting,
                 "assumption": device.assumption,
+                "verbs": [
+                    (
+                        COMMAND_NAMES.get(command, command),
+                        BASIS_LABELS[device.command_basis[command]],
+                    )
+                    for command in device.commands
+                    if command in device.command_basis
+                ],
                 "change": (
                     changes.get(target)
                     if changes is not None and status == "current"
@@ -254,6 +312,14 @@ def planned_value(command: str, value) -> str | None:
             return f"{number_text(value['temp_c'])}°" + (f" {number_text(minutes)}분" if minutes else "")
         case "play" if value.get("playlist"):
             return PLAYLISTS.get(value["playlist"], "음악 재생")
+        case "mode":
+            return PURIFIER_MODES.get(value.get("mode"))
+        case "wind_strength":
+            return WIND_STRENGTHS.get(value.get("wind_strength"))
+        case "set_course_standby":
+            return COURSE_NAMES.get(value.get("course"))
+        case "delayed_start" if "hours" in value:
+            return f"{number_text(value['hours'])}시간 후"
     return None
 
 
@@ -315,7 +381,7 @@ def device_controls(device: Device, *, appliance: bool) -> list[Control]:
         )
     if "off" in commands and device.device_type == "display":
         controls.append(Control("display_off", "끄기", {"play_mood": None}))
-    if "off" in commands or device.device_type == "light":
+    if "off" in commands or device.device_type in {"light", "smart_plug"}:
         controls.extend(
             (
                 Control("power_on", "켜기", {"power": True}),
@@ -350,6 +416,25 @@ def device_controls(device: Device, *, appliance: bool) -> list[Control]:
         )
     if "stop" in commands:
         controls.append(Control("stop", "음악 정지", {"play": None}))
+    for command, prop, names in (
+        ("mode", "mode", PURIFIER_MODES),
+        ("wind_strength", "wind_strength", WIND_STRENGTHS),
+        ("set_course_standby", "course", COURSE_NAMES),
+    ):
+        if command in commands:
+            controls.extend(
+                Control(
+                    f"{prop}_{value.lower()}",
+                    f"{COMMAND_NAMES[command]} · {name}",
+                    {prop: value},
+                )
+                for value, name in names.items()
+            )
+    if "delayed_start" in commands:
+        controls.extend(
+            Control(f"delay_{hours}", f"{hours}시간 후 예약", {"delay_hours": hours})
+            for hours in (1, 3, 6, 12)
+        )
     if (
         device.device_type == "oven"
         and device.job

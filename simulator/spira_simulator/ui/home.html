@@ -16,6 +16,11 @@
               {% if device.content is not none %}<p class="device-value">{{ device.content }}</p>{% endif %}
               {% if device.observation_label %}<p class="observation-warning">{{ device.observation_label }}{% if device.observation == "stale" %} · {{ device.observed_at }}{% endif %}</p>{% endif %}
               {% if device.change %}<p class="change-marker">{{ device.change[1] }}</p>{% endif %}
+              {% if device.verbs %}
+              <ul class="device-verbs">
+                {% for verb, basis in device.verbs %}<li>{{ verb }} <span class="command-basis">{{ basis }}</span></li>{% endfor %}
+              </ul>
+              {% endif %}
               {% if device.physical %}<p class="tile-note">미검증</p>{% endif %}
               {% if device.class_a %}<p class="tile-note" title="{{ device.assumption }}">부류 A · 패널 조작 보고 가정</p>{% endif %}
             </article>

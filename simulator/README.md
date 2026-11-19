@@ -27,7 +27,21 @@ Open `/operator` for **Bring package inside**, **Guests arrive**, **Event ends**
 
 Open `/app` for the phone-sized Korean appliance app. Use the operator login and select who is acting. It defaults to 아빠 on `h_042` and the first configured person on `h_051`. Appliance changes use `other_app` with `local_operation: false`. To run it on a second phone, bind Uvicorn to a reachable interface with `--host 0.0.0.0` and use the simulator host's LAN address and port on a trusted demo network.
 
-Select the inventory at startup with `WORLD_PROFILE`. It defaults to [`h_042`](spira_simulator/profiles/ep_9031.json) with seven virtual devices. The [`h_051`](spira_simulator/profiles/ep_9120.json) profile has four virtual devices and the same home event controls. Give each process a separate `WORLD_DB`, MQTT prefix, and HTTP port when running both homes. Reopen the same database for that household to retain device state, offline state, receipts, witnesses, jobs, and truth. Command and readback fault arms are in memory. A physical entry is labelled physical and unqualified and stays unavailable until a driver is provided.
+Select the inventory at startup with `WORLD_PROFILE`. Give each process a separate `WORLD_DB`, MQTT prefix, and HTTP port when running both homes. Reopen the same database for that household to retain device state, offline state, receipts, witnesses, jobs, and truth. Command and readback fault arms are in memory. A physical entry is labelled physical and unqualified and stays unavailable until a driver is provided.
+
+| Household profile | Virtual devices | Hub installation |
+| --- | --- | --- |
+| [`h_042` (default)](spira_simulator/profiles/ep_9031.json) | 12, including the living-room purifier, kitchen dishwasher, laundry-room washer and iron plug, and living-room router plug | [`hub/installation.example.json`](../hub/installation.example.json) |
+| [`h_051`](spira_simulator/profiles/ep_9120.json) | 5, including the living-room purifier | [`hub/installation.h_051.example.json`](../hub/installation.h_051.example.json) |
+
+The viewer labels each verb `SDK` or `LG 가정`. The badge describes the command's basis in ThinQ Connect. The Class A label describes the simulator's assumed panel signal.
+
+| Added device | Panel and appliance-app actions |
+| --- | --- |
+| Air purifier | Set mode and wind strength using the enums from LG's published example profile. [LG device profile](https://smartsolution.developer.lge.com/en/apiManage/device_profile?s=1734593490507#tag/air_purifier) |
+| Dishwasher | Set a standby course using LG's read-only course enum, and set delay hours using SDK `set_relative_hour_to_start`. The simulator uses LG's documented 1–12 hour appliance range. [SDK profile](https://github.com/thinq-connect/pythinqconnect/blob/main/thinqconnect/devices/dish_washer.py) · [LG appliance manual](https://gscs-b2c.lge.com/open/downloadFile?fileId=19JGb9kobJ6NhWJFCayeQ) |
+| Washer | Set a simulated standard or delicates standby course. [SDK profile](https://github.com/thinq-connect/pythinqconnect/blob/main/thinqconnect/devices/washer.py) |
+| Iron and router plugs | Toggle power as a household member. The Hub can switch off the iron plug and read the router plug. |
 
 ## Peer inputs and binding
 
@@ -73,6 +87,7 @@ Tests use in-process protocol fakes, HTTP stubs for both evidence sources, and a
 | SIM-AT-19 | Both profiles render their rooms, device values, entrance, wall clock, and configured links in HTTP tests. |
 | SIM-AT-20 | HTTP tests check the viewer and its data for World change labels and action-only overlays. They check that items, intents, rationale, card text, Hub attribution, and judge output stay out of the viewer. |
 | SIM-AT-21 | HTTP tests submit the named panel and appliance-app forms and check the emitted signals and truth journal. The Class A panel signal is provisional pending PQ-01. |
+| Expanded household inventory | MQTT protocol tests cover writes, change events, independent readback, and refusal of Hub writes to the router plug. HTTP tests cover Korean tile values, verb badges, and both person-control paths. |
 
 ## Needs integration
 
@@ -82,6 +97,8 @@ Tests use in-process protocol fakes, HTTP stubs for both evidence sources, and a
 
 ## Open questions
 
+- Which ThinQ models should the contract fixtures represent? The dishwasher profile can report `remoteControlEnabled` and the SDK exposes a separate `START` operation. The simulator keeps `start` in `never` and stores a delay setting without running a wash. The published example reports delay as read-only, while the SDK and public property definition support a write on models that advertise it. The washer SDK has no course selector.
+- Should the existing fridge gain express cooling (`set_express_fridge` or model-specific `set_express_mode`) and compartment target temperature (`set_target_temperature_c`)? Should the oven gain cooking mode (`set_cook_mode`) and timer (`set_timer`)? The SDK couples cooking-mode writes to `START`. Any standby equivalent needs owner review.
 - E6-R3 and protocol §10 still describe fixture Server receipts as the required judge evidence. Should the Hub dashboard projection count toward SIM-AT-02, or should acceptance continue to require a Server-side receipt?
 - `/state` exposes the latest 100 event records and latest 100 restore reports with their delivery flags. Task stories expose run outcomes without C-4 run delivery status. Would future acceptance need run delivery evidence or older dashboard records?
 - For reads of undiscovered targets, the Simulator returns an unavailable report with `substrate: null`. The protocol leaves the substrate for such reads unspecified.

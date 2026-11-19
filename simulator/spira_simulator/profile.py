@@ -67,6 +67,7 @@ class Device(ProfileModel):
     local_operation_reporting: bool
     assumption: str | None = None
     commands: list[str]
+    command_basis: dict[str, Literal["sdk", "lg_assumed"]] = Field(default_factory=dict)
     properties: dict[str, Property] = Field(min_length=1)
     job: Job | None = None
     prohibited_properties: list[str] = Field(default_factory=list)
@@ -75,6 +76,8 @@ class Device(ProfileModel):
     def check_capability(self):
         if self.local_operation_reporting and not self.assumption:
             raise ValueError("Class A requires a displayed assumption")
+        if self.command_basis and self.command_basis.keys() != set(self.commands):
+            raise ValueError("command basis must cover the device commands")
         if any(not re.fullmatch(r"[a-z][a-z0-9_]*", key) for key in self.properties):
             raise ValueError("invalid property name")
         if PRIVATE_FIELDS.intersection(self.properties):

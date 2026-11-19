@@ -72,6 +72,7 @@ header a + a { margin-left: .75rem; }
 }
 .floor-room { min-width: 0; padding: .7rem; }
 .floor-room + .floor-room { border-left: 2px solid #b9bebb; }
+.floor-room[data-room="laundry_room"] { grid-column: 1 / -1; border-left: 0; border-top: 2px solid #b9bebb; }
 .floor-room h2, .entrance h2 {
   color: #6b7378;
   font-size: .87rem;
@@ -111,6 +112,8 @@ header a + a { margin-left: .75rem; }
 .device-value { white-space: pre-wrap; font-size: .96rem; }
 .substrate { background: #ecedeb; border-radius: 3px; padding: 0 .25rem; font-size: .7rem; }
 .substrate.physical { color: #fff; background: #4e565b; }
+.device-verbs { list-style: none; margin: .3rem 0 0; padding: 0; color: #4e565b; font-size: .74rem; }
+.command-basis { background: #ecedeb; border-radius: 3px; padding: 0 .25rem; white-space: nowrap; }
 .tile-note { color: #6b7378; font-size: .74rem; margin-top: .3rem; }
 .observation-warning { color: #824a21; font-size: .83rem; font-weight: 600; }
 .planned {

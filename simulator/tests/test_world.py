@@ -35,7 +35,7 @@ def test_sim_at01_configured_household_without_peers(wire, tmp_path):
         assert client.get("/sim/viewer").status_code == 200
         snapshot = client.get("/sim/snapshot").json()
         assert snapshot["household_id"] == fixture.household_id
-        assert len(snapshot["devices"]) == 7
+        assert {logical[d["target"]] for d in snapshot["devices"]} == set(expected)
         assert all(d["observation"] == "current" for d in snapshot["devices"])
 
 
@@ -100,6 +100,86 @@ def test_family_gathering_profile_and_speaker_binding(tmp_path, monkeypatch):
         assert receipt["status"] == "ACCEPTED"
         assert stopped["event_type"] == "speaker.changed"
         assert wire.read(speaker)["values"] == before["values"] == {"play": None}
+
+
+@pytest.mark.parametrize("episode", ["ep_9031", "ep_9120"])
+def test_demo_profiles_label_every_command_basis(episode):
+    profile = load_profile(DEFAULT_PROFILE.with_name(f"{episode}.json"))
+    for device in profile.devices:
+        assert set(device.command_basis) == set(device.commands)
+        assert set(device.command_basis.values()) <= {"sdk", "lg_assumed"}
+
+
+@pytest.mark.parametrize(
+    "episode, device_id, prop, value, invalid",
+    [
+        ("ep_9031", "air_purifier_01", "mode", "AUTO", "INVALID"),
+        ("ep_9031", "air_purifier_01", "wind_strength", "HIGH", "INVALID"),
+        ("ep_9120", "air_purifier_01", "wind_strength", "HIGH", "INVALID"),
+        ("ep_9031", "dishwasher_01", "course", "NORMAL", "INVALID"),
+        ("ep_9031", "dishwasher_01", "delay_hours", 12, 13),
+        ("ep_9031", "washer_01", "course", "NORMAL", "INVALID"),
+        ("ep_9031", "plug_iron", "power", False, "off"),
+    ],
+)
+def test_added_devices_report_command_effect_and_readback(
+    tmp_path, clock, episode, device_id, prop, value, invalid
+):
+    profile = load_profile(DEFAULT_PROFILE.with_name(f"{episode}.json"))
+    fixture = Devices.model_validate(fixture_json(f"{episode}/devices.json"))
+    device = next(device for device in fixture.devices if device.id == device_id)
+    target = f"mqtt:{device_id}"
+    world = World(tmp_path / "expanded.db", profile, clock)
+    try:
+        wire = Wire(world)
+        if device_id == "plug_iron":
+            world.local_change(target, "resident", {"power": True})
+        before = wire.read(target)
+        desired = {prop: value}
+        receipt, (changed,) = wire.command(
+            target, desired, expected={prop: before["revisions"][prop]}
+        )
+        assert receipt["status"] == "ACCEPTED"
+        assert receipt["job_id"] is None
+        assert changed["event_type"] == f"{device.type}.changed"
+        assert "changed" in device.events
+        assert changed["operation_id"] == receipt["operation_id"]
+        after = wire.read(target)
+        assert after["values"] == changed["values"] == {**before["values"], **desired}
+        assert after["revisions"] == changed["revisions"]
+        assert after["revisions"][prop] != before["revisions"][prop]
+
+        receipt, signals = wire.command(target, {prop: invalid})
+        assert receipt["status"] == "REJECTED" and not signals
+        if "start" in device.never:
+            receipt, signals = wire.command(target, {"start": True})
+            assert receipt["status"] == "PROHIBITED" and not signals
+        assert wire.read(target)["revisions"] == after["revisions"]
+
+        receipt, _ = wire.command(
+            target, {prop: before["values"][prop]}, expected=after["revisions"]
+        )
+        assert receipt["status"] == "ACCEPTED"
+        assert wire.read(target)["values"] == before["values"]
+    finally:
+        world.store.close()
+
+
+def test_router_plug_refuses_hub_off_but_supports_household_control(wire, world):
+    target = "mqtt:plug_router"
+    discovery, _ = wire.request("discover")
+    router = next(device for device in discovery["devices"] if device["target"] == target)
+    assert router["capabilities"]["commands"] == []
+    before = wire.read(target)
+    receipt, signals = wire.command(target, {"power": False})
+    assert receipt["status"] == "PROHIBITED" and not signals
+    assert wire.read(target)["values"] == before["values"] == {"power": True}
+    assert wire.read(target)["revisions"] == before["revisions"]
+
+    (changed,) = world.local_change(target, "resident", {"power": False})
+    assert changed["event_type"] == "smart_plug.changed"
+    assert changed["local_operation"] is False
+    assert wire.read(target)["values"] == {"power": False}
 
 
 def test_sim_at03_local_change_survives_restart_and_remains_private(tmp_path, clock):

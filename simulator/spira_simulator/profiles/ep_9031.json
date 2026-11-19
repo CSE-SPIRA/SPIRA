@@ -20,6 +20,9 @@
       "commands": [
         "clean"
       ],
+      "command_basis": {
+        "clean": "lg_assumed"
+      },
       "properties": {
         "clean": {
           "initial": null,
@@ -86,6 +89,10 @@
         "color",
         "color_temp"
       ],
+      "command_basis": {
+        "color": "lg_assumed",
+        "color_temp": "lg_assumed"
+      },
       "properties": {
         "color": {
           "initial": {
@@ -158,6 +165,10 @@
         "play_mood",
         "off"
       ],
+      "command_basis": {
+        "play_mood": "lg_assumed",
+        "off": "lg_assumed"
+      },
       "properties": {
         "play_mood": {
           "initial": null,
@@ -200,6 +211,9 @@
       "commands": [
         "child_lock"
       ],
+      "command_basis": {
+        "child_lock": "lg_assumed"
+      },
       "properties": {
         "child_lock": {
           "initial": false,
@@ -231,6 +245,9 @@
       "commands": [
         "set_cook_standby"
       ],
+      "command_basis": {
+        "set_cook_standby": "lg_assumed"
+      },
       "properties": {
         "preset": {
           "initial": null,
@@ -305,6 +322,9 @@
       "commands": [
         "show_notice"
       ],
+      "command_basis": {
+        "show_notice": "lg_assumed"
+      },
       "properties": {
         "show_notice": {
           "initial": null,
@@ -341,6 +361,9 @@
       "commands": [
         "off"
       ],
+      "command_basis": {
+        "off": "lg_assumed"
+      },
       "properties": {
         "power": {
           "initial": true,
@@ -350,6 +373,180 @@
         }
       },
       "label": "Kettle plug"
+    },
+    {
+      "target": "mqtt:air_purifier_01",
+      "logical_id": "air_purifier_01",
+      "device_type": "purifier",
+      "room": "living_room",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": true,
+      "assumption": "Virtual LG local-operation reporting",
+      "commands": [
+        "mode",
+        "wind_strength"
+      ],
+      "command_basis": {
+        "mode": "sdk",
+        "wind_strength": "sdk"
+      },
+      "properties": {
+        "mode": {
+          "initial": "CLEAN",
+          "schema": {
+            "enum": [
+              "CLEAN",
+              "AUTO",
+              "CIRCULATOR",
+              "DUAL_CLEAN"
+            ]
+          }
+        },
+        "wind_strength": {
+          "initial": "MID",
+          "schema": {
+            "enum": [
+              "LOW",
+              "MID",
+              "HIGH",
+              "AUTO",
+              "POWER"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "target": "mqtt:dishwasher_01",
+      "logical_id": "dishwasher_01",
+      "device_type": "dishwasher",
+      "room": "kitchen",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": true,
+      "assumption": "Virtual LG local-operation reporting",
+      "commands": [
+        "set_course_standby",
+        "delayed_start"
+      ],
+      "command_basis": {
+        "set_course_standby": "lg_assumed",
+        "delayed_start": "sdk"
+      },
+      "prohibited_properties": [
+        "start"
+      ],
+      "properties": {
+        "course": {
+          "initial": null,
+          "schema": {
+            "enum": [
+              "DELICATE",
+              "TURBO",
+              "RINSE",
+              "REFRESH",
+              "HEAVY",
+              "NORMAL",
+              "AUTO",
+              "EXPRESS",
+              "MACHINE_CLEAN",
+              "DOWNLOAD_CYCLE",
+              null
+            ]
+          }
+        },
+        "delay_hours": {
+          "initial": null,
+          "schema": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 12
+          }
+        }
+      }
+    },
+    {
+      "target": "mqtt:washer_01",
+      "logical_id": "washer_01",
+      "device_type": "washer",
+      "room": "laundry_room",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": true,
+      "assumption": "Virtual LG local-operation reporting",
+      "commands": [
+        "set_course_standby"
+      ],
+      "command_basis": {
+        "set_course_standby": "lg_assumed"
+      },
+      "prohibited_properties": [
+        "start"
+      ],
+      "properties": {
+        "course": {
+          "initial": null,
+          "schema": {
+            "enum": [
+              "NORMAL",
+              "DELICATES",
+              null
+            ]
+          }
+        }
+      }
+    },
+    {
+      "target": "mqtt:plug_iron",
+      "logical_id": "plug_iron",
+      "device_type": "smart_plug",
+      "room": "laundry_room",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": false,
+      "commands": [
+        "off"
+      ],
+      "command_basis": {
+        "off": "lg_assumed"
+      },
+      "label": "다리미 플러그",
+      "properties": {
+        "power": {
+          "initial": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "target": "mqtt:plug_router",
+      "logical_id": "plug_router",
+      "device_type": "smart_plug",
+      "room": "living_room",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": false,
+      "commands": [],
+      "command_basis": {},
+      "prohibited_properties": [
+        "power"
+      ],
+      "label": "공유기 플러그",
+      "properties": {
+        "power": {
+          "initial": true,
+          "schema": {
+            "type": "boolean"
+          },
+          "hub_write": false
+        }
+      }
     }
   ],
   "home_signals": {

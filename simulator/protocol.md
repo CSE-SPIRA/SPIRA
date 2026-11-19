@@ -326,6 +326,18 @@ property witnesses for conditional writes.
 | `oven_01` | `set_cook_standby` | `preset: {temp_c, minutes}`. Actual cooking starts with a local device action. |
 | `fridge_01` | `show_notice` | `show_notice: <text>`. The display slot holds the latest notice. Opening the door emits `fridge.door_opened`. |
 | `plug_kettle` | `off` | `power: false`. |
+| `air_purifier_01` | `mode`, `wind_strength` | `mode` accepts `CLEAN`, `AUTO`, `CIRCULATOR`, `DUAL_CLEAN`. `wind_strength` accepts `LOW`, `MID`, `HIGH`, `AUTO`, `POWER`. |
+| `dishwasher_01` | `set_course_standby`, `delayed_start` | `course` accepts the [fixture's course enum](../contracts/fixtures/ep_9031/devices.json). `delay_hours` accepts relative hours from 1 to 12. A saved `null` clears the corresponding setting on restore. |
+| `washer_01` | `set_course_standby` | `course` accepts `NORMAL` or `DELICATES`. A saved `null` clears the setting on restore. |
+| `plug_iron` | `off` | `power: false`. |
+| `plug_router` | None | `power` can be read by the Hub. A Hub write to it returns `PROHIBITED`. The household can operate the plug locally or through the appliance app. |
+
+The purifier, dishwasher, washer, and plugs emit `<device_type>.changed` on
+property changes. The purifier uses device type `purifier`. The purifier,
+dishwasher, and washer use the Class A panel assumption. The plugs are Class B.
+Dishwasher and washer course settings are standby presets. The dishwasher
+delay stores a relative-hour setting. Both machines prohibit Hub start and
+have no automatic job transitions in these profiles.
 
 The default profile's operator controls MUST emit these raw observations as
 `event_signal` messages.
@@ -339,13 +351,14 @@ The default profile's operator controls MUST emit these raw observations as
 ## 12. `h_051` profile
 
 In the [family-gathering profile](spira_simulator/profiles/ep_9120.json), bind
-each logical device to `mqtt:<logical_id>`. The cleaner, oven, and fridge use
-the mappings above. The cleaner also accepts `침실` as a room value. The home
-controls emit the same raw observations as in `h_042`.
+each logical device to `mqtt:<logical_id>`. The cleaner, oven, fridge, and
+purifier use the mappings above. The cleaner also accepts `침실` as a room
+value. The home controls emit the same raw observations as in `h_042`.
 
 | Logical device | Fixture command | Desired properties |
 | --- | --- | --- |
 | `speaker_01` | `play`, `stop` | `play: {playlist, volume}` or `play: null`. Both use the same property witness. |
+| `air_purifier_01` | `mode`, `wind_strength` | `mode: <mode>` or `wind_strength: <strength>`, with the same enums and `purifier.changed` event as `h_042`. |
 
 Both fields are required for playback. `playlist` is `calm`, `party`, or
 `family`. `volume` is a number from 0 through 100. The virtual speaker emits

@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import paho.mqtt.client as mqtt
 import pytest
-from conftest import LIGHT, PREFIX
+from conftest import LIGHT, PREFIX, fixture_json
 from fastapi.testclient import TestClient
 from spira_simulator.api import create_app
 from spira_simulator.world import DEVICE_SCHEMA
@@ -141,7 +141,10 @@ def test_mosquitto_requests_signals_availability_and_reconnect(tmp_path, monkeyp
 
                 send("discover", "rq_discover")
                 _, response, _, _ = frames.get(timeout=5)
-                assert len(response["data"]["devices"]) == 7
+                assert {device["target"] for device in response["data"]["devices"]} == {
+                    f'mqtt:{device["id"]}'
+                    for device in fixture_json("ep_9031/devices.json")["devices"]
+                }
 
                 send(
                     "command",
