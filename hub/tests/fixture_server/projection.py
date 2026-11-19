@@ -36,7 +36,9 @@ def run_state(task: Task, latest: list[RunResult], rejected: bool, previous: Lin
     completed = statuses.count(ExecutionStatus.COMPLETED)
     all_final = len(statuses) == len(task.actions) and ExecutionStatus.RUNNING not in statuses
     if not all_final:
-        if completed or ExecutionStatus.RUNNING in statuses or previous == LineState.RUNNING:
+        # Same as the Server's line_state (spec §11.5): running only while an action is
+        # completed or still running; otherwise the line falls back to scheduled.
+        if completed or ExecutionStatus.RUNNING in statuses:
             return LineState.RUNNING, None
         return LineState.SCHEDULED, None
     if completed:

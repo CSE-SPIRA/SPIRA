@@ -170,7 +170,13 @@ def test_two_action_line_waits_for_final_results(birthday, first_status, second_
     first.update(status=first_status, at=(safety + timedelta(seconds=1)).isoformat())
     first.pop("observed")
     client.request("POST", route, json=first)
-    assert client.cards(since=poll["server_time"])["cards"] == []
+    pending = client.cards(since=poll["server_time"])["cards"]
+    if started:
+        # Server line_state: no action completed or running any more and one still
+        # pending → the line falls back to scheduled; it is not final yet.
+        assert pending[0]["lines"][1]["state"] == "scheduled"
+    else:
+        assert pending == []
 
     second.update(status=second_status, at=(safety + timedelta(seconds=2)).isoformat())
     if second_status != "completed":
