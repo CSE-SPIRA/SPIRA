@@ -1,0 +1,57 @@
+:root {
+  color-scheme: light;
+  font: 100% system-ui, sans-serif;
+  background: #f3f3ed;
+  color: #212a25;
+  line-height: 1.5;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { width: min(94%, 72rem); margin: 2.5rem auto; }
+header { margin-bottom: 1.5rem; }
+h1, h2, h3, p { margin: 0 0 .55rem; }
+h1 { font-size: clamp(2rem, 5vw, 3.2rem); line-height: 1.1; }
+h2 { font-size: 1.25rem; }
+h3 { font-size: 1rem; }
+.rooms, .overlays, .controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.room { background: #e1e9df; border: 2px solid #586960; padding: 1.15rem; }
+.room + .room { background: #ece5d9; border-color: #827057; }
+.devices { display: grid; gap: .65rem; }
+@media (min-width: 62rem) {
+  .devices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.device {
+  border: 1px solid #bdc9bd;
+  border-left: .3rem solid #527567;
+  background: #fff;
+  padding: .8rem;
+  overflow-wrap: anywhere;
+}
+.device[data-status="stale"], .device[data-status="missing"], .device[data-status="unavailable"] {
+  border: 1px dashed #936843;
+  border-left: .3rem solid #936843;
+  background: #fff9ef;
+}
+.device-heading { display: flex; justify-content: space-between; align-items: start; gap: .5rem; }
+.metadata { color: #49584f; font-size: .88rem; }
+.stale { color: #824a21; font-weight: 700; }
+.color-sample { border: 1px solid #6a695b; border-radius: 50%; width: 1.25rem; height: 1.25rem; flex: none; }
+dl { display: grid; grid-template-columns: minmax(5.5rem, auto) 1fr; gap: .15rem .75rem; margin: .5rem 0 0; }
+dt { color: #4c5b53; }
+dd { margin: 0; }
+.planned, .restore, .control, .evidence { padding: 1rem; }
+.planned { background: #f7f8f3; border: 1px dashed #88998e; color: #56645b; }
+.restore { background: #faf9f4; border: 1px solid #b9b5a6; }
+.control, .evidence { background: #fff; border: 1px solid #bdc9bd; }
+ul { margin-top: .4rem; padding-left: 1.35rem; }
+label { display: block; margin: .6rem 0 .2rem; }
+button, select, textarea { font: inherit; padding: .42rem .6rem; }
+button { cursor: pointer; border: 1px solid #45614f; background: #e4ece3; color: #212a25; margin: .25rem .2rem .25rem 0; }
+button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #257052; outline-offset: 2px; }
+textarea { width: 100%; min-height: 5.2rem; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: .5rem 0 1rem; }

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SPIRA operator</title>
+  <link rel="stylesheet" href="/sim/style.css">
+  <script defer src="/operator/ui.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Household operator</h1>
+      <a href="/sim/viewer">Open household stage</a>
+    </header>
+    <section class="controls" aria-label="Operator controls">
+      <section class="control">
+        <h2>Home events</h2>
+        <div id="home-actions"></div>
+      </section>
+      <section class="control">
+        <h2>Device action</h2>
+        <label for="device">Device</label>
+        <select id="device"></select>
+        <label for="actor">Actor</label>
+        <select id="actor"></select>
+        <div id="quick-actions"></div>
+        <label for="values">Property values (JSON)</label>
+        <textarea id="values" spellcheck="false">{}</textarea>
+        <p id="editable" class="metadata"></p>
+        <button id="write">Apply property values</button>
+      </section>
+      <section class="control">
+        <h2>Faults</h2>
+        <label for="fault-device">Device</label>
+        <select id="fault-device"></select>
+        <label for="mode">Fault mode</label>
+        <select id="mode">
+          <option value="link:offline">Device offline</option>
+          <option value="link:online">Device online</option>
+          <option value="command:reject">Reject next command</option>
+          <option value="command:unchanged">Accept next command without changing state</option>
+          <option value="command:clear">Clear command fault</option>
+          <option value="readback:stale">Stale readback</option>
+          <option value="readback:missing">Missing readback</option>
+          <option value="readback:unavailable">Unavailable readback</option>
+          <option value="readback:current">Resume current readback</option>
+        </select>
+        <button id="fault">Apply fault mode</button>
+      </section>
+    </section>
+    <p id="notice" role="status"></p>
+    <section class="evidence">
+      <h2>Private evidence</h2>
+      <button id="journal">Refresh truth journal</button>
+      <button id="judge">Read received C-3 and compare</button>
+      <pre id="evidence" aria-live="polite"></pre>
+    </section>
+  </main>
+</body>
+</html>

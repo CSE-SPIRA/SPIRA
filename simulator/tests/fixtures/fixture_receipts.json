@@ -1,0 +1,347 @@
+{
+  "events": [
+    [
+      {
+        "at": "2026-11-19T14:43:22.038805+09:00",
+        "event_id": "ev_b65210efb5ce4fef98068652e3380ecb",
+        "household_id": "h_042",
+        "payload": {},
+        "source": "hub",
+        "type": "guest_arrived"
+      }
+    ],
+    [
+      {
+        "at": "2026-11-19T14:43:22.129240+09:00",
+        "event_id": "ev_67f7aef0552a4198906ab1c42f327689",
+        "household_id": "h_042",
+        "payload": {
+          "by": "spira",
+          "from": false,
+          "property": "child_lock",
+          "to": true
+        },
+        "source": "cooktop_01",
+        "type": "cooktop.changed"
+      }
+    ],
+    [
+      {
+        "at": "2026-11-19T14:43:22.149448+09:00",
+        "event_id": "ev_996519b1734b4da28a271ecb756a8504",
+        "household_id": "h_042",
+        "payload": {
+          "by": "spira",
+          "from": true,
+          "property": "power",
+          "to": false
+        },
+        "source": "plug_kettle",
+        "type": "smart_plug.changed"
+      }
+    ],
+    [
+      {
+        "at": "2026-11-19T14:43:22.164065+09:00",
+        "event_id": "ev_fe075d1ded9042d093401c8fb48d3b42",
+        "household_id": "h_042",
+        "payload": {
+          "by": "spira",
+          "from": null,
+          "property": "play_mood",
+          "to": {
+            "scene": "kids_party"
+          }
+        },
+        "source": "display_01",
+        "type": "display.changed"
+      }
+    ],
+    [
+      {
+        "at": "2026-11-19T14:43:22.200184+09:00",
+        "event_id": "ev_6b3e48a2dcbb4c8394cff6c5ab248cb5",
+        "household_id": "h_042",
+        "payload": {
+          "by": "spira",
+          "from": {
+            "kelvin": 3000
+          },
+          "property": "color",
+          "to": {
+            "brightness": 70.0,
+            "hue": 330.0,
+            "saturation": 45.0
+          }
+        },
+        "source": "light_01",
+        "type": "light.changed"
+      }
+    ],
+    [
+      {
+        "at": "2026-11-19T14:44:21.919266+09:00",
+        "event_id": "ev_6eaf141544e440739c1cacbc43bc81c8",
+        "household_id": "h_042",
+        "payload": {
+          "by": "spira",
+          "from": null,
+          "property": "preset",
+          "to": {
+            "minutes": 20.0,
+            "temp_c": 170.0
+          }
+        },
+        "source": "oven_01",
+        "type": "oven.changed"
+      }
+    ],
+    [
+      {
+        "at": "2026-11-19T14:44:22.473988+09:00",
+        "event_id": "ev_95e464f852f34c96aea8c99eae8a6622",
+        "household_id": "h_042",
+        "payload": {
+          "by": "user",
+          "from": {
+            "brightness": 70.0,
+            "hue": 330.0,
+            "saturation": 45.0
+          },
+          "property": "color",
+          "to": {
+            "kelvin": 2700
+          }
+        },
+        "source": "light_01",
+        "type": "light.changed"
+      }
+    ],
+    [
+      {
+        "at": "2026-11-19T14:44:22.477239+09:00",
+        "event_id": "ev_7d66c2c6d06344aa963ad6f8cf7fc7b2",
+        "household_id": "h_042",
+        "payload": {
+          "by": "user"
+        },
+        "source": "oven_01",
+        "type": "oven.started"
+      }
+    ],
+    [
+      {
+        "at": "2026-11-19T14:44:23.548989+09:00",
+        "event_id": "ev_6366ba29023b4a6fbd89f21981b2f45a",
+        "household_id": "h_042",
+        "payload": {},
+        "source": "hub",
+        "type": "event_end"
+      }
+    ],
+    [
+      {
+        "at": "2026-11-19T14:44:23.704690+09:00",
+        "event_id": "ev_fa50ea433cac47868b1eb7f257a8e2ec",
+        "household_id": "h_042",
+        "payload": {
+          "by": "spira",
+          "from": true,
+          "property": "child_lock",
+          "to": false
+        },
+        "source": "cooktop_01",
+        "type": "cooktop.changed"
+      }
+    ],
+    [
+      {
+        "at": "2026-11-19T14:44:23.715142+09:00",
+        "event_id": "ev_de5f091537a440a3a79ee8f1859f1e14",
+        "household_id": "h_042",
+        "payload": {
+          "by": "spira",
+          "from": false,
+          "property": "power",
+          "to": true
+        },
+        "source": "plug_kettle",
+        "type": "smart_plug.changed"
+      }
+    ],
+    [
+      {
+        "at": "2026-11-19T14:44:23.726167+09:00",
+        "event_id": "ev_cdf3d3ae5000485ebf1ca3f3e8fb2768",
+        "household_id": "h_042",
+        "payload": {
+          "by": "spira",
+          "from": {
+            "scene": "kids_party"
+          },
+          "property": "play_mood",
+          "to": null
+        },
+        "source": "display_01",
+        "type": "display.changed"
+      }
+    ]
+  ],
+  "executions": [
+    {
+      "at": "2026-11-19T05:43:22.134843+00:00",
+      "cmd": "child_lock",
+      "device": "cooktop_01",
+      "kind": "run",
+      "observed": {
+        "child_lock": true,
+        "in_use": false
+      },
+      "operation_id": "op_cfb8bd8b6fdc413bb4deae07c25f1feb",
+      "plan_id": "ep_9031",
+      "plan_version": 2,
+      "reason": null,
+      "result_id": "rs_7daf47e7b39e4211aae2587e8f71a5b2",
+      "saved_state": {
+        "child_lock": false,
+        "in_use": false
+      },
+      "status": "completed",
+      "substrate": "virtual",
+      "task_id": "t_safe#2"
+    },
+    {
+      "at": "2026-11-19T05:43:22.153214+00:00",
+      "cmd": "off",
+      "device": "plug_kettle",
+      "kind": "run",
+      "observed": {
+        "power": false
+      },
+      "operation_id": "op_35045abfe8ad4a5a9f563aa494725403",
+      "plan_id": "ep_9031",
+      "plan_version": 2,
+      "reason": null,
+      "result_id": "rs_e673e41e51df477192359bd4eaf39774",
+      "saved_state": {
+        "power": true
+      },
+      "status": "completed",
+      "substrate": "virtual",
+      "task_id": "t_safe#2"
+    },
+    {
+      "at": "2026-11-19T05:43:22.166404+00:00",
+      "cmd": "play_mood",
+      "device": "display_01",
+      "kind": "run",
+      "observed": {
+        "play_mood": {
+          "scene": "kids_party"
+        }
+      },
+      "operation_id": "op_8bc206db0de246b5ab554cc799656c0a",
+      "plan_id": "ep_9031",
+      "plan_version": 2,
+      "reason": null,
+      "result_id": "rs_a754e33e871a4a538db984ca33ab0ba3",
+      "saved_state": {
+        "play_mood": null
+      },
+      "status": "completed",
+      "substrate": "virtual",
+      "task_id": "t_mood#3"
+    },
+    {
+      "at": "2026-11-19T05:43:22.207586+00:00",
+      "cmd": "color",
+      "device": "light_01",
+      "kind": "run",
+      "observed": {
+        "color": {
+          "brightness": 70.0,
+          "hue": 330.0,
+          "saturation": 45.0
+        },
+        "power": true
+      },
+      "operation_id": "op_8412918f336d4a8d9dcd70d87490d5fe",
+      "plan_id": "ep_9031",
+      "plan_version": 2,
+      "reason": null,
+      "result_id": "rs_5985d0dec3cc4c6d9dafe3ab3f6677ac",
+      "saved_state": {
+        "color": {
+          "kelvin": 3000
+        },
+        "power": true
+      },
+      "status": "completed",
+      "substrate": "virtual",
+      "task_id": "t_mood#3"
+    },
+    {
+      "at": "2026-11-19T05:44:21.922571+00:00",
+      "cmd": "set_cook_standby",
+      "device": "oven_01",
+      "kind": "run",
+      "observed": {
+        "in_use": false,
+        "job_status": "idle",
+        "preset": {
+          "minutes": 20.0,
+          "temp_c": 170.0
+        }
+      },
+      "operation_id": "op_ee3627156b604324bf518b571a787685",
+      "plan_id": "ep_9031",
+      "plan_version": 2,
+      "reason": null,
+      "result_id": "rs_4275f13aea244ac499fe18d5e74527ee",
+      "saved_state": {
+        "in_use": false,
+        "job_status": "idle",
+        "preset": null
+      },
+      "status": "completed",
+      "substrate": "virtual",
+      "task_id": "t_oven#4"
+    },
+    {
+      "at": "2026-11-19T05:44:23.718188+00:00",
+      "items": [
+        {
+          "device": "cooktop_01",
+          "status": "restored"
+        },
+        {
+          "device": "plug_kettle",
+          "status": "restored"
+        }
+      ],
+      "kind": "restore",
+      "plan_id": "ep_9031",
+      "plan_version": 2,
+      "result_id": "rs_d5153e4f81e64b069b27d988d1c7eb46",
+      "task_id": "t_safe#2"
+    },
+    {
+      "at": "2026-11-19T05:44:23.728374+00:00",
+      "items": [
+        {
+          "device": "light_01",
+          "status": "skipped_user_changed"
+        },
+        {
+          "device": "display_01",
+          "status": "restored"
+        }
+      ],
+      "kind": "restore",
+      "plan_id": "ep_9031",
+      "plan_version": 2,
+      "result_id": "rs_fdde803694044ab39c40c2e3f2be5dbd",
+      "task_id": "t_mood#3"
+    }
+  ]
+}
