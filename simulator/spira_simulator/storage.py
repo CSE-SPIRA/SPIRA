@@ -3,6 +3,7 @@
 import json
 import sqlite3
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -21,6 +22,10 @@ def identity(prefix: str) -> str:
 
 def encode(value: Any) -> str:
     return json.dumps(value, allow_nan=False, separators=(",", ":"))
+
+
+def sortable_time(at: datetime) -> str:
+    return at.astimezone(UTC).isoformat(timespec="microseconds")
 
 
 class WorldStorage:
@@ -63,6 +68,18 @@ class WorldStorage:
             )
             self.db.execute(
                 "CREATE TABLE IF NOT EXISTS truth_journal(sequence INTEGER PRIMARY KEY, body TEXT NOT NULL)"
+            )
+            self.db.execute(
+                """CREATE TABLE IF NOT EXISTS command_truth(
+                    sequence INTEGER PRIMARY KEY,
+                    operation_id TEXT NOT NULL,
+                    target TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL,
+                    is_notice INTEGER NOT NULL
+                )"""
+            )
+            self.db.execute(
+                "CREATE INDEX IF NOT EXISTS command_truth_time ON command_truth(occurred_at)"
             )
             self.db.execute(
                 "INSERT OR IGNORE INTO control VALUES('world_revision','0')"
@@ -116,6 +133,9 @@ class WorldStorage:
         ).fetchone()
         return row[0] if row else None
 
+    def save_control(self, key: str, value: str):
+        self.db.execute("INSERT OR REPLACE INTO control VALUES(?,?)", (key, value))
+
     @property
     def revision(self) -> int:
         return int(self.control("world_revision"))
@@ -141,6 +161,43 @@ class WorldStorage:
         self.db.execute(
             "INSERT INTO receipts VALUES(?,?)", (operation_id, encode(receipt))
         )
+
+    def record_command(
+        self, operation_id: str, target: str, at: datetime, *, is_notice: bool
+    ):
+        self.db.execute(
+            """INSERT INTO command_truth(operation_id, target, occurred_at, is_notice)
+               VALUES(?,?,?,?)""",
+            (operation_id, target, sortable_time(at), is_notice),
+        )
+
+    def mark_commands(self, at: datetime) -> dict:
+        (sequence,) = self.db.execute(
+            "SELECT COALESCE(MAX(sequence), 0) FROM command_truth"
+        ).fetchone()
+        marker = {"at": at.isoformat(), "sequence": sequence}
+        self.save_control("command_marker", encode(marker))
+        return marker
+
+    def count_commands(
+        self, *, after: int = 0, start: datetime | None = None, end: datetime | None = None
+    ) -> dict:
+        query = """
+            SELECT target, SUM(is_notice), COUNT(*) - SUM(is_notice)
+            FROM command_truth
+        """
+        if start is not None and end is not None:
+            where = "WHERE occurred_at >= ? AND occurred_at < ?"
+            bounds = (sortable_time(start), sortable_time(end))
+        else:
+            where = "WHERE sequence > ?"
+            bounds = (after,)
+        return {
+            target: {"notices": notices, "other_commands": other_commands}
+            for target, notices, other_commands in self.db.execute(
+                f"{query} {where} GROUP BY target", bounds
+            )
+        }
 
     def append_truth(self, fact: dict) -> int:
         sequence = self.revision + 1

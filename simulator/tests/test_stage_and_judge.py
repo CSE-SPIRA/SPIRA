@@ -7,10 +7,11 @@ import httpx
 import pytest
 from conftest import LIGHT, OVEN, PLUG, Wire, fixture_json
 from fastapi.testclient import TestClient
+from spira_contracts.plan import Plan
 from spira_simulator.api import create_app
 from spira_simulator.profile import Profile, load_profile, public_value
 from spira_simulator.sources import JsonSource
-from spira_simulator.world import DEVICE_SCHEMA
+from spira_simulator.world import DEVICE_SCHEMA, World
 
 AUTH = ("operator", uuid4().hex)
 
@@ -328,6 +329,76 @@ def test_judge_reads_http_receipt_and_only_joins_exact_device_type_and_time(
         assert [row["reason"] for row in result["unresolved"]] == [
             "no_matching_truth"
         ] * 3 + ["undefined_attribution"]
+
+
+def test_judge_counts_command_arrivals_by_marker_and_time(tmp_path, monkeypatch, clock):
+    monkeypatch.setattr(
+        "spira_simulator.api.World", lambda path, profile: World(path, profile, clock)
+    )
+    marker_url = "/operator/judge/marker"
+    counts_url = "/operator/judge/commands"
+    plan = Plan.model_validate(fixture_json("ep_9150/plan.v1.json"))
+    with TestClient(operator_app(tmp_path)) as client:
+        wire = Wire(client.app.state.world)
+        assert client.post(marker_url).status_code == 401
+        assert client.get(counts_url).status_code == 401
+        assert client.get(counts_url, auth=AUTH).status_code == 409
+        assert client.get("/operator/judge", auth=AUTH).status_code == 503
+
+        # A pre-marker dispatch shares the timestamp of the grocery notices.
+        wire.command(LIGHT, {"power": False}, "op_prior")
+        marker = post(client, marker_url).json()
+        wire.command(LIGHT, {"power": False}, "op_prior")
+        empty = client.get(counts_url, auth=AUTH).json()
+        assert empty["total"] == {"notices": 0, "other_commands": 0}
+        client.app.state.world.home_event("delivery")
+        for task in plan.tasks:
+            (action,) = task.actions
+            payload = {"show_notice": action.value}
+            target = f"mqtt:{action.device}"
+            wire.command(target, payload, task.task_id)
+            wire.command(target, payload, task.task_id)
+        wire.read(LIGHT)
+        clock.advance()
+        to_time = clock.now.astimezone(UTC).isoformat()
+
+        groceries = client.get(counts_url, auth=AUTH).json()
+        assert groceries["window"]["start"] == marker["at"]
+        assert groceries["total"] == {"notices": 2, "other_commands": 0}
+        assert groceries["by_device"]["fridge_01"] == groceries["total"]
+        assert groceries["by_device"]["light_01"] == empty["total"]
+
+        world = client.app.state.world
+        world.set_fault(LIGHT, "command", "unchanged")
+        assert wire.command(LIGHT, {"power": True})[1] == []
+        world.set_fault(LIGHT, "command", "reject")
+        assert wire.command(LIGHT, {"power": True})[0]["status"] == "REJECTED"
+        missing, _ = wire.command("mqtt:missing", {"power": True})
+        assert missing["status"] == "UNSUPPORTED"
+        world.local_change(LIGHT, "resident", {"power": True})
+        clock.advance()
+
+        window = {"start": marker["at"], "end": to_time}
+        explicit = client.get(counts_url, params=window, auth=AUTH).raise_for_status()
+        assert explicit.json()["total"] == {"notices": 2, "other_commands": 1}
+        for invalid, status in (
+            ({"start": marker["at"]}, 400),
+            ({"start": to_time, "end": marker["at"]}, 400),
+            ({**window, "start": "2026-10-17T14:00:00"}, 422),
+        ):
+            assert client.get(counts_url, params=invalid, auth=AUTH).status_code == status
+
+    with TestClient(operator_app(tmp_path)) as client:
+        saved = client.get(counts_url, auth=AUTH).raise_for_status().json()
+        assert saved["window"]["start"] == marker["at"]
+        assert saved["recording_since"] == marker["at"]
+        assert saved["total"] == {"notices": 2, "other_commands": 3}
+        assert saved["by_device"]["light_01"] == {"notices": 0, "other_commands": 2}
+        assert saved["unbound_targets"] == {
+            "mqtt:missing": {"notices": 0, "other_commands": 1}
+        }
+        post(client, marker_url)
+        assert client.get(counts_url, auth=AUTH).json()["total"] == empty["total"]
 
 
 def test_raw_home_signals_and_wall_clock_sim_at18_local_evidence(tmp_path, monkeypatch):

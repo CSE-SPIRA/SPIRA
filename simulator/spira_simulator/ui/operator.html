@@ -55,6 +55,15 @@
       <button id="journal">Refresh truth journal</button>
       <button id="judge">Read received C-3 and compare</button>
       <pre id="evidence" aria-live="polite"></pre>
+      <h3>Hub command counts</h3>
+      <button id="command-marker">Set command marker</button>
+      <label for="command-start">Start (ISO 8601 with offset)</label>
+      <input id="command-start" type="text">
+      <label for="command-end">End (ISO 8601 with offset)</label>
+      <input id="command-end" type="text">
+      <button id="count-commands">Count Hub commands</button>
+      <p class="metadata">Leave both times blank to count since the marker.</p>
+      <pre id="command-evidence" aria-live="polite"></pre>
     </section>
   </main>
 </body>

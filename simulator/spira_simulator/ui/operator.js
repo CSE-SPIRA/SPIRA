@@ -37,10 +37,10 @@ const write = (values, start = false) => request("/operator/device", {
   target: byId("device").value, actor: byId("actor").value, values, start,
 });
 
-async function evidence(path) {
-  byId("evidence").textContent = "";
-  const facts = await request(path);
-  byId("evidence").textContent = JSON.stringify(facts, null, 2);
+async function evidence(path, output = "evidence", body) {
+  byId(output).textContent = "";
+  const facts = await request(path, body);
+  byId(output).textContent = JSON.stringify(facts, null, 2);
 }
 
 async function init() {
@@ -79,6 +79,17 @@ async function init() {
   }));
   byId("journal").addEventListener("click", () => report(() => evidence("/operator/truth")));
   byId("judge").addEventListener("click", () => report(() => evidence("/operator/judge")));
+  byId("command-marker").addEventListener("click", () => report(
+    () => evidence("/operator/judge/marker", "command-evidence", {}),
+  ));
+  byId("count-commands").addEventListener("click", () => report(() => {
+    const range = new URLSearchParams();
+    for (const key of ["start", "end"]) {
+      const value = byId(`command-${key}`).value.trim();
+      if (value) range.set(key, value);
+    }
+    return evidence(`/operator/judge/commands?${range}`, "command-evidence");
+  }));
 }
 
 init().catch((error) => { byId("notice").textContent = error.message; });

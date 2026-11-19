@@ -43,6 +43,8 @@ class World:
             raise
 
     def _seed(self):
+        if self.store.control("commands_recorded_since") is None:
+            self.store.save_control("commands_recorded_since", self.clock().isoformat())
         old_light = self.store.control("legacy_light")
         for target, device in self.devices.items():
             if self.store.state(target) is not None:
@@ -286,12 +288,54 @@ class World:
             old_receipt = self.store.receipt(operation_id)
             if old_receipt is not None:
                 return old_receipt, []
+            self.store.record_command(
+                operation_id,
+                target,
+                self.clock(),
+                is_notice=desired.keys() == {"show_notice"},
+            )
             status, job_id, signals = self._apply_command(
                 operation_id, target, desired, expected
             )
             receipt = {"status": status, "operation_id": operation_id, "job_id": job_id}
             self.store.save_receipt(operation_id, receipt)
             return receipt, signals
+
+    def mark_commands(self) -> dict:
+        with self.store.transaction():
+            return self.store.mark_commands(self.clock())
+
+    def command_counts(
+        self, start: datetime | None = None, end: datetime | None = None
+    ) -> dict | None:
+        with self.store.lock:
+            if start is None:
+                saved = self.store.control("command_marker")
+                if saved is None:
+                    return None
+                marker = json.loads(saved)
+                counts = self.store.count_commands(after=marker["sequence"])
+                window = {"start": marker["at"], "end": self.clock().isoformat()}
+            else:
+                counts = self.store.count_commands(start=start, end=end)
+                window = {"start": start.isoformat(), "end": end.isoformat()}
+            total = {
+                key: sum(device[key] for device in counts.values())
+                for key in ("notices", "other_commands")
+            }
+            by_device = {
+                device.logical_id: counts.pop(
+                    device.target, {"notices": 0, "other_commands": 0}
+                )
+                for device in self.devices.values()
+            }
+            return {
+                "window": window,
+                "recording_since": self.store.control("commands_recorded_since"),
+                "total": total,
+                "by_device": by_device,
+                "unbound_targets": counts,
+            }
 
     def _apply_command(
         self, operation_id: str, target: str, desired: dict, expected: dict

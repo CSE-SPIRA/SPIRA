@@ -41,6 +41,10 @@ Read replies carry `operation_id: null` and `local_operation: false`. A stale re
 
 The grocery fixture `../contracts/fixtures/ep_9150/plan.v1.json` shows two item notices and no household preparation. The birthday fixture keeps the protective line in the plan after the cleaning line is switched off. The stage labels planned protective actions and shows withheld releases in the Hub restore reports. Its device tiles come from World readback.
 
+Under **Private evidence**, set a command marker before an episode, then select **Count Hub commands**. Enter both offset timestamps to count over an explicit interval instead. The API is `POST /operator/judge/marker` and `GET /operator/judge/commands`, optionally with `start` and `end` query parameters. The count includes the start time and excludes the end time. A marker uses journal order so it works even when a command shares its timestamp. It persists in `WORLD_DB`.
+
+Counts cover the first valid command arrival for each operation ID, including rejected commands and accepted commands with no effect. A write to only `show_notice` goes in `notices`; every other command goes in `other_commands`. For groceries, check for zero other commands and look for the notices under `fridge_01`. The report lists `recording_since` because databases opened before this feature have no command-arrival history before that time. Command counts are available without a received C-3 source.
+
 ## Tests
 
 ```bash

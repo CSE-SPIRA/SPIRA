@@ -11,7 +11,7 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from .mqtt import Broker, DeviceProtocol
 from .profile import DEFAULT_PROFILE, Profile, load_profile
@@ -278,6 +278,25 @@ def create_app(
             raise HTTPException(
                 502, "Received C-3 source unavailable or invalid"
             ) from exc
+
+    @application.post("/operator/judge/marker", dependencies=[Depends(require_operator)])
+    def mark_commands(request: Request):
+        return request.app.state.world.mark_commands()
+
+    @application.get("/operator/judge/commands", dependencies=[Depends(require_operator)])
+    def count_commands(
+        request: Request,
+        start: AwareDatetime | None = None,
+        end: AwareDatetime | None = None,
+    ):
+        if (start is None) != (end is None):
+            raise HTTPException(400, "Provide both start and end, or use the marker")
+        if start is not None and end is not None and end <= start:
+            raise HTTPException(400, "End must be later than start")
+        counts = request.app.state.world.command_counts(start, end)
+        if counts is None:
+            raise HTTPException(409, "Set a command marker or enter a time range")
+        return counts
 
     @application.middleware("http")
     async def prevent_caching(request: Request, call_next):
