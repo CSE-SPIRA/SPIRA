@@ -1,11 +1,10 @@
 """HTTP transport for the non-inference fixture replay."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, Response
-from pydantic import ValidationError
 from spira_contracts.ack import Ack
 from spira_contracts.calendar import Calendar
 from spira_contracts.calendar_response import CalendarResponse
@@ -34,7 +33,7 @@ from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException
 
 from .replay import Replay, valid_household_types, wire
-from .scene_support import NextOrder, live_replay
+from .scene_support import NextOrder, apply_scene_calendar, live_replay, scene_calendar
 
 LABEL = "SPIRA fixture - non-inference test support"
 LABEL_HEADER = "X-SPIRA-Fixture"
@@ -80,11 +79,13 @@ def create_app(
     episode_id: str = "ep_9031", *, scene_controls: bool = False, demo_mode: bool = False
 ) -> FastAPI:
     replay = Replay(episode_id)
-    if scene_controls and replay.household_id != "h_042":
-        raise ValueError("Scene controls support only household h_042")
-    published = not scene_controls
+    snapshots: dict[str, Replay] = {} if scene_controls else {episode_id: replay}
+    scene_counts: dict[str, int] = {}
     pending_order: NextOrder | None = None
+    active_order: NextOrder | None = None
     orders: dict[str, str] = {}
+    event_ids: set[str] = set()
+    result_ids: set[str] = set()
     app = FastAPI(title=LABEL, docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.middleware("http")
@@ -120,10 +121,26 @@ def create_app(
             )
 
     def require_episode(requested_episode: str):
-        if not published or requested_episode != replay.episode.episode_id:
+        if requested_episode not in snapshots:
             raise FixtureError(
                 404, "not_found", "Episode is outside the selected fixture"
             )
+        return snapshots[requested_episode]
+
+    def apply_calendar(calendar: Calendar, *, now: datetime | None = None):
+        for event in calendar.events:
+            timestamp(event.start)
+            timestamp(event.end)
+        if active_order:
+            apply_scene_calendar(replay, active_order, calendar, demo_mode=demo_mode, now=now)
+        elif not scene_controls and calendar == replay.calendar:
+            replay.find_calendar_time()
+        return response(CalendarResponse(accepted=len(calendar.events)), 202)
+
+    def project(snapshot: Replay):
+        snapshot.clock = max(snapshot.clock, replay.clock)
+        snapshot.project()
+        replay.clock = max(snapshot.clock, replay.clock)
 
     async def app_token(request: Request):
         scheme, _, token = request.headers.get("Authorization", "").partition(" ")
@@ -153,8 +170,17 @@ def create_app(
         @app.post("/_fixture/scene/next-order", dependencies=app_auth, status_code=202)
         async def next_order(order: NextOrder):
             nonlocal pending_order
+            if Replay(order.episode_id).household_id != replay.household_id:
+                raise FixtureError(422, "validation_error", "Scene episode belongs to another household")
             pending_order = order
             return {"episode_id": order.episode_id, "household_id": replay.household_id}
+
+        @app.post("/_fixture/scene/calendar", dependencies=app_auth, status_code=202)
+        async def post_scene_calendar():
+            if active_order is None or not replay.calendar:
+                raise FixtureError(404, "not_found", "No committed calendar for the active scene")
+            now = datetime.fromisoformat(replay.tick())
+            return apply_calendar(scene_calendar(replay, active_order, now), now=now)
 
         @app.get("/_fixture/scene/acks", dependencies=hub_auth)
         async def scene_acks():
@@ -185,14 +211,15 @@ def create_app(
     async def put_calendar(household_id: str, request: Request):
         require_household(household_id)
         calendar = await read_body(request, Calendar)
-        replay.put_calendar(calendar)
-        return response(CalendarResponse(accepted=len(calendar.events)), 202)
+        return apply_calendar(calendar)
 
     @app.post("/v1/households/{household_id}/pause", dependencies=app_auth)
     async def put_pause(household_id: str, request: Request):
         require_household(household_id)
         pause = await read_body(request, Pause)
         replay.pause(pause.paused)
+        if replay.live:
+            replay.project()
         return response(Pause(household_id=household_id, paused=replay.paused))
 
     @app.get("/v1/households/{household_id}/episodes", dependencies=app_auth)
@@ -207,33 +234,39 @@ def create_app(
             raise FixtureError(
                 422, "validation_error", "Invalid episode limit"
             ) from exc
-        episodes = []
-        episode = replay.episode
-        if published and (before is None or datetime.fromisoformat(episode.shared_at) < before):
-            episodes.append(
-                EpisodeSummary(
-                    episode_id=episode.episode_id,
-                    shared_at=episode.shared_at,
-                    status=episode.status,
-                    item_count=episode.item_count,
-                    card_ids=episode.card_ids,
-                )
+        if replay.live:
+            replay.project()
+        episodes = [
+            EpisodeSummary(
+                episode_id=episode.episode_id,
+                shared_at=episode.shared_at,
+                status=episode.status,
+                item_count=episode.item_count,
+                card_ids=episode.card_ids,
             )
-        return response(EpisodeList(episodes=episodes, next_before=None))
+            for episode in (snapshot.episode for snapshot in reversed(snapshots.values()))
+            if before is None or datetime.fromisoformat(episode.shared_at) < before
+        ]
+        next_before = episodes[limit - 1].shared_at if len(episodes) > limit else None
+        return response(EpisodeList(episodes=episodes[:limit], next_before=next_before))
 
     @app.get("/v1/households/{household_id}/cards", dependencies=app_auth)
     async def get_cards(household_id: str, request: Request):
         require_household(household_id)
         since = timestamp(request.query_params.get("since"))
-        card = replay.card if published else None
-        if since is None:
-            cards = [card] if card and not replay.finished and not card.stopped else []
-        else:
-            cards = (
-                [card]
-                if card and datetime.fromisoformat(card.updated_at) > since
-                else []
-            )
+        if replay.live:
+            replay.project()
+        cards = []
+        for snapshot in reversed(snapshots.values()):
+            card = snapshot.card
+            if card is None:
+                continue
+            if since is None:
+                if snapshot.episode.status != EpisodeStatus.CLOSED and not card.stopped:
+                    cards.append(card)
+            elif datetime.fromisoformat(card.updated_at) > since:
+                cards.append(card)
+        replay.clock = replay.now()
         return response(
             CardsResponse(cards=cards, server_time=replay.clock.isoformat())
         )
@@ -265,7 +298,7 @@ def create_app(
 
     @app.post("/v1/orders", dependencies=app_auth)
     async def post_order(request: Request):
-        nonlocal replay, published, pending_order
+        nonlocal replay, active_order, pending_order
         try:
             async with request.form() as form:
                 household = form.get("household_id")
@@ -293,14 +326,22 @@ def create_app(
             ) from exc
         duplicate = source_id in orders
         if not duplicate and scene_controls and not replay.paused:
-            if pending_order is None and not published:
+            if pending_order is None and not snapshots:
                 raise FixtureError(409, "invalid_request", "Select a scene episode before upload")
             if pending_order is not None:
-                upcoming = live_replay(pending_order, demo_mode=demo_mode)
+                template = pending_order.episode_id
+                scene_counts[template] = scene_counts.get(template, 0) + 1
+                now = datetime.now(timezone.utc)
+                if replay.live:
+                    now = max(now, replay.clock + timedelta(microseconds=1))
+                upcoming = live_replay(
+                    pending_order, demo_mode=demo_mode, now=now, sequence=scene_counts[template],
+                )
                 upcoming.devices = replay.devices
                 upcoming.profile = replay.profile
                 upcoming.receipts = replay.receipts
-                replay, published, pending_order = upcoming, True, None
+                snapshots[upcoming.episode.episode_id] = upcoming
+                replay, active_order, pending_order = upcoming, pending_order, None
         selected_id = orders[source_id] if duplicate else replay.episode.episode_id
         if source_id is not None:
             orders[source_id] = selected_id
@@ -312,8 +353,10 @@ def create_app(
 
     @app.get("/v1/episodes/{episode_id}", dependencies=app_auth)
     async def get_episode(episode_id: str):
-        require_episode(episode_id)
-        return response(replay.episode)
+        snapshot = require_episode(episode_id)
+        if snapshot is replay and replay.live:
+            replay.project()
+        return response(snapshot.episode)
 
     @app.put("/v1/episodes/{episode_id}/order", dependencies=app_auth)
     async def edit_order(episode_id: str, request: Request):
@@ -324,8 +367,8 @@ def create_app(
 
     @app.get("/v1/episodes/{episode_id}/rationale", dependencies=app_auth)
     async def get_rationale(episode_id: str):
-        require_episode(episode_id)
-        rationale = replay.load(Rationale, "rationale.json")
+        snapshot = require_episode(episode_id)
+        rationale = snapshot.load(Rationale, "rationale.json")
         if rationale is None:
             raise FixtureError(
                 404, "not_found", "No rationale snapshot at this fixture step"
@@ -334,13 +377,16 @@ def create_app(
 
     @app.post("/v1/cards/{card_id}/reactions", dependencies=app_auth)
     async def react(card_id: str, request: Request):
-        if not published or not replay.card or replay.card.card_id != card_id or replay.finished:
+        reaction = await read_body(request, Reaction)
+        if not snapshots or not replay.card or replay.card.card_id != card_id or replay.finished:
             raise FixtureError(
                 404, "not_found", "No open card with this ID in the fixture"
             )
-        reaction = await read_body(request, Reaction)
         try:
-            return response(replay.react(reaction))
+            replay.react(reaction)
+            if replay.live:
+                replay.project()
+            return response(replay.card)
         except LookupError as exc:
             raise FixtureError(404, "not_found", str(exc)) from exc
         except ValueError as exc:
@@ -368,15 +414,17 @@ def create_app(
                 household_id=replay.household_id,
                 paused=replay.paused,
                 devices_revision=replay.devices.revision,
-                plans=[replay.plan] if published and not replay.finished else [],
+                plans=[replay.plan] if snapshots and not replay.finished else [],
             )
         )
 
     @app.post("/v1/hub/plans/{plan_id}/ack", dependencies=hub_auth)
     async def ack_plan(plan_id: str, request: Request):
-        require_episode(plan_id)
         ack = await read_body(request, Ack)
-        replay.acks[ack.plan_version] = ack
+        snapshot = require_episode(plan_id)
+        snapshot.acks[ack.plan_version] = ack
+        if snapshot.live:
+            project(snapshot)
         return Response(status_code=204)
 
     @app.post("/v1/hub/events", dependencies=hub_auth)
@@ -415,13 +463,16 @@ def create_app(
         for raw in body:
             try:
                 event = parse(Event, raw)
-                if event.event_id not in replay.events:
+                datetime.fromisoformat(event.at)
+                if event.event_id not in event_ids:
                     if event.source != "hub" and event.source not in device_ids:
                         raise ContractError("Unknown fixture device")
-                    replay.events[event.event_id] = raw
-                    changed = replay.release_package(event) or changed
+                    event_ids.add(event.event_id)
+                    if snapshots:
+                        replay.events[event.event_id] = event
+                        changed = replay.release_package(event) or changed
                 accepted.append(event.event_id)
-            except (ContractError, ValidationError):
+            except ValueError:
                 event_id = raw.get("event_id") if isinstance(raw, dict) else None
                 rejected.append(
                     RejectedItem(
@@ -430,6 +481,8 @@ def create_app(
                         message=f"{LABEL}. Invalid event or unknown fixture device",
                     )
                 )
+        if replay.live:
+            replay.project()
         changed = replay.finish_if_replayed() or changed
         return response(
             EventResponse(accepted=accepted, rejected=rejected, plans_changed=changed)
@@ -439,13 +492,17 @@ def create_app(
     async def post_execution(request: Request):
         receipts = replay.receipts["executions"]
         result = await read_body(request, ExecutionResult, receipts=receipts)
-        require_episode(result.root.plan_id)
+        timestamp(result.root.at)
+        snapshot = require_episode(result.root.plan_id)
         result_id = result.root.result_id
-        duplicate = result_id in replay.results
+        duplicate = result_id in result_ids
         if not duplicate:
-            replay.results[result_id] = result
-            replay.result_bodies[result_id] = receipts[-1]
-            replay.finish_if_replayed()
+            result_ids.add(result_id)
+            snapshot.results[result_id] = result
+            snapshot.result_bodies[result_id] = receipts[-1]
+            if not snapshot.finished:
+                project(snapshot)
+            snapshot.finish_if_replayed()
         return response(ExecutionResponse(duplicate=duplicate))
 
     return app

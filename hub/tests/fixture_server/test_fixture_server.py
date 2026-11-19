@@ -445,7 +445,7 @@ def test_calendar_keeps_a_held_line_off_until_it_is_explicitly_reenabled(peer):
 
 
 @pytest.mark.parametrize("episode_id", ["ep_9150", "ep_9120"])
-def test_episodes_without_release_fixture_keep_item_work_waiting(peer, episode_id):
+def test_a_package_from_before_the_order_keeps_item_work_waiting(peer, episode_id):
     client = peer(episode_id)
     pull = client.pull()
     event = read_json(FIXTURES / "ep_9031" / "events.json")[0]
