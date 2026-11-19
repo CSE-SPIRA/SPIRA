@@ -9,7 +9,9 @@ from typing import Any, Literal
 from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-PRIVATE_FIELDS = frozenset({"actor", "ground_truth_actor", "provenance", "by"})
+PRIVATE_FIELDS = frozenset(
+    {"actor", "actor_name", "action_path", "ground_truth_actor", "provenance", "by"}
+)
 
 
 def public_value(value: Any) -> bool:

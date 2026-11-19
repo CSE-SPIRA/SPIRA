@@ -335,3 +335,19 @@ The default profile's operator controls MUST emit these raw observations as
 | Bring package inside | `mqtt:sim_camera` · `camera.package_removed` with `removed_count: 1`, `remaining_count: 0` |
 | Guests arrive | `mqtt:sim_doorbell` · `doorbell.pressed`, `mqtt:sim_door_lock` · `door_lock.opened`, and `mqtt:sim_presence` · `presence.room_occupied` |
 | Event ends | `mqtt:sim_presence` · `presence.room_empty` |
+
+## 12. `h_051` profile
+
+In the [family-gathering profile](spira_simulator/profiles/ep_9120.json), bind
+each logical device to `mqtt:<logical_id>`. The cleaner, oven, and fridge use
+the mappings above. The cleaner also accepts `침실` as a room value. The home
+controls emit the same raw observations as in `h_042`.
+
+| Logical device | Fixture command | Desired properties |
+| --- | --- | --- |
+| `speaker_01` | `play`, `stop` | `play: {playlist, volume}` or `play: null`. Both use the same property witness. |
+
+Both fields are required for playback. `playlist` is `calm`, `party`, or
+`family`. `volume` is a number from 0 through 100. The virtual speaker emits
+`speaker.changed` for playback changes and reports
+`local_operation_reporting: false`.

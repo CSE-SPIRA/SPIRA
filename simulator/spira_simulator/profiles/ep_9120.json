@@ -1,0 +1,265 @@
+{
+  "household_id": "h_051",
+  "devices": [
+    {
+      "target": "mqtt:cleaner_01",
+      "logical_id": "cleaner_01",
+      "device_type": "cleaner",
+      "room": "living_room",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": true,
+      "assumption": "Virtual LG local-operation reporting",
+      "commands": [
+        "clean"
+      ],
+      "properties": {
+        "clean": {
+          "initial": null,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "room": {
+                    "enum": [
+                      "거실",
+                      "주방",
+                      "침실"
+                    ]
+                  }
+                },
+                "required": [
+                  "room"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "in_use": {
+          "initial": false,
+          "schema": {
+            "type": "boolean"
+          },
+          "hub_write": false,
+          "local_write": false
+        },
+        "job_status": {
+          "initial": "idle",
+          "schema": {
+            "enum": [
+              "idle",
+              "running",
+              "completed",
+              "stopped"
+            ]
+          },
+          "hub_write": false,
+          "local_write": false
+        }
+      },
+      "job": {
+        "trigger_property": "clean",
+        "duration_seconds": 30
+      }
+    },
+    {
+      "target": "mqtt:speaker_01",
+      "logical_id": "speaker_01",
+      "device_type": "speaker",
+      "room": "living_room",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": false,
+      "commands": [
+        "play",
+        "stop"
+      ],
+      "properties": {
+        "play": {
+          "initial": null,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "playlist": {
+                    "enum": [
+                      "calm",
+                      "party",
+                      "family"
+                    ]
+                  },
+                  "volume": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  }
+                },
+                "required": [
+                  "playlist",
+                  "volume"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "target": "mqtt:oven_01",
+      "logical_id": "oven_01",
+      "device_type": "oven",
+      "room": "kitchen",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": true,
+      "assumption": "Virtual LG local-operation reporting",
+      "commands": [
+        "set_cook_standby"
+      ],
+      "properties": {
+        "preset": {
+          "initial": null,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "temp_c": {
+                    "type": "number",
+                    "minimum": 40,
+                    "maximum": 250
+                  },
+                  "minutes": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 180
+                  }
+                },
+                "required": [
+                  "temp_c",
+                  "minutes"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "in_use": {
+          "initial": false,
+          "schema": {
+            "type": "boolean"
+          },
+          "hub_write": false,
+          "local_write": false
+        },
+        "job_status": {
+          "initial": "idle",
+          "schema": {
+            "enum": [
+              "idle",
+              "running",
+              "completed",
+              "stopped"
+            ]
+          },
+          "hub_write": false,
+          "local_write": false
+        }
+      },
+      "job": {
+        "duration_seconds": 1200,
+        "minutes_property": "preset"
+      },
+      "prohibited_properties": [
+        "start",
+        "in_use"
+      ]
+    },
+    {
+      "target": "mqtt:fridge_01",
+      "logical_id": "fridge_01",
+      "device_type": "fridge",
+      "room": "kitchen",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": true,
+      "assumption": "Virtual LG local-operation reporting",
+      "commands": [
+        "show_notice"
+      ],
+      "properties": {
+        "show_notice": {
+          "initial": null,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "door_open": {
+          "initial": false,
+          "schema": {
+            "type": "boolean"
+          },
+          "hub_write": false,
+          "event_type": "fridge.door_opened"
+        }
+      }
+    }
+  ],
+  "home_signals": {
+    "delivery": [
+      {
+        "target": "mqtt:sim_camera",
+        "event_type": "camera.package_removed",
+        "payload": {
+          "removed_count": 1,
+          "remaining_count": 0
+        }
+      }
+    ],
+    "guests_arrive": [
+      {
+        "target": "mqtt:sim_doorbell",
+        "event_type": "doorbell.pressed",
+        "payload": {}
+      },
+      {
+        "target": "mqtt:sim_door_lock",
+        "event_type": "door_lock.opened",
+        "payload": {}
+      },
+      {
+        "target": "mqtt:sim_presence",
+        "event_type": "presence.room_occupied",
+        "payload": {}
+      }
+    ],
+    "event_end": [
+      {
+        "target": "mqtt:sim_presence",
+        "event_type": "presence.room_empty",
+        "payload": {}
+      }
+    ]
+  }
+}

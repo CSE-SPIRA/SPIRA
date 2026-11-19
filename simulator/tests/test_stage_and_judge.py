@@ -7,10 +7,11 @@ import httpx
 import pytest
 from conftest import LIGHT, OVEN, PLUG, Wire, fixture_json
 from fastapi.testclient import TestClient
+from spira_contracts.plan import Plan
 from spira_simulator.api import create_app
 from spira_simulator.profile import Profile, load_profile, public_value
 from spira_simulator.sources import JsonSource
-from spira_simulator.world import DEVICE_SCHEMA
+from spira_simulator.world import DEVICE_SCHEMA, World
 
 AUTH = ("operator", uuid4().hex)
 
@@ -328,6 +329,161 @@ def test_judge_reads_http_receipt_and_only_joins_exact_device_type_and_time(
         assert [row["reason"] for row in result["unresolved"]] == [
             "no_matching_truth"
         ] * 3 + ["undefined_attribution"]
+
+
+def test_judge_counts_command_arrivals_by_marker_and_time(tmp_path, monkeypatch, clock):
+    monkeypatch.setattr(
+        "spira_simulator.api.World", lambda path, profile: World(path, profile, clock)
+    )
+    marker_url = "/operator/judge/marker"
+    counts_url = "/operator/judge/commands"
+    plan = Plan.model_validate(fixture_json("ep_9150/plan.v1.json"))
+    with TestClient(operator_app(tmp_path)) as client:
+        wire = Wire(client.app.state.world)
+        assert client.post(marker_url).status_code == 401
+        assert client.get(counts_url).status_code == 401
+        assert client.get(counts_url, auth=AUTH).status_code == 409
+        assert client.get("/operator/judge", auth=AUTH).status_code == 503
+
+        # A pre-marker dispatch shares the timestamp of the grocery notices.
+        wire.command(LIGHT, {"power": False}, "op_prior")
+        marker = post(client, marker_url).json()
+        wire.command(LIGHT, {"power": False}, "op_prior")
+        empty = client.get(counts_url, auth=AUTH).json()
+        assert empty["total"] == {"notices": 0, "other_commands": 0}
+        client.app.state.world.home_event("delivery")
+        for task in plan.tasks:
+            (action,) = task.actions
+            payload = {"show_notice": action.value}
+            target = f"mqtt:{action.device}"
+            wire.command(target, payload, task.task_id)
+            wire.command(target, payload, task.task_id)
+        wire.read(LIGHT)
+        clock.advance()
+        to_time = clock.now.astimezone(UTC).isoformat()
+
+        groceries = client.get(counts_url, auth=AUTH).json()
+        assert groceries["window"]["start"] == marker["at"]
+        assert groceries["total"] == {"notices": 2, "other_commands": 0}
+        assert groceries["by_device"]["fridge_01"] == groceries["total"]
+        assert groceries["by_device"]["light_01"] == empty["total"]
+
+        world = client.app.state.world
+        world.set_fault(LIGHT, "command", "unchanged")
+        assert wire.command(LIGHT, {"power": True})[1] == []
+        world.set_fault(LIGHT, "command", "reject")
+        assert wire.command(LIGHT, {"power": True})[0]["status"] == "REJECTED"
+        missing, _ = wire.command("mqtt:missing", {"power": True})
+        assert missing["status"] == "UNSUPPORTED"
+        world.local_change(LIGHT, "resident", {"power": True})
+        clock.advance()
+
+        window = {"start": marker["at"], "end": to_time}
+        explicit = client.get(counts_url, params=window, auth=AUTH).raise_for_status()
+        assert explicit.json()["total"] == {"notices": 2, "other_commands": 1}
+        for invalid, status in (
+            ({"start": marker["at"]}, 400),
+            ({"start": to_time, "end": marker["at"]}, 400),
+            ({**window, "start": "2026-10-17T14:00:00"}, 422),
+        ):
+            assert client.get(counts_url, params=invalid, auth=AUTH).status_code == status
+
+    with TestClient(operator_app(tmp_path)) as client:
+        saved = client.get(counts_url, auth=AUTH).raise_for_status().json()
+        assert saved["window"]["start"] == marker["at"]
+        assert saved["recording_since"] == marker["at"]
+        assert saved["total"] == {"notices": 2, "other_commands": 3}
+        assert saved["by_device"]["light_01"] == {"notices": 0, "other_commands": 2}
+        assert saved["unbound_targets"] == {
+            "mqtt:missing": {"notices": 0, "other_commands": 1}
+        }
+        post(client, marker_url)
+        assert client.get(counts_url, auth=AUTH).json()["total"] == empty["total"]
+
+
+def test_named_operator_actions_keep_path_and_identity_private(
+    tmp_path, monkeypatch, clock
+):
+    monkeypatch.setattr(
+        "spira_simulator.api.World", lambda path, profile: World(path, profile, clock)
+    )
+    received = []
+    app = operator_app(tmp_path, received_source=SourceStub(received))
+    snapshot_url = "/operator/snapshot"
+    actions = [
+        ("엄마", "device_panel", 2700, "user", "match"),
+        ("아빠", "other_app", 3200, "unknown", "person-reported-unknown"),
+    ]
+    with TestClient(app) as client:
+        signals = []
+        monkeypatch.setattr(
+            app.state.protocol,
+            "publish",
+            lambda topic, payload, **kwargs: signals.append(json.loads(payload)),
+        )
+        assert client.get(snapshot_url).status_code == 401
+        prior = Wire(app.state.world).read(LIGHT)
+        for i, (name, path, kelvin, by, _) in enumerate(actions):
+            clock.advance()
+            color = {"kelvin": kelvin}
+            post(
+                client,
+                "/operator/device",
+                target=LIGHT,
+                actor="resident",
+                actor_name=name,
+                action_path=path,
+                values={"color": color},
+            )
+            signal = signals[-1]
+            assert signal["local_operation"] is (path == "device_panel")
+            assert signal["operation_id"] is None and public_value(signal)
+            assert signal["values"]["color"] == color
+            assert signal["revisions"]["color"] != prior["revisions"]["color"]
+            received.append(
+                {
+                    "event_id": f"ev_named_{i}",
+                    "household_id": "h_042",
+                    "source": "light_01",
+                    "type": signal["event_type"],
+                    "at": signal["occurred_at"],
+                    "payload": {
+                        "by": by,
+                        "property": "color",
+                        "from": prior["values"]["color"],
+                        "to": color,
+                    },
+                }
+            )
+            prior = signal
+
+        truth = client.get("/operator/truth", auth=AUTH).json()
+        assert [(f["actor"], f["actor_name"], f["action_path"]) for f in truth] == [
+            ("resident", name, path) for name, path, _, _, _ in actions
+        ]
+        compared = client.get("/operator/judge", auth=AUTH).raise_for_status().json()
+        assert [(r["truth"]["actor_name"], r["verdict"]) for r in compared["results"]] == [
+            (name, verdict) for name, _, _, _, verdict in actions
+        ]
+        # A later Hub command does not erase the most recent operator action.
+        Wire(app.state.world).command(LIGHT, {"power": False})
+
+    with TestClient(operator_app(tmp_path)) as client:
+        snapshot = client.get(snapshot_url, auth=AUTH).json()
+        light = next(d for d in snapshot["devices"] if d["target"] == LIGHT)
+        assert light["last_operator_action"] == {
+            "actor": "resident",
+            "actor_name": "아빠",
+            "action_path": "other_app",
+            "event_type": "light.changed",
+            "occurred_at": truth[-1]["occurred_at"],
+        }
+        public = client.get("/sim/snapshot").json()
+        assert all("last_operator_action" not in d for d in public["devices"])
+        wire = Wire(client.app.state.world)
+        for body in (public, wire.read(LIGHT), wire.request("discover")[0]):
+            assert public_value(body)
+            assert all(name not in str(body) for name, *_ in actions)
 
 
 def test_raw_home_signals_and_wall_clock_sim_at18_local_evidence(tmp_path, monkeypatch):
