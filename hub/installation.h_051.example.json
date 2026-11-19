@@ -1,0 +1,252 @@
+{
+  "devices": {
+    "household_id": "h_051",
+    "revision": 1,
+    "updated_at": "2026-11-01T09:00:00+09:00",
+    "devices": [
+      {
+        "id": "cleaner_01",
+        "type": "cleaner",
+        "room": "거실",
+        "substrate": "virtual",
+        "commands": [
+          {
+            "cmd": "clean",
+            "value_schema": {
+              "room": {
+                "enum": [
+                  "거실",
+                  "주방",
+                  "침실"
+                ],
+                "default": "거실"
+              }
+            }
+          }
+        ],
+        "events": [
+          "started",
+          "completed"
+        ],
+        "never": [],
+        "noisy": true
+      },
+      {
+        "id": "speaker_01",
+        "type": "speaker",
+        "room": "거실",
+        "substrate": "virtual",
+        "commands": [
+          {
+            "cmd": "play",
+            "value_schema": {
+              "playlist": {
+                "enum": [
+                  "calm",
+                  "party",
+                  "family"
+                ],
+                "default": "calm"
+              },
+              "volume": {
+                "range": [
+                  0,
+                  100
+                ],
+                "default": 30
+              }
+            }
+          },
+          {
+            "cmd": "stop"
+          }
+        ],
+        "events": [
+          "changed"
+        ],
+        "never": [
+          "purchase"
+        ],
+        "noisy": true
+      },
+      {
+        "id": "oven_01",
+        "type": "oven",
+        "room": "주방",
+        "substrate": "virtual",
+        "commands": [
+          {
+            "cmd": "set_cook_standby",
+            "value_schema": {
+              "temp_c": {
+                "range": [
+                  40,
+                  250
+                ],
+                "default": 180
+              },
+              "minutes": {
+                "range": [
+                  1,
+                  180
+                ],
+                "default": 20
+              }
+            }
+          }
+        ],
+        "events": [
+          "started",
+          "stopped"
+        ],
+        "never": [
+          "start"
+        ],
+        "noisy": false
+      },
+      {
+        "id": "fridge_01",
+        "type": "fridge",
+        "room": "주방",
+        "substrate": "virtual",
+        "commands": [
+          {
+            "cmd": "show_notice",
+            "value_schema": "text"
+          }
+        ],
+        "events": [
+          "door_opened"
+        ],
+        "never": [],
+        "noisy": false
+      },
+      {
+        "id": "air_purifier_01",
+        "type": "purifier",
+        "room": "거실",
+        "substrate": "virtual",
+        "commands": [
+          {
+            "cmd": "mode",
+            "value_schema": {
+              "mode": {
+                "enum": [
+                  "CLEAN",
+                  "AUTO",
+                  "CIRCULATOR",
+                  "DUAL_CLEAN"
+                ],
+                "default": "CLEAN"
+              }
+            }
+          },
+          {
+            "cmd": "wind_strength",
+            "value_schema": {
+              "wind_strength": {
+                "enum": [
+                  "LOW",
+                  "MID",
+                  "HIGH",
+                  "AUTO",
+                  "POWER"
+                ],
+                "default": "MID"
+              }
+            }
+          }
+        ],
+        "events": [
+          "changed"
+        ],
+        "never": [],
+        "noisy": false
+      }
+    ]
+  },
+  "bindings": {
+    "cleaner_01": {
+      "target": "mqtt:cleaner_01",
+      "commands": {
+        "clean": "clean"
+      }
+    },
+    "speaker_01": {
+      "target": "mqtt:speaker_01",
+      "commands": {
+        "play": "play",
+        "stop": {
+          "fixed": {
+            "play": null
+          }
+        }
+      }
+    },
+    "oven_01": {
+      "target": "mqtt:oven_01",
+      "commands": {
+        "set_cook_standby": "preset"
+      }
+    },
+    "fridge_01": {
+      "target": "mqtt:fridge_01",
+      "commands": {
+        "show_notice": "show_notice"
+      }
+    },
+    "air_purifier_01": {
+      "target": "mqtt:air_purifier_01",
+      "commands": {
+        "mode": {
+          "properties": {
+            "mode": "mode"
+          }
+        },
+        "wind_strength": {
+          "properties": {
+            "wind_strength": "wind_strength"
+          }
+        }
+      }
+    }
+  },
+  "home_signals": [
+    {
+      "event": "package.brought_in",
+      "sources": [
+        {
+          "target": "mqtt:sim_camera",
+          "event_type": "camera.package_removed"
+        }
+      ],
+      "count_field": "removed_count"
+    },
+    {
+      "event": "guest_arrived",
+      "sources": [
+        {
+          "target": "mqtt:sim_doorbell",
+          "event_type": "doorbell.pressed"
+        },
+        {
+          "target": "mqtt:sim_door_lock",
+          "event_type": "door_lock.opened"
+        },
+        {
+          "target": "mqtt:sim_presence",
+          "event_type": "presence.room_occupied"
+        }
+      ]
+    },
+    {
+      "event": "event_end",
+      "sources": [
+        {
+          "target": "mqtt:sim_presence",
+          "event_type": "presence.room_empty"
+        }
+      ]
+    }
+  ]
+}

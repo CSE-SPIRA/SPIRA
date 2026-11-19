@@ -201,6 +201,154 @@
         ],
         "never": [],
         "noisy": false
+      },
+      {
+        "id": "air_purifier_01",
+        "type": "purifier",
+        "room": "거실",
+        "substrate": "virtual",
+        "commands": [
+          {
+            "cmd": "mode",
+            "value_schema": {
+              "mode": {
+                "enum": [
+                  "CLEAN",
+                  "AUTO",
+                  "CIRCULATOR",
+                  "DUAL_CLEAN"
+                ],
+                "default": "CLEAN"
+              }
+            }
+          },
+          {
+            "cmd": "wind_strength",
+            "value_schema": {
+              "wind_strength": {
+                "enum": [
+                  "LOW",
+                  "MID",
+                  "HIGH",
+                  "AUTO",
+                  "POWER"
+                ],
+                "default": "MID"
+              }
+            }
+          }
+        ],
+        "events": [
+          "changed"
+        ],
+        "never": [],
+        "noisy": false
+      },
+      {
+        "id": "dishwasher_01",
+        "type": "dishwasher",
+        "room": "주방",
+        "substrate": "virtual",
+        "commands": [
+          {
+            "cmd": "set_course_standby",
+            "value_schema": {
+              "course": {
+                "enum": [
+                  "DELICATE",
+                  "TURBO",
+                  "RINSE",
+                  "REFRESH",
+                  "HEAVY",
+                  "NORMAL",
+                  "AUTO",
+                  "EXPRESS",
+                  "MACHINE_CLEAN",
+                  "DOWNLOAD_CYCLE"
+                ],
+                "default": "NORMAL"
+              }
+            }
+          },
+          {
+            "cmd": "delayed_start",
+            "value_schema": {
+              "hours": {
+                "range": [
+                  1,
+                  12
+                ],
+                "default": 1
+              }
+            }
+          }
+        ],
+        "events": [
+          "changed"
+        ],
+        "never": [
+          "start"
+        ],
+        "noisy": true
+      },
+      {
+        "id": "washer_01",
+        "type": "washer",
+        "room": "세탁실",
+        "substrate": "virtual",
+        "commands": [
+          {
+            "cmd": "set_course_standby",
+            "value_schema": {
+              "course": {
+                "enum": [
+                  "NORMAL",
+                  "DELICATES"
+                ],
+                "default": "NORMAL"
+              }
+            }
+          }
+        ],
+        "events": [
+          "changed"
+        ],
+        "never": [
+          "start"
+        ],
+        "noisy": true
+      },
+      {
+        "id": "plug_iron",
+        "type": "smart_plug",
+        "room": "세탁실",
+        "label": "다리미",
+        "substrate": "virtual",
+        "commands": [
+          {
+            "cmd": "off"
+          }
+        ],
+        "events": [
+          "changed"
+        ],
+        "never": [],
+        "noisy": false
+      },
+      {
+        "id": "plug_router",
+        "type": "smart_plug",
+        "room": "거실",
+        "label": "공유기",
+        "substrate": "virtual",
+        "commands": [],
+        "events": [
+          "changed"
+        ],
+        "never": [
+          "off"
+        ],
+        "noisy": false
       }
     ]
   },
@@ -260,6 +408,60 @@
           }
         }
       }
+    },
+    "air_purifier_01": {
+      "target": "mqtt:air_purifier_01",
+      "commands": {
+        "mode": {
+          "properties": {
+            "mode": "mode"
+          }
+        },
+        "wind_strength": {
+          "properties": {
+            "wind_strength": "wind_strength"
+          }
+        }
+      }
+    },
+    "dishwasher_01": {
+      "target": "mqtt:dishwasher_01",
+      "commands": {
+        "set_course_standby": {
+          "properties": {
+            "course": "course"
+          }
+        },
+        "delayed_start": {
+          "properties": {
+            "hours": "delay_hours"
+          }
+        }
+      }
+    },
+    "washer_01": {
+      "target": "mqtt:washer_01",
+      "commands": {
+        "set_course_standby": {
+          "properties": {
+            "course": "course"
+          }
+        }
+      }
+    },
+    "plug_iron": {
+      "target": "mqtt:plug_iron",
+      "commands": {
+        "off": {
+          "fixed": {
+            "power": false
+          }
+        }
+      }
+    },
+    "plug_router": {
+      "target": "mqtt:plug_router",
+      "commands": {}
     }
   },
   "home_signals": [
