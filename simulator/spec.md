@@ -133,8 +133,9 @@ E5-R2.
 **E5-R6.** The viewer MAY mark who made the latest change to a device from World
 truth (SPIRA, or a person's display name and path). It MUST NOT show the Hub's
 attribution, the judge's verdict, or anything from SPIRA's reasoning: no items,
-intents, rationale or card text. Planned overlays name only the device, the
-action and its trigger or time.
+intents, rationale or card text. Planned overlays show the device, the action
+with its device-level target value, and its trigger or time; item notice text
+stays out of the stage until the device shows it.
 
 **E5-R7.** The viewer MUST show the wall-clock day of week and time (E9-R1).
 

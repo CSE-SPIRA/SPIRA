@@ -237,13 +237,38 @@ def viewer_world(world: World) -> dict:
     }
 
 
+def planned_value(command: str, value) -> str | None:
+    """The target of a planned action, in household words (device-level only)."""
+    if not isinstance(value, dict):
+        return None
+    match command:
+        case "play_mood":
+            return SCENES.get(value.get("scene"))
+        case "color" if all(k in value for k in ("hue", "saturation", "brightness")):
+            name = "분홍" if value["hue"] == 330 and value["saturation"] else "색상"
+            return f"{name} {number_text(value['hue'])}/{number_text(value['saturation'])}/{number_text(value['brightness'])}"
+        case "color_temp" if "kelvin" in value:
+            return f"{number_text(value['kelvin'])}K"
+        case "set_cook_standby" if "temp_c" in value:
+            minutes = value.get("minutes")
+            return f"{number_text(value['temp_c'])}°" + (f" {number_text(minutes)}분" if minutes else "")
+        case "play" if value.get("playlist"):
+            return PLAYLISTS.get(value["playlist"], "음악 재생")
+    return None
+
+
 def viewer_plan(data: dict, device_names: dict) -> tuple[dict, list[dict]]:
     planned = defaultdict(list)
     for row in data["preparation"] + data["notices"]:
         wait = row["wait"]
         planned[row["device"]].append(
             {
-                "action": COMMAND_NAMES.get(row["command"], row["command"]),
+                "action": " ".join(
+                    part for part in (
+                        COMMAND_NAMES.get(row["command"], row["command"]),
+                        planned_value(row["command"], row.get("target_value")),
+                    ) if part
+                ),
                 "wait": TRIGGER_NAMES.get(wait) or display_time(wait),
             }
         )

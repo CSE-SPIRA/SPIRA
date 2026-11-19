@@ -649,11 +649,11 @@ def test_sim_at10_read_only_faint_waiting_and_item_only_episode(tmp_path):
             ("cooktop_01", "child_lock"),
             ("plug_kettle", "off"),
         }
-        assert {
-            "device": "light_01",
-            "command": "color",
-            "wait": "guest_arrived",
-        } in overlay["preparation"]
+        assert any(
+            row["device"] == "light_01" and row["command"] == "color"
+            and row["wait"] == "guest_arrived" and row["task_id"] == "t_mood#3"
+            for row in overlay["preparation"]
+        )
         source.body = fixture_json("ep_9150/plan.v1.json")
         grocery = client.get("/sim/overlay").json()
         assert grocery["errors"] == []
@@ -661,15 +661,11 @@ def test_sim_at10_read_only_faint_waiting_and_item_only_episode(tmp_path):
         grocery_episode = fixture_json("ep_9150/episode.json")
         assert len(grocery["notices"]) == len(grocery_episode["item_tasks"]) == 2
         assert (
-            grocery["notices"]
-            == [
-                {
-                    "device": "fridge_01",
-                    "command": "show_notice",
-                    "wait": "package.brought_in",
-                }
+            [
+                (row["device"], row["command"], row["wait"], row["target_value"])
+                for row in grocery["notices"]
             ]
-            * 2
+            == [("fridge_01", "show_notice", "package.brought_in", None)] * 2
         )
         grocery_page = client.get("/sim/viewer").text
         assert "예정된 집 준비 없음" in grocery_page
@@ -984,8 +980,10 @@ def test_sim_at20_viewer_projects_world_markers_and_no_reasoning(tmp_path, monke
         assert "아빠" not in json.dumps(public, ensure_ascii=False)
         assert overlay["errors"] == []
         for row in overlay["preparation"] + overlay["notices"]:
-            assert set(row) == {"device", "command", "wait"}
-        assert "오븐 · 굽기 설정 대기 · 10/17 토 14:00" in page
+            assert set(row) == {
+                "plan_id", "task_id", "device", "command", "target_value", "wait", "protective",
+            }
+        assert "오븐 · 굽기 설정 대기 170° 20분 · 10/17 토 14:00" in page
         assert "냉장고 · 안내 표시 · 택배를 들이면" in page
         view = ElementTree.fromstring(fragment)
         for device, kind, expected in (

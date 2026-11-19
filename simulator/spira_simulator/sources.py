@@ -15,6 +15,7 @@ from spira_contracts.execution_result import ExecutionResult, RestoreResult, Run
 from spira_contracts.plan import Plan, TimeTrigger
 from spira_contracts.plan_pull import PlanPull
 
+from .profile import public_value
 from .world import PEOPLE
 
 
@@ -151,12 +152,17 @@ async def stage_overlay(
                     plan.plan_id,
                     task.task_id,
                     action.device,
-                ) not in runs:
+                ) not in runs and public_value(action.value):
                     overlay.append(
                         {
+                            "plan_id": plan.plan_id,
+                            "task_id": task.task_id,
                             "device": action.device,
                             "command": action.cmd,
+                            # Item notice text stays out of the stage (E5-R6).
+                            "target_value": None if overlay is notices else action.value,
                             "wait": wait,
+                            "protective": task.protective is True,
                         }
                     )
 
@@ -169,6 +175,8 @@ async def stage_overlay(
                 substrate
             )
             row = {
+                "plan_id": record.plan_id,
+                "task_id": record.task_id,
                 "at": record.at,
                 "device": item.device,
                 "status": item.status.value,
