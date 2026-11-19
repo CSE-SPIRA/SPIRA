@@ -1,455 +1,256 @@
-# Home Hub implementation specification
+# Home Hub gate-G0 specification
 
-This document is the normative implementation specification for `hub/`.
-`MUST`, `MUST NOT`, `SHOULD`, and `MAY` are normative. Shared HTTP bodies,
-identifiers, enums, polling rules, and state meanings remain authoritative in
-[`contracts/`](../contracts/README.md); this document defines Hub-owned state,
-algorithms, recovery, and acceptance. If they conflict, the contract wins.
+This is the normative product specification for `hub/`. `MUST`, `MUST NOT`,
+`SHOULD`, and `MAY` are normative. Shared HTTP bodies, identifiers, enums,
+polling, version handling, and state meanings remain authoritative in
+[`contracts/`](../contracts/README.md). The Hub-to-device protocol is owned by
+[`simulator/protocol.md`](../simulator/protocol.md); this document consumes that
+protocol and does not redefine it. Non-normative implementation guidance is in
+[`design-notes.md`](design-notes.md).
 
-This specification does not certify a runtime, Server integration, or physical
-device. Those claims require the corresponding implementation and evidence.
+## 1. Purpose and boundaries
 
-## 1. Purpose, scope and owners
+The Hub turns the Server's versioned plans into effects at the specified home
+and time, observes what actually happened, preserves person-made changes, and
+reports evidence that the Server can use for household memory. It runs
+independently of the App and Simulator process, so closing the App does not stop
+waiting work. (PC-4, PC-5, PC-6)
 
-Home MUST turn a versioned execution request into durable local work, wait for its
-delegated trigger, check current authority, dispatch to the selected native target,
-independently observe the outcome, report evidence, and conditionally restore only
-still-owned temporary properties. It MUST NOT infer an order, purchase intent,
-preparation, household preference or missing schedule. Server and KB remain
-separate owners. An App card is not a Home task. Test peers MUST identify
-themselves as test actors.
+The Hub does not infer purchase intent, create preparation work, choose a
+different target or value, judge household preference, or implement Server
+plan-time policy such as quiet hours or room suitability. The Server owns those
+judgments and S7 memory. The Hub communicates with the Server only by the pull,
+acknowledgement, event, and result routes in `contracts/openapi/hub.yaml`; the
+Server never calls the Hub or Simulator. (PC-1, PC-2, PC-4, PC-6)
 
-## 2. Glossary and domain objects
+## 2. Requirements
 
-| Object | Identity / consequential content |
-| --- | --- |
-| Household / installation | Explicit household ID, installation revision, logical→native bindings; separate from credentials |
-| Registry entry | Logical device ID/type, room, label, admitted flag, delegated commands/value schemas, never, events, noisy, binding epoch |
-| Plan batch | `(plan_id, version)`, canonical envelope, admission result; current floor is per plan |
-| Task / action | Episode, plan/version, semantic line and native action ID, family, native target, concrete desired values, trigger, validity, prechecks, end/restore |
-| Trigger / end | Source-bound predicate plus occurrence time/window/delay; end MAY include alternatives, maximum duration or stable-state completion |
-| Attempt | Durable operation ID, reservation/start time, before state, receipt, observation and outcome; never equivalent to command success |
-| Observation | Native target, independent source time, availability, property values/revisions, substrate and USER/SPIRA/UNKNOWN provenance |
-| Ownership | One `(native target, property)` claim: task, before value, desired value, post-effect revision and owned flag |
-| Event / result | Stable event identity / persisted result sequence and packet; observations and claims remain separately attributable |
-| Control | Plan Stop, task disable, household pause; distinct scope and semantics |
+### H1. Installation identity
 
-Native `Task.key` is a structured JSON encoding of plan ID/version/action ID,
-never a delimiter-concatenation guess. Started action identity MAY continue across
-plan versions through explicit durable carry metadata. A logical rebind MUST NOT
-transfer a prior action's ownership to the replacement device.
+**H1-R3.** A replacement native device MUST NOT inherit an earlier device's
+temporary-property ownership or restoration authority merely because it has the
+same logical device ID, room, or label. (PC-5)
 
-## 3. Component and process boundary
+### H2. Delegation and capabilities
 
-```text
-plan source -> boundary validation/conversion -> admission -> SQLite
-                                                    -> scheduler
-result sink <- stable outbox <- verification <- device port -> independent world
-```
+**H2-R1.** The Hub MUST publish only admitted devices and explicitly delegated
+commands/value schemas in C-2, including `never` prohibitions and the current
+devices revision. It MUST NOT execute a command that is no longer delegated.
+(PC-3, PC-5)
 
-Home MUST use protocol I/O to devices/Simulator, MUST NOT import Simulator or App,
-and MUST NOT use a Home state mirror as independent truth. Its process,
-SQLite database, clock policy and lifetime MUST be independent of App. Multiple
-workers on one DB are unsupported; one event-loop owner MUST serialize execution.
-An integration harness MAY orchestrate multiple processes through public ports.
+**H2-R2.** Discovery or order sharing MUST NOT grant delegation. A valid,
+previously unseen device type MUST remain usable as data when its declared
+capabilities satisfy the contract; virtual success MUST NOT be presented as
+physical-device qualification. (PC-3, PC-4)
 
-## 4. Architecture and responsibility map
+### H3. Plans, admission, and versions
 
-| Target module owner | Responsibility and dependency rule |
-| --- | --- |
-| `api.py` / `bootstrap.py` | Lifespan, configuration, connector/Server composition, local auth/health; no intent logic |
-| `domain.py` | Strict Task/Trigger/End/Capability/Observation/Receipt/Event; no wire imports |
-| `runtime.py` | Floor/control gate, waits, reservation, verification, lifecycle, ownership and compaction |
-| `clock.py` / `durations.py` | Wall/virtual time and explicit duration validation |
-| `rules.py` | Pure source/order/window evaluation and next rule frontier |
-| `store.py` | SQLite schema/additive migrations, transactions and atomic result publication |
-| `registry.py` | Installation, logical binding, capability and delegation ownership |
-| `connectors/` | Device port and native I/O/readback/conditional-write qualification |
-| `server_adapter.py` | Generated-contract validation, normalization, admission transport and outgoing packet conversion |
+**H3-R1.** The Hub MUST pull and validate current C-1 plans without using current
+house state to reinterpret the plan. It MUST retain accepted work until its
+trigger, including across Hub restart. (PC-4)
 
-Splits SHOULD occur only when they remove a real dependency conflict. The Hub
-MUST have one canonical implementation tree; fixture, compatibility, or demo
-packages MUST NOT become a second execution engine.
+**H3-R2.** The Hub MUST reject only malformed addressable tasks for the contract
+reasons and MUST admit valid siblings. Admission MUST NOT reject a task because
+the device is currently offline, busy, in use, or already in the requested
+state; those are execution-time observations. (PC-4, PC-5)
 
-## 5. Platform, runtime and configuration
+**H3-R3.** For each plan, a higher `plan_version` MUST replace the held version.
+An equal or lower version MUST be ignored, as required by the contract, without
+creating work, sending another device command, or lowering the held version.
+(PC-4)
 
-Python >=3.12, pinned Python dependencies, FastAPI/Uvicorn, SQLite WAL/FULL, an
-HTTP client, and an MQTT client are the selected baseline. Configuration MUST be
-resolved before admission:
+**H3-R4.** Cumulative cancellation MUST take precedence and preserve its
+`restore` value. Work with `released: false` MUST wait until a higher Server
+version explicitly releases it; the Hub MUST NOT link a package to an order or
+release the task itself. Started unchanged work MUST NOT be dispatched again
+when a higher version arrives. (PC-4, PC-5)
 
-| Profile | Required settings / constraint |
-| --- | --- |
-| Local no-device | Dedicated DB and no device connector; can admit an empty/no-effect batch without Server |
-| Team Server | Server URL, household ID, Hub key reference, dedicated DB and installation/binding state; uses generated contract models |
-| Isolated Simulator | Dedicated DB, MQTT namespace and matching isolated clock; never shares state with another scenario |
-| Physical candidate | One named adapter/controller and qualification profile; never inferred from virtual success |
+### H4. Triggers, events, attribution, and time
 
-MQTT host/port/prefix and physical adapter endpoint/token/roles belong to their
-adapters. Unknown profiles MUST fail startup. An installation MUST have separate
-state and explicit household/binding revision fences. Service MUST
-use HTTPS except a loopback fixture. Secrets MUST be resolved through a local
-secret-store port or provisioned environment, never written in plans or evidence.
-A missing secret reference MUST fail clearly without including its value.
+**H4-R1.** The Hub MUST compute every device-event `payload.by` itself. A device
+effect that echoes an `operation_id` matching the Hub's own operation record is
+`spira`; otherwise a class-A `local_operation` report is `user`; every other
+case is `unknown`. It MUST NOT accept or copy device/world `actor`, `provenance`,
+or `by`, and MUST NOT infer a person from door, presence, proximity, or other
+indirect signals. Class-A local-operation reporting is an explicit assumption
+pending O-01/PQ-01 and MUST be declared as a capability, not presumed for a
+device family. (PC-6)
 
-## 6. Domain invariants and numbered requirements
+**H4-R2.** The Hub MUST deduplicate events and match only the plan's explicit
+event kind, source binding, occurrence time, order, and window. A fact observed
+before admission MUST NOT wake newly admitted work. Relevant home and device
+events MUST be sent to the Server as C-3 with stable `event_id` values. (PC-4,
+PC-6)
 
-<a id="h1"></a>
+**H4-R3.** The Hub MUST wait for explicit plan triggers and MUST NOT infer
+purchase intent, synthesize package release, or turn an unobserved home event
+into observed evidence. Any time fallback in a plan is a lifecycle fallback,
+not evidence that `event_end` occurred. (PC-4, PC-6)
 
-### H1. Household, registry and provisioning
+**H4-R4.** The running demo MUST use one clock: the Hub's wall clock and the
+absolute values supplied by the Server. Only Server `DEMO_MODE` shortens the
+scenario's starting values under COM-15; the Hub MUST NOT run a separate demo
+clock. (PC-4)
 
-**H1-R1.** Home MUST accept a one-time App provisioning handoff only through an
-explicit local setup/secret-store port; local wire, authentication and rotation
-remain an external joint decision. It MUST store the provisioned household/key in
-local secret storage, never claim that an environment value implements pairing.
-**H1-R2.** Discovery MUST yield candidates; Home MUST revalidate target existence
-and capabilities before persisting an admitted logical→native binding.
-**H1-R3.** Room/label edits MUST preserve logical identity and increment projection
-revision. Device replacement MUST isolate past restore authority by native binding.
+### H5. Final authority and dispatch
 
-<a id="h2"></a>
+**H5-R1.** Immediately before a new effect, after awaited device reads, the Hub
+MUST pull the current Server snapshot and recheck the current plan, line,
+card-Stop cancellation, household pause, and delegation. If that pull fails, it
+MUST start no new effect and report `blocked: plan_unconfirmed`; lifecycle and
+restoration of effects already started continue. (PC-4, PC-5)
 
-### H2. Capability and standing delegation
+**H5-R2.** At execution time the Hub MUST check the active target binding,
+delegated capability and value schema, fresh availability, and
+`in_use_by_person`. It MUST NOT substitute a device/value or re-legislate Server
+plan-time judgments such as quiet hours, room suitability, or intent safety.
+(PC-4, PC-5)
 
-**H2-R1.** The Server projection MUST include admitted devices only, intersect
-actual verified capabilities with delegated commands/value ranges and hard `never`
-prohibitions, and include room/type, events, noisy, substrate and revision.
-**H2-R2.** Projection changes MUST increase revision and be republished; an unknown
-device type MUST remain data when its capability schema is valid. Discovery or
-order sharing MUST NOT grant delegation. ThinQ Connect SDK surface is not live
-appliance qualification; connector availability and authority remain independent.
+**H5-R3.** The Hub MUST assign one stable `operation_id` before dispatch and MUST
+prevent concurrent eligibility checks, a higher version, reconnect, or restart
+from dispatching the same action twice. (PC-4, PC-5)
 
-<a id="h3"></a>
+### H6. Receipts, observations, and jobs
 
-### H3. Admission and version identity
+**H6-R1.** Command acknowledgement and effect are different facts. The Hub MUST
+record accepted/rejected acknowledgement separately and MUST report completion
+only after a fresh read-back of the same target verifies the effect. A missing,
+stale, unavailable, contradictory, or wrong-operation observation MUST remain
+`unverifiable` or `unknown`, never completed. (PC-4)
 
-**H3-R1.** The Server adapter MUST pull current Server plans, validate C-1 v3
-headers and addressable lines, then convert to internal tasks. Admission MUST NOT
-read current device state, availability, in-use or completed-today observations.
-**H3-R2.** Invalid addressable lines MUST receive explicit task-level reasons while
-valid siblings commit; malformed/unaddressable envelopes MUST reject atomically.
-Capability, delegated command and value-schema checks are admission metadata checks.
-**H3-R3.** A duplicate canonical body at the current version MUST reuse the saved
-ack without creating work. A changed body at the same identity/version MUST fail
-as a conflict. A lower version MUST be ignored without lowering the durable floor.
-Plan floors, accepted tasks, ack,
-carry and cancellation metadata MUST commit together before ack delivery.
-**H3-R4.** Cancellation takes precedence, preserving its restore flag. A started
-semantic action MUST retain its operation/action identity across versions; a
-changed started action MUST be rejected. Unreleased item work MUST stay absent
-from executable tasks until the plan source explicitly releases it.
+**H6-R2.** A job MUST distinguish command acceptance, observed running, and
+fresh completion of the same job. The Hub MUST NOT stop or restore over a job a
+person started, or over a replacement/foreign job. (PC-4, PC-5, PC-6)
 
-<a id="h4"></a>
+**H6-R3.** Dispatch uncertainty or process death MUST NOT cause a blind command
+retry. Only a failure proven to have produced no effect may be retried while the
+task remains current. (PC-4, PC-5)
 
-### H4. Triggers and events
+### H7. Ownership, Stop, and restoration
 
-**H4-R1.** Home MUST validate household/source/event ID, deduplicate durably and
-match only delegated source-bound rules within validity/order/window bounds.
-It MUST normalize known actors to user/spira and retain unknown as unknown.
-**H4-R2.** Event-time predicates MUST use occurrence time; durable ingress cursors
-MUST exclude pre-admission facts and distinguish same-time later ingress.
-Package/guest/quiet-end rules MUST require supplied source bindings and schedules.
-**H4-R3.** A first-event delay MUST bind to the first valid occurrence; fallback and
-maximum duration MUST be explicit. Stable conditions MUST reset after a gap,
-contradiction or process downtime. Relevant raw/derived events MUST enter a durable
-outbox; Home MUST NOT infer purchase intent or release package plans itself.
+**H7-R1.** After a verified temporary effect, the Hub MUST track ownership per
+changed property. Any later change not matched to that SPIRA operation releases
+ownership, whether its attribution is `user` or `unknown`. Ownership MUST NOT be
+reacquired when the value later happens to equal SPIRA's desired value, and a
+released property MUST NOT be overwritten during restoration. (PC-5)
 
-<a id="h5"></a>
+**H7-R2.** Restoration has two product meanings, mood restoration and
+protective release (for example unlocking a child lock or re-enabling a disabled
+appliance). The plan contract marks protective tasks with `protective: true`
+(agreed with the Server on 2026-11-19; contracts PR pending). The Hub MUST NOT
+classify tasks itself; it uses only that flag.
+- A protective task MUST be released only after an actually observed
+  `event_end`. A time fallback (`or_time`, `or_after`, elapsed time, missing
+  evidence, or an inferred end) MUST end its lifecycle without releasing, and
+  the item is reported `withheld_end_not_observed`, never `restored` or
+  `not_needed`.
+- A non-protective task (mood) follows the contract: at its end, including a
+  time fallback, still-owned properties are restored.
+- Until the contract carries the flag and the status, the Hub MUST treat every
+  task as protective: a time fallback restores nothing, and the withheld item
+  is reported `unknown`.
 
-### H5. Current authority and dispatch
+Every restoration MUST preserve non-owned values and report each restored,
+withheld or skipped device. (PC-5)
 
-**H5-R1.** The plan source owns logical target and concrete values. Home MUST check
-current plan/line/Stop/pause/delegation immediately before a new effect, after
-awaited device reads and before reservation. Missing/unconfirmed/failed current
-pull MUST defer new work while existing lifecycle/restore continues locally.
-**H5-R2.** Home MUST recheck active binding, capability, online/fresh state,
-parameters, before keys, busy/done/quiet/room constraints and conflicting property
-ownership. It MUST NOT substitute a different logical device or infer a value.
-**H5-R3.** A guarded atomic WAITING/RETRY_WAIT→EXECUTING reservation MUST persist
-operation ID, before state, start time and event cursor before connector dispatch.
-Concurrent eligibility readers MUST NOT reserve the same action twice.
+**H7-R3.** A device rebind MUST preserve the old device from writes to its
+replacement. `restore: false` MUST relinquish restoration authority without
+erasing the observed effect. Person-started jobs and all non-SPIRA changes MUST
+remain untouched. (PC-5)
 
-<a id="h6"></a>
+**H7-R4.** Card Stop MUST end that card's preparation now: cancel its unstarted
+work, request restoration only for effects SPIRA still owns subject to H7-R2,
+and preserve person changes and person-started jobs. It MUST NOT stop other
+cards, the whole house, or item notices outside the card. The Hub MUST expose no
+Stop All or Server-less stop path; Stop reaches it only as the Server's newer
+plan version. (PC-5, PC-6)
 
-### H6. Receipt, fresh observation and jobs
+### H8. Evidence and dashboard
 
-**H6-R1.** Home MUST record receipt accepted/rejected separately from effects and
-require its operation ID to match the reservation. Accepted MUST trigger fresh
-readback of the same target; stale, missing-key, unavailable or contradictory
-readback MUST NOT become VERIFIED. No reply MUST remain UNVERIFIABLE/INDETERMINATE.
-**H6-R2.** RUN_JOB MUST distinguish accepted, independently observed running and
-fresh same-job completed state. An adapter without stable run identity MUST retain
-attribution uncertainty. Replacement/stopped foreign jobs MUST NOT be stopped by
-an old task. A stop requires fresh run/job revisions and native conditional write.
-**H6-R3.** Process death or dispatch uncertainty MUST NOT cause blind retry. Only a
-proven no-effect failure MAY retry within its validity and bounded attempt policy.
+**H8-R1.** C-3 events and C-4 run/restore results MUST use stable
+`event_id`/`result_id` values. A resend MUST carry the same identity and body;
+delivery failure MUST NOT erase the observation. (PC-4, PC-6)
 
-<a id="h7"></a>
+**H8-R2.** Hub evidence MUST distinguish attempted command, acknowledgement,
+fresh read-back, current binding/substrate, Hub-computed `by`, failure or
+uncertainty, and restoration outcome. It MUST NOT claim a ground-truth actor,
+preference, or successful physical qualification that it did not observe.
+(PC-4, PC-6)
 
-### H7. Ownership, intervention and restoration
-
-**H7-R1.** After verified effect, Home MUST save before/desired values and property
-revision witnesses only for changed temporary properties. It MUST observe later
-revisions and relinquish ownership on independent change, including away-and-back
-and change during verification. Desired final equality MUST NOT recreate authority.
-**H7-R2.** On end/Stop/cancel with restore requested, Home MUST independently read
-current state, reconcile ownership and conditionally restore only still-owned
-properties using native revision protection. Missing CAS MUST skip as unsafe;
-revision conflict MUST preserve the outside value. Unknown conflict MUST NOT be
-labelled USER without independent provenance.
-**H7-R3.** User-changed properties MUST be skipped; an oven cooking job started by
-a person MUST NOT be stopped as cleanup of a prior preset. Rebinding MUST NOT
-restore the old device's saved value to its replacement. A cancellation with
-restore=false MUST relinquish authority and preserve the effect record.
-
-<a id="h8"></a>
-
-### H8. Evidence and delivery
-
-**H8-R1.** Result publication MUST atomically persist task outcome plus outbox row.
-Outgoing C-3/C-4 packets MUST be converted at the adapter, assigned stable
-installation/event/result identities and persisted before HTTP. Retries MUST reuse
-identical packet/ID; only a valid matching acknowledgement may mark delivered.
-**H8-R2.** Evidence MUST distinguish attempted, receipt, observed/verified state,
-actual binding, substrate, actor, failure/unknown and restore result. Partial
-multi-action truth MUST remain partial. Home MUST NOT conclude that a user liked
-an effect or turn silence into permission/preference.
-
-<a id="h9"></a>
+**H8-R3.** The Hub dashboard MUST put these four views first: waiting work and
+its trigger; command acknowledgement versus read-back; person actions with the
+Hub-computed `by` and the C-3 payload sent to the Server; and restoration versus
+skip outcomes. It MUST identify each device as virtual or physical and visibly
+mark the class-A local-operation assumption. (PC-4, PC-5, PC-6)
 
 ### H9. Restart and reconciliation
 
-**H9-R1.** Startup MUST load future work, floors, attempts, ownership and outboxes;
-reconcile current version/Stop/pause/cancel before new dispatch; reset unwitnessed
-stability intervals. A reserved unresolved dispatch MUST become INDETERMINATE and
-MUST NOT execute again. Interrupted restore MUST retain uncertainty.
-**H9-R2.** Retry of unacknowledged event/result packets MUST preserve their durable
-identity. Home MUST re-read independent state before resuming restore; old binding
-ownership MUST never migrate to a replacement target. Reconnect is not a reset.
+**H9-R1.** On restart the Hub MUST resume future waiting work and still-owned
+restoration, first reconcile the current Server version/Stop/pause/cancellation,
+and preserve uncertain dispatch as uncertain rather than executing it again.
+(PC-4, PC-5)
 
-## 7. Persistence, indexes, retention and migrations
+**H9-R2.** Reconnect MUST NOT reset plan floors, operation identity, ownership,
+or pending C-3/C-4 identity. Before resuming restoration the Hub MUST obtain a
+fresh device observation. (PC-4, PC-5)
 
-SQLite ownership MUST be one local writer, WAL and synchronous FULL. Target schema:
+### H10. Contract fixture Server (test support only)
 
-| Table / primary identity | Required retained contents |
-| --- | --- |
-| `plans(id)` | Highest version, retained even when tasks expire |
-| `plan_batches(id,version)` | Canonical admitted envelope and receive time |
-| `tasks(id)` | Strict internal body, status/result, before/after state, restore state, attempts/deadlines/start/end/stability/trigger timestamps, gate evidence, receipt, operation ID, admission/start event floors |
-| `events(id)` | Raw source-bound event and ingress time |
-| `controls(id)` | Pause, plan Stop and task disable values |
-| `ownership(target,property)` | Task, before/desired/revision, owned |
-| `outbox(seq)` | Immutable result record and delivery standing |
-| `event_outbox(seq)` | Unique event ID, body, delivery standing |
-| `bridge_state(id)` | Profile/household/installation fences, stable hub ID, ack/carry/cancel metadata, immutable outgoing packets |
+**H10-R1.** `hub/tests/fixture_server` MUST provide deterministic test support
+for `ep_9031`, `ep_9150`, and `ep_9120`. It MUST answer every route and method in
+`contracts/openapi/hub.yaml` and `contracts/openapi/app.yaml` with contract-valid
+fixture behavior, including plan versions produced by App reactions. It MUST
+record the C-3 event bodies it actually receives so the Simulator judge can
+compare their `by` values with Simulator-only actor truth. This fixture MUST be
+clearly identified as non-inference test support and MUST NOT be presented as
+evidence that the real Server, OCR, LLM, KB, or S7 memory is implemented.
+(PC-1, PC-2, PC-3, PC-4, PC-5, PC-6; test support only)
 
-The primary/unique keys above are mandatory indexes; scanning task JSON is the
-current bounded implementation. Large-household scaling SHOULD add reviewed
-status/end/target indexes without changing identity. Migrations MUST be additive,
-transactional with backfills and tested on a populated old schema. DDL and event
-cursor backfill MUST roll back together. A future destructive migration MUST have
-backup, schema version, rollback and explicit ownership transition.
-Acknowledged event/result history MAY compact after 14 days; active rule history,
-undelivered truth, task identities and version floors MUST remain protected.
-Local secret references MUST NOT store secret values in SQLite. Data retention
-of plans/identities requires a separate explicit lifecycle decision; no automatic
-identity purge is authorized here.
+## 3. Acceptance catalogue
 
-## 8. State machines and guards
+Every test below is judged through public HTTP/device-protocol surfaces,
+persisted fixture-Server receipts, and observed device state; reading Hub
+internals is not acceptance evidence.
 
-```text
-batch: received -> header rejected | line validation -> atomic admitted(partial?)
-       same canonical version -> saved ack; stale/conflicting version -> conflict
-work:  WAITING -> RETRY_WAIT -> WAITING/EXECUTING
-       WAITING -> CANCELLED/SUPERSEDED/EXPIRED/PROHIBITED/UNSUPPORTED/ABSTAINED
-       EXECUTING -> VERIFIED | RUNNING | MISMATCH | UNVERIFIABLE | INDETERMINATE
-job:   RUNNING -> COMPLETED | OVERRIDDEN | STOPPED | UNVERIFIABLE
-end:   active -> end predicate/cancel -> restore/stop reconciliation -> ended_at
-restore: pending -> RESTORING -> RESTORED | skipped override/unsafe | failed | unknown
-```
+| ID | Initial state and input | Required external observation | PCs | Requirements |
+| --- | --- | --- | --- | --- |
+| HUB-AT01 | A plan is accepted; the same version with identical or changed content and then a lower version are pulled | No additional device command or work appears; the held version never regresses; a later higher version is the only replacement | PC-4 | H3-R3, H5-R3 |
+| HUB-AT02 | One plan contains a valid delegated line, a malformed/unsupported sibling, an offline valid line, and a valid previously unseen device type | Ack admits valid lines and rejects only the malformed sibling with a contract reason; admission performs no device effect; offline is decided only at execution | PC-3, PC-4, PC-5 | H2-R1, H2-R2, H3-R1, H3-R2 |
+| HUB-AT03 | A temporary effect exists on a native device; the logical device is rebound before end | No restore command is sent to the replacement; the old effect/uncertainty remains attributed to the old binding | PC-5 | H1-R3, H7-R3 |
+| HUB-AT04 | A task waits for a source-bound event; an old fact, wrong source, out-of-window event, restart, and then one eligible event occur; a package task starts unreleased | Only the eligible event wakes the task once after restart; the package task waits until a higher Server version sets `released: true` | PC-4, PC-6 | H3-R1, H3-R4, H4-R2, H9-R1 |
+| HUB-AT05 | A device read is delayed while Stop, pause, a newer plan, delegation revocation, or Server outage arrives; separately, the Server sends a cleaner action during local quiet hours | Revoked/unconfirmed work sends no command and reports the contract block; the current cleaner action is not blocked by a Hub quiet-hours/room policy | PC-4, PC-5 | H5-R1, H5-R2 |
+| HUB-AT06 | A command is accepted, followed by stale, failed, missing-property, wrong-operation, and finally fresh matching read-backs | Dashboard and C-4 keep acknowledgement separate; no completion is reported before the fresh matching read-back | PC-4 | H6-R1, H8-R2, H8-R3 |
+| HUB-AT07 | A SPIRA standby is followed by a class-A local oven start and later by a foreign replacement job | C-3 reports the local start as `by: user`; Hub sends no stop/restore over either person-started or replacement job | PC-4, PC-5, PC-6 | H4-R1, H6-R2, H7-R3 |
+| HUB-AT08 | SPIRA owns two mood properties; one gets a class-A change and the other an unmatched class-B away-and-back change before end | Both changes release ownership; end preserves both final outside values, reports skips, and equality never reacquires either property | PC-5, PC-6 | H7-R1, H7-R2, H8-R1 |
+| HUB-AT09 | A process dies after dispatch and while C-3/C-4 packets are unacknowledged, then restarts/reconnects | The device effect is not blindly repeated; uncertainty remains visible; each packet is resent with byte-equivalent identity/body | PC-4, PC-5, PC-6 | H6-R3, H8-R1, H9-R1, H9-R2 |
+| HUB-AT12 | Two cards have waiting/running work; Stop is posted for one card through the fixture Server while a person has changed one property and started one job | Only that card's unstarted work is cancelled; its still-owned eligible mood property restores; the person change/job, the other card, and item notices remain; no Hub Stop All or direct stop endpoint exists | PC-5, PC-6 | H3-R4, H7-R1, H7-R2, H7-R4 |
+| HUB-AT15 | Five device effects occur: matching echoed operation, class-A local operation, class-B person change, external automation, and unmatched device transition; door/presence signals surround the changes | Fixture Server records `spira`, `user`, `unknown`, `unknown`, `unknown` respectively; removing door/presence signals does not change the outputs | PC-6 | H4-R1, H8-R1, H8-R2 |
+| HUB-AT16 | `ep_9031` with protective (child lock, kettle off) and mood actions active, in two runs: (a) an observed `event_end` arrives before `or_time`; (b) wall time passes `or_time` without `event_end` | (a) still-owned protective properties are released and mood properties restored. (b) no protective release command is sent and those items are reported `withheld_end_not_observed`; still-owned mood properties are restored. Under the interim rule, (b) sends no restore command at all and reports `unknown` | PC-5 | H4-R3, H7-R2 |
+| HUB-AT17 | Waiting, accepted-but-unverified, attributed person change, Server event delivery, restored, and skipped cases are present | The dashboard's first views show the four H8-R3 groups, including exact `by`, sent C-3 content, virtual/physical labels, and assumption badge | PC-4, PC-5, PC-6 | H8-R2, H8-R3 |
+| HUB-AT18 | The three demo surfaces run with Server `DEMO_MODE` off and on | All timestamps advance on wall time; only Server-supplied absolute/duration values shorten in demo mode; Hub exposes no separate demo-clock control | PC-4 | H4-R4 |
+| HUB-AT19 | App and Hub clients replay all three contract episodes, including card reactions, C-3 events, and C-4 results | The fixture answers every App/Hub OpenAPI route with schema-valid responses; the Simulator judge reads `by` from the fixture's received C-3 records; surfaces label the peer as a fixture with no inference claim | PC-1, PC-2, PC-3, PC-4, PC-5, PC-6 | H10-R1 |
 
-No receipt alone can traverse to VERIFIED/COMPLETED. Household pause cancels
-resident unstarted work; resume MUST NOT revive that admitted version. New current
-work requires a new authorized version. Local line off/on and Stop are not one
-state: re-enable is only meaningful for unstarted work per plan-source semantics.
-A restore failure before I/O MAY retry; uncertainty after reservation MUST remain
-indeterminate. Terminal effect status and lifecycle closure MUST remain distinct.
+## 4. Open items
 
-## 9. Primary workflows
-
-```mermaid
-sequenceDiagram
-  participant P as Plan source
-  participant A as Adapter/admission
-  participant H as Runtime
-  participant D as Device port
-  participant S as Result sink
-  P->>A: versioned plan and current controls
-  A->>H: validated internal tasks + cancellation
-  H->>H: atomic floor/task/ack persistence
-  A-->>P: durable admission ack
-  H->>H: wait for source/time predicate
-  H->>D: discover + fresh before read
-  H->>P: current authority check
-  H->>H: recheck gate + reserve operation
-  H->>D: execute(operation ID)
-  D-->>H: correlated receipt
-  H->>D: fresh same-target/job read
-  H->>H: evidence + ownership + outbox
-  H->>S: persisted stable result packet
-  S-->>H: matching acknowledgement
-```
-
-Stop/pause controls MUST persist before a later eligibility check. After dispatch,
-controls cannot erase actual outcome. End processing MUST preserve that outcome,
-reconcile per-property ownership, reserve restore and check native CAS/readback.
-
-## 10. Failure, retries, timeouts and idempotency
-
-Pre-dispatch unavailable/busy failures MAY retry only while deadline and attempt
-budget allow; bounded exponential delay is `min(60, base*2^(attempt-1))` seconds,
-maximum 10 configured attempts, default one. Accepted mismatch MUST NOT retry.
-Current-authority failure defers with explicit blocked evidence, default 1 second.
-HTTP timeout is 5 seconds; adapter retry MUST be bounded (current max 10 seconds).
-Contract periodic pull is 15 seconds with an additional immediate pre-dispatch pull;
-per-plan floors MUST NOT be misused as a household global cursor. Device verification
-uses a configured finite monotonic timeout, sampling at 100ms; source times still
-determine freshness. Restore pre-dispatch unavailability retries at 5 seconds.
-Schema rejection MUST be retained visibly rather than silently delivered. Repeated
-same identity with different content MUST fail at both plan and device boundaries.
-
-## 11. Concurrency, transaction and locking order
-
-One process/event loop MUST own Store. The runtime async lock encloses tick,
-execution/lifecycle and restore; the plan-pull lock serializes HTTP snapshots.
-If both are needed the order is runtime lock then pull lock. Pull MUST NOT await
-runtime tick while holding its pull lock. SQLite transactions MUST contain only
-local work: never hold a transaction across awaited HTTP/device I/O. Synchronous
-ingress MAY change floors/controls while a read awaits, hence the final gate is
-mandatory. Guarded SQL reservation is the final dispatch arbiter. Observation
-callbacks MUST persist independently and revoke ownership while verification waits.
-A new worker/threads model requires explicit locking/transaction redesign.
-
-## 12. Recovery algorithm
-
-```text
-open/migrate DB; validate profile + household + installation fence
-load floors/tasks/controls/ownership/outboxes
-EXECUTING -> INDETERMINATE; RESTORING -> INDETERMINATE
-clear trigger/stability continuity without a sensor witness
-compose clock/device/plan-source/result-sink/secret-store ports
-pull current snapshot (failure blocks only new dispatch)
-resume waits; read independent state for lifecycle/restore
-retry saved outgoing packets with the same identities
-```
-
-The dispatch-after-I/O crash window cannot promise exactly-once physical effects.
-Durable reservation promises no blind duplicate dispatch by Home, with explicit
-uncertainty. Operator reconciliation MAY inspect independent device state; it MUST
-NOT turn guessed state into verified history or delete a floor to retry.
-
-## 13. Security, privacy and secrets
-
-All APIs SHOULD bind loopback/private interfaces; configured HOME_TOKEN MUST guard
-control/state/results while health exposes no secrets. Provisioning and selected
-Server credentials MUST use separate secret-store references; compare tokens in
-constant time. Installation/profile edits MUST not bypass household/binding fences.
-Logs/evidence MUST omit tokens, raw orders, fabric keys and full DB/bundles.
-Fault APIs MUST remain isolated virtual-only; no automatic device reboot belongs
-to normal search. Shared contract values and frozen source captures MUST NOT be
-edited to satisfy local checks.
-
-## 14. Observability, health and bounded evidence
-
-Health MUST identify role, process liveness, timestamp and virtual mode. Liveness
-MUST NOT imply Server/device readiness. Tasks/results/events/timeline and fresh
-states SHOULD expose reason, source, cursor and unknown states. Outbox backlog,
-last current-pull error and rejected packets MUST be diagnosable. Evidence receipts
-MUST record code revision, commands, isolated process identities, bounds and gaps.
-Transport/protocol software PASS MUST NOT imply native or physical qualification.
-
-## 15. Ports, adapters and conversion ownership
-
-| Port | Required semantics |
-| --- | --- |
-| Plan source | Deliver versioned requests and fresh controls; own ack delivery; no world reads during admission |
-| Device (`Connector`) | Discover Capability, read Observation, execute with operation ID and optional revisions, stream Event, close |
-| Result sink | Accept persisted result/event IDs, acknowledge or retain; no result reconstruction on retry |
-| Secret store | Resolve configured references at composition; no provisioning wire invention |
-| Clock | Wall clock or isolated independent virtual clock; monotonic timers for I/O bounds |
-
-The Server adapter owns all C-1/C-2/C-3/C-4/HUB-15/16 DTO conversions.
-Internal models MUST NOT import it. Local HTTP ingestion and fixture adapters are
-replaceable development ports, not team authority. Generated internal schema is
-not a shared team contract. App↔Hub provisioning and Hub↔device transport remain
-explicit joint boundaries. MQTT or physical-controller qualification is
-adapter-specific.
-
-## 16. Recommended dependency layout
-
-Use the owners in §4; composition/settings and narrow plan-source/result-sink/
-secret-store contracts MAY be extracted beside them when tested. Dependency order:
-`api/composition -> adapters -> internal model/runtime -> storage/rules`; native
-connectors consume internal evidence types, never wire DTOs. Simulator is across
-a transport, not a Python dependency.
-
-## 17. Consequential algorithms
-
-```text
-admit(envelope):
-  validate profile, household, revision, addressable IDs
-  if same version: compare canonical body; return saved ack or conflict
-  if below durable floor: conflict
-  validate every line against declared binding/capability/schema (no device read)
-  cancel entries take precedence; preserve restore choice
-  reject changed started actions; carry unchanged started identity
-  transaction: floor + batch + valid tasks + carry + cancellation + ack
-  deliver saved ack
-
-execute(task):
-  await discover/read/prechecks
-  await current-authority snapshot
-  recheck durable floor/control/binding gate
-  transaction: guarded reserve unique operation + before + ingress cursor
-  await execute; persist correlated receipt
-  await fresh same-target observation; for job require same operation/job identity
-  reconcile all post-reservation property observations/revisions
-  transaction: verified ownership only for changed still-authorized properties
-  atomic result + outbox; no blind retry after uncertainty
-
-restore(task):
-  await fresh independent read; revoke changed ownership
-  if no owned properties: skipped; if no native CAS: unsafe skipped
-  persist RESTORING; await conditional write(expected per-property revisions)
-  correlate receipt; await fresh readback; record outcome + outbox
-```
-
-## 18. Acceptance catalogue
-
-Each row defines a required observable exit. A test location or passing status is
-added only by the implementation PR that supplies the evidence.
-
-| ID / initial state | Input | Required observation and exit |
-| --- | --- | --- |
-| HUB-AT01 empty dedicated DB, no devices/Server | Empty plan v1; restart; duplicate, changed same-version, then stale versions | Same ack for duplicate; changed same-version conflicts; stale version is ignored; floor never regresses; zero connector calls |
-| HUB-AT02 installation plus valid/invalid sibling lines, offline world | Contract-valid plan envelope | Valid sibling admitted, invalid reason retained, zero device reads |
-| HUB-AT03 admitted started line | Unchanged v2 then changed started action | Same operation and one dispatch for unchanged action; changed started action rejected |
-| HUB-AT04 waiting delegated source predicate | Old fact then same-time later ingress, delay/window boundary | Only eligible source/time activates once |
-| HUB-AT05 precheck read suspended | Stop/new floor/delegation revocation before reservation | Final synchronous gate observes revocation; zero new commands |
-| HUB-AT06 accepted command | Wrong receipt ID/target or stale/missing-key readback | No verified/completed outcome; uncertainty remains explicit |
-| HUB-AT07 running same job | Stale completion, then fresh completion; foreign replacement | Only fresh same-job completion closes; foreign job is preserved |
-| HUB-AT08 verified temporary two-property effect | External change including away-and-back; end with conditional-write race | Changed/conflicting property preserved; protected remainder restored |
-| HUB-AT09 started action and persisted packets | Process death/outage; reconnect | Unknown dispatch not repeated; identical packet ID/body resent |
-| HUB-AT10 populated old task schema | Open/migrate twice; fail each backfill transaction | Identities retained; cursor backfill atomic and conservative; rerun idempotent |
-| HUB-AT11 acknowledged old history plus pending/active rules | Compact after retention | Undelivered truth, active history, identities and floors remain |
-| HUB-AT12 admitted waiting work | Pause then resume; cancellation restore true/false | No cancelled-version revival; restore choice remains durable |
-| HUB-AT13 bounded Server peer plus independent world | Plan, event, readback, end and restart | Separate processes/state; App-facing projection reflects fresh observed truth; no real-Server claim |
-| HUB-AT14 missing secret reference | Boot team-Server configuration | Fail before admission/effect; no secret value disclosed; pairing remains external |
-
-## 19. Extensions and unsupported behavior
-
-Connectors MAY add device families only with declared capability, correlated
-receipts, fresh observation and explicit qualification. No native CAS means no
-safe automatic restore claim. Arbitrary natural-language plans, purchase intent,
-KB, multi-node consensus, blind job retry, rebind migration and production mobile
-provisioning are unsupported until separately specified/adopted. No full-device
-reboot, deployment, team promotion or contract redefinition follows from this spec.
+- **Agreed with the Server, contracts PR pending (2026-11-19):** plan tasks get
+  `protective: true` (chosen by the Server from a command list, not by the LLM);
+  `restore_item_status` gets `withheld_end_not_observed`; card line `end_state`
+  gets `withheld`. H7-R2 states both the agreed rule and the interim rule used
+  until that PR lands.
+- **O-24 — owner:** whether a withheld protective item is released when its
+  `event_end` is observed after the time fallback ended the task.
+- **O-01 / PQ-01 — professor:** confirm whether class-A appliances may be
+  modelled as reporting local panel operation. Until answered, this is a visible
+  virtual-device assumption; Matter and unverified physical devices are class B.
+- **O-02 / SP-01 — Server:** decide how one card Stop affects future S7 memory.
+  The answer does not change H7-R4's immediate Hub behavior.
+- **Agreed fixture changes, contracts PR pending:** the `ep_9031` line-off example
+  becomes the cleaning line `t_clean#1`; `ep_9150` gets a rationale and a
+  strawberry line for the same-item contrast. The fixture Server follows the
+  committed contract fixtures until that PR lands.
+- **Agreed Server rule:** shared-display text (fridge, TV) carries item guidance
+  only, never intent, event names, guests or themes. The Hub displays
+  Server-supplied values and does not judge text content.
+- **SP-14 — Server:** the real Server at gate G0 exposes only `/health`; core
+  schema and App/Hub contract routes remain Server work. Passing H10-R1 is not
+  real-Server interoperability evidence.
