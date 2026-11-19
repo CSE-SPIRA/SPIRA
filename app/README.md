@@ -2,24 +2,77 @@
 
 Owner: Yejoon Kim
 
-Flutter app: share order screenshots, show the preparation card, stop or switch
-off lines, and show results. See [`spec.md`](spec.md) for the complete target.
+SPIRA's Android app receives shared order screenshots, shows the Server's
+preparation cards and rationale, and sends card Stop, line off/on, and household
+pause/resume. Settings contains this-home memory and case deletion.
 
-The current walking skeleton implements only the server-free product-state
-floor: immutable preparation values, an environment/household-scoped cache, a
-typed fixture source, cache-first refresh, stale fallback, and a read-only
-preparation surface. The fixture qualifier is always visible. It does not
-implement image intake, controls, native lifecycle, Server interoperability, or
-Android/iOS qualification.
+## Run locally
 
-This repository currently contains a Flutter package rather than generated
-platform directories. With a compatible Flutter SDK available:
+Use Flutter 3.50 and the Android SDK. Start the contract fixture Server from its
+own checkout using the Hub owner's launcher and expose its App API to Android.
+For G0, that process belongs to `hub/tests/fixture_server`. The App has no
+bundled fixture Server. The fixture launch command is provided with H10-R1.
 
-```bash
-flutter pub get
-flutter test
+From `app/`, set `SPIRA_BASE_URL` in a local `.env` to the peer's Android-accessible
+origin. Set `SPIRA_PEER=fixture` for H10-R1 or `SPIRA_PEER=server` for a team Server
+profile. Emulator hosts use `10.0.2.2` for a peer bound to the development
+machine. A connected physical device needs a reachable address. HTTP is enabled
+in debug builds.
+
+```sh
+flutter run -d <android-device-id> --dart-define-from-file=.env
 ```
 
-`pubspec.lock` and platform scaffolding must be added and reviewed with the
-first platform-qualified build before `flutter run`; this source-only slice
-does not make that claim.
+If the peer returns 401, open the key button and enter the App's bearer token
+for that session. The token stays in memory. Keep tokens out of the Dart defines.
+Use Android's share menu to send one to three JPG or PNG screenshots to SPIRA.
+
+Optional Dart defines:
+
+- `SPIRA_HOUSEHOLD_ID` opens an already created household, useful for a scripted
+  fixture demo. Omit it to exercise initial setup.
+- `SPIRA_DISCOVERY_JSON` supplies a C-2 device manifest for reviewing available
+  actions. The demo can use `contracts/fixtures/ep_9031/devices.json`.
+  Selections stay on this device. The App contract has no discovery or
+  delegation-publishing route.
+- `SPIRA_GOOGLE_CLIENT_ID` enables Google Calendar setup. Register
+  `org.cse_spira.spira_app` and the build's signing SHA-1 as an Android OAuth
+  client, enable Calendar API, and set the Web client ID used by the Android
+  sign-in plugin. The setup request sends primary-calendar events in the
+  contract window. The App keeps no Calendar titles or access tokens.
+  [Flutter Android sign-in setup](https://pub.dev/packages/google_sign_in_android)
+  [Google Calendar events API](https://developers.google.com/workspace/calendar/api/v3/reference/events/list)
+
+## Checks
+
+```sh
+flutter test
+flutter analyze
+flutter build apk --debug
+```
+
+The Flutter tests drive the UI and typed HTTP client with small in-test peers.
+They read the shared fixture payloads directly. Build verification covers the
+Android manifest, Kotlin share inbox and notification bridge. Android share
+delivery, process recreation, and TalkBack still require an Android runtime.
+
+## Contract boundaries
+
+- Android share intents have no delivery ID. The inbox uses the ordered content
+  URIs and image bytes to identify redelivery. Sharing the exact same URIs with
+  the exact same bytes is indistinguishable from redelivery. A newly captured
+  screenshot can be shared again after a read failure. Pending uploads bind to
+  the first ready profile and household that takes them.
+- C-6 carries no explicit line-start history or planned end condition.
+  Interventions use the supplied line state and previously observed starts.
+  Missing guidance release and closure fields are projected from item task
+  states and the episode's `closed` status. The App consumes only App API data.
+- The App displays the Server's per-line `end_state` and `note`.
+  Device-level restore items, including `withheld_end_not_observed`, travel
+  from the Hub to the Server in C-4. A card line reports `withheld` when the
+  Server projects that outcome.
+- App API has no pause status read route. Settings uses the last successful
+  pause/resume response and shows an unknown state before one is available.
+- Creating a household returns a one-time Hub key. Hub provisioning and
+  publishing delegation require an agreed handoff. The App does not contact the
+  Hub or the Simulator.
