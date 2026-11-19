@@ -29,24 +29,24 @@ def action_results(task: Task, runs: list[RunResult]) -> list[RunResult]:
     ]
 
 
-def run_state(task: Task, latest: list[RunResult], rejected: bool):
+def run_state(task: Task, latest: list[RunResult], rejected: bool, previous: LineState):
+    if rejected:
+        return LineState.FAILED, None
     statuses = [result.status for result in latest]
     completed = statuses.count(ExecutionStatus.COMPLETED)
     all_final = len(statuses) == len(task.actions) and ExecutionStatus.RUNNING not in statuses
-    if completed == len(task.actions):
-        return LineState.DONE, None
-    if completed and all_final:
-        return LineState.PARTIAL, None
-    if completed or ExecutionStatus.RUNNING in statuses:
-        return LineState.RUNNING, None
-    if rejected or ExecutionStatus.FAILED in statuses:
+    if not all_final:
+        if completed or ExecutionStatus.RUNNING in statuses or previous == LineState.RUNNING:
+            return LineState.RUNNING, None
+        return LineState.SCHEDULED, None
+    if completed:
+        return (LineState.DONE if completed == len(task.actions) else LineState.PARTIAL), None
+    if ExecutionStatus.FAILED in statuses:
         return LineState.FAILED, None
     for result in latest:
         if result.status == ExecutionStatus.BLOCKED:
             return LineState.BLOCKED, result.reason.value
-    if statuses:
-        return LineState.UNKNOWN, None
-    return LineState.SCHEDULED, None
+    return LineState.UNKNOWN, None
 
 
 def matching_trigger(trigger: EventTrigger, events: list[Event], admitted_at: datetime):

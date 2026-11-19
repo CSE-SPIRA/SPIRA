@@ -141,6 +141,49 @@ def test_live_run_outcome_is_visible_and_retries_do_not_move_the_cursor(birthday
     assert client.cards(since=changed["server_time"])["cards"] == []
 
 
+@pytest.mark.parametrize("first_status,second_status,started,expected", [
+    ("failed", "failed", False, "failed"),
+    ("failed", "completed", False, "partial"),
+    ("failed", "blocked", True, "failed"),
+    ("unverifiable", "unknown", False, "unknown"),
+    ("unverifiable", "blocked", False, "blocked"),
+])
+def test_two_action_line_waits_for_final_results(birthday, first_status, second_status, started, expected):
+    """server/spec.md §11.5: "some `completed` and every other action final → `partial`";
+    "none completed and every action final: any `failed` → `failed`, any `blocked` → `blocked`".
+    """
+    client, advance, plan = birthday
+    first, second = client.fixture("executions.json")[2:4]
+    task = plan["tasks"][1]
+    safety = datetime.fromisoformat(task["trigger"]["time"])
+    advance(safety)
+    route = "/v1/hub/executions"
+    for result in (first, second):
+        result.update(plan_version=plan["plan_version"], at=safety.isoformat())
+    if started:
+        running = dict(first, result_id="rs_safety_running", status="running")
+        running.pop("observed")
+        client.request("POST", route, json=running)
+
+    poll = client.cards()
+    assert poll["cards"][0]["lines"][1]["state"] == ("running" if started else "scheduled")
+    first.update(status=first_status, at=(safety + timedelta(seconds=1)).isoformat())
+    first.pop("observed")
+    client.request("POST", route, json=first)
+    assert client.cards(since=poll["server_time"])["cards"] == []
+
+    second.update(status=second_status, at=(safety + timedelta(seconds=2)).isoformat())
+    if second_status != "completed":
+        second.pop("observed")
+    if second_status == "blocked":
+        second["reason"] = "plan_unconfirmed"
+    client.request("POST", route, json=second)
+    card = client.cards(since=poll["server_time"])["cards"][0]
+    assert card["lines"][1]["state"] == expected
+    assert card["lines"][1]["note"] == (second.get("reason") if expected == "blocked" else None)
+    assert card["summary"]["done"] == int(expected == "partial")
+
+
 def test_partial_run_and_rejected_ack_use_expected_actions(birthday):
     client, advance, plan = birthday
     result1, result2 = client.fixture("executions.json")[2:4]

@@ -255,7 +255,7 @@ class Replay:
         for item in self.episode.item_tasks:
             task = tasks[item.task_id]
             latest = action_results(task, runs.get(item.task_id, []))
-            state, _ = run_state(task, latest, item.task_id in rejected)
+            state, _ = run_state(task, latest, item.task_id in rejected, item.state)
             if item.task_id in cancelled and not self.started(item.task_id):
                 state = LineState.CANCELLED
             item_tasks.append(item.model_copy(update={"state": state}))
@@ -279,7 +279,7 @@ class Replay:
             ended_at = task_end(task, events, self.admitted_at(task_id))
             state, note = line.state, line.note
             if state not in INACTIVE:
-                state, note = run_state(task, latest, task_id in rejected)
+                state, note = run_state(task, latest, task_id in rejected, state)
                 if state in (LineState.DONE, LineState.PARTIAL) and user_changed(task, results, events, ended_at):
                     state = LineState.USER_CHANGED
 
