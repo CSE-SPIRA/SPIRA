@@ -18,6 +18,9 @@ class Store:
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, body TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS plans (id TEXT PRIMARY KEY, version INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS plan_versions (
+                plan TEXT, version INTEGER, body TEXT NOT NULL, PRIMARY KEY (plan, version)
+            );
             CREATE TABLE IF NOT EXISTS tasks (
                 plan TEXT, task TEXT, body TEXT NOT NULL, PRIMARY KEY (plan, task)
             );
@@ -76,6 +79,13 @@ class Store:
 
     def advance(self, plan, version):
         self.db.execute("REPLACE INTO plans VALUES (?, ?)", (plan, version))
+
+    def save_plan_version(self, plan, version, body):
+        self.db.execute("INSERT INTO plan_versions VALUES (?, ?, ?)", (plan, version, encode(body)))
+
+    def plan_versions(self):
+        rows = self.db.execute("SELECT plan, version, body FROM plan_versions")
+        return {(row["plan"], row["version"]): json.loads(row["body"]) for row in rows}
 
     def attempts(self, *, task=None, target=None):
         if task is not None:

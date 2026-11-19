@@ -12,7 +12,7 @@ from spira_contracts.plan import Action
 from .config import Installation
 from .contracts import identity, no_earlier_than, offset_time, packet, value_reason, wall_time, wire
 from .observations import Observations
-from .plans import action_keys, admit, delegated, end_status, trigger_time
+from .plans import action_keys, admit, delegated, end_match, end_status, trigger_match, trigger_time
 
 IO_FAILURES = (httpx.HTTPError, ValueError, TypeError, OverflowError)
 PULL_INTERVAL = 15
@@ -186,15 +186,21 @@ class Runtime:
                 if (task["closed"] or not task["active"] or snapshot["paused"]
                         or task["plan"] not in snapshot["plans"]):
                     continue
-                triggered = trigger_time(self.store, task, now)
-                if triggered is None:
+                trigger = trigger_match(self.store, task, now)
+                if trigger is None:
                     continue
+                triggered = offset_time(trigger["at"])
                 if not task["triggered_at"]:
                     task["triggered_at"] = triggered.isoformat()
+                    task.setdefault("trigger_evidence", []).append({
+                        **trigger, "recorded_at": now.isoformat(), "plan_version": task["version"],
+                    })
                     with self.store.db:
                         self.store.save_task(task)
-                if end_status(self.store, task, now, started_at=triggered):
+                end = end_match(self.store, task, now, started_at=triggered)
+                if end:
                     if not any(attempt["before"] for attempt in self.store.attempts(task=task)):
+                        self.record_end(task, end, now)
                         self.close_task(task)
                     continue
                 attempted = {attempt["action_key"] for attempt in self.store.attempts(task=task)}
@@ -443,9 +449,12 @@ class Runtime:
         attempts = [attempt for attempt in self.store.attempts(task=task)
                     if attempt["kind"] == "run" and attempt["before"] is not None]
         triggered = offset_time(task["triggered_at"]) if attempts else None
-        end = end_status(self.store, task, self.clock(), started_at=triggered)
-        if end is None:
+        now = self.clock()
+        match = end_match(self.store, task, now, started_at=triggered)
+        if match is None:
             return
+        self.record_end(task, match, now)
+        end = match["disposition"]
         if not attempts or end == "relinquished":
             self.close_task(task)
             return
@@ -458,7 +467,12 @@ class Runtime:
             return
         for attempt in attempts:
             current = self.store.task(task["plan"], task["id"])
-            end = end_status(self.store, current, self.clock(), started_at=triggered)
+            now = self.clock()
+            match = end_match(self.store, current, now, started_at=triggered)
+            if match is None:
+                return
+            self.record_end(current, match, now)
+            end = match["disposition"]
             if end == "relinquished":
                 self.close_task(current)
                 return
@@ -479,9 +493,22 @@ class Runtime:
         done = all(attempt["op"] in current["restore_items"] for attempt in attempts)
         self.report_restore(current, "observed_end" if done else "waiting_for_read", items, close=done)
 
+    def record_end(self, task, match, now):
+        history = task.setdefault("end_evidence", [])
+        if history:
+            previous = history[-1]["match"]
+            same_cancellation = (match["how"] == previous["how"] == "cancelled"
+                                 and match["restore"] == previous["restore"])
+            if match == previous or same_cancellation:
+                return
+        history.append({"match": match, "plan_version": task["version"], "recorded_at": now.isoformat()})
+        with self.store.db:
+            self.store.save_task(task)
+
     def close_task(self, task):
         with self.store.db:
             task["closed"] = "final"
+            task["closed_at"] = self.clock().isoformat()
             for attempt in self.store.attempts(task=task):
                 for claim in attempt["claims"].values():
                     claim["owned"] = False
