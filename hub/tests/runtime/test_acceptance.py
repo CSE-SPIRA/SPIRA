@@ -645,7 +645,7 @@ def test_hub_at16_fixture_protective_release(tmp_path, observed_end):
             "mqtt:display_01": {"play_mood": None},
             "mqtt:light_01": {"color": {"kelvin": 3000}},
             **({"mqtt:cooktop_01": {"child_lock": False}, "mqtt:plug_kettle": {"power": True}}
-               if observed_end else {"mqtt:oven_01": {"preset": {"temp_c": 170, "minutes": 20}}}),
+               if observed_end else {}),
         }
         receipts = await hub.receipts()
         release_status = "restored" if observed_end else "withheld_end_not_observed"
@@ -660,6 +660,48 @@ def test_hub_at16_fixture_protective_release(tmp_path, observed_end):
         assert sum(event["type"] == "event_end" for batch in receipts["events"] for event in batch) == observed_end
         await hub.cycle()
         assert await hub.receipts() == receipts
+        await hub.close()
+    run(exercise)
+
+
+def test_oven_standby_time_fallback_relinquishes_without_restoring(tmp_path):
+    async def exercise():
+        clock = Clock()
+        preset = {"temp_c": 170, "minutes": 20}
+        deadline = (clock() + timedelta(minutes=1)).isoformat()
+        line = task(clock, action("oven_01", "set_cook_standby", preset), end={
+            "on": "oven.started", "by": "user", "or_time": deadline, "restore": False,
+        })
+        line["way"] = "standby"
+        stub = Stub(clock, line)
+        hub = Scenario(tmp_path, clock, stub=stub)
+        install_birthday(hub)
+        hub.boot()
+        await hub.reconcile()
+        await hub.cycle()
+
+        oven = hub.world.native["mqtt:oven_01"]
+        assert oven.values["preset"] == preset
+        assert len(hub.world.commands) == 1
+        assert [(row["kind"], row["status"]) for row in stub.executions] == [("run", "completed")]
+        assert stub.executions[0]["observed"]["preset"] == preset
+        executions, events = stub.executions.copy(), stub.events.copy()
+
+        clock.advance(minutes=1)
+        await hub.cycle()
+        assert oven.values["preset"] == preset
+        assert len(hub.world.commands) == 1
+        assert stub.executions == executions
+        assert stub.events == events
+
+        # A later cancellation cannot reopen the ended lifecycle to restore the preset.
+        stub.advance(cancelled=[{"task_id": line["task_id"], "restore": True}])
+        await hub.reconcile()
+        await hub.cycle()
+        assert stub.acks[-1]["plan_version"] == 2
+        assert oven.values["preset"] == preset
+        assert len(hub.world.commands) == 1
+        assert stub.executions == executions
         await hub.close()
     run(exercise)
 
