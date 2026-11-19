@@ -34,6 +34,7 @@ from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException
 
 from .replay import Replay, valid_household_types, wire
+from .scene_support import NextOrder, live_replay
 
 LABEL = "SPIRA fixture - non-inference test support"
 LABEL_HEADER = "X-SPIRA-Fixture"
@@ -75,8 +76,15 @@ def timestamp(value: str | None):
         raise FixtureError(422, "validation_error", "Invalid timestamp") from exc
 
 
-def create_app(episode_id: str = "ep_9031") -> FastAPI:
+def create_app(
+    episode_id: str = "ep_9031", *, scene_controls: bool = False, demo_mode: bool = False
+) -> FastAPI:
     replay = Replay(episode_id)
+    if scene_controls and replay.household_id != "h_042":
+        raise ValueError("Scene controls support only household h_042")
+    published = not scene_controls
+    pending_order: NextOrder | None = None
+    orders: dict[str, str] = {}
     app = FastAPI(title=LABEL, docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.middleware("http")
@@ -112,7 +120,7 @@ def create_app(episode_id: str = "ep_9031") -> FastAPI:
             )
 
     def require_episode(requested_episode: str):
-        if requested_episode != episode_id:
+        if not published or requested_episode != replay.episode.episode_id:
             raise FixtureError(
                 404, "not_found", "Episode is outside the selected fixture"
             )
@@ -140,6 +148,17 @@ def create_app(episode_id: str = "ep_9031") -> FastAPI:
     @app.get("/_fixture/receipts")
     async def receipts():
         return JSONResponse(replay.receipts)
+
+    if scene_controls:
+        @app.post("/_fixture/scene/next-order", dependencies=app_auth, status_code=202)
+        async def next_order(order: NextOrder):
+            nonlocal pending_order
+            pending_order = order
+            return {"episode_id": order.episode_id, "household_id": replay.household_id}
+
+        @app.get("/_fixture/scene/acks", dependencies=hub_auth)
+        async def scene_acks():
+            return JSONResponse([wire(ack) for ack in replay.acks.values()])
 
     @app.post("/v1/households", dependencies=app_auth)
     async def create_household(request: Request):
@@ -190,10 +209,10 @@ def create_app(episode_id: str = "ep_9031") -> FastAPI:
             ) from exc
         episodes = []
         episode = replay.episode
-        if before is None or datetime.fromisoformat(episode.shared_at) < before:
+        if published and (before is None or datetime.fromisoformat(episode.shared_at) < before):
             episodes.append(
                 EpisodeSummary(
-                    episode_id=episode_id,
+                    episode_id=episode.episode_id,
                     shared_at=episode.shared_at,
                     status=episode.status,
                     item_count=episode.item_count,
@@ -206,7 +225,7 @@ def create_app(episode_id: str = "ep_9031") -> FastAPI:
     async def get_cards(household_id: str, request: Request):
         require_household(household_id)
         since = timestamp(request.query_params.get("since"))
-        card = replay.card
+        card = replay.card if published else None
         if since is None:
             cards = [card] if card and not replay.finished and not card.stopped else []
         else:
@@ -246,6 +265,7 @@ def create_app(episode_id: str = "ep_9031") -> FastAPI:
 
     @app.post("/v1/orders", dependencies=app_auth)
     async def post_order(request: Request):
+        nonlocal replay, published, pending_order
         try:
             async with request.form() as form:
                 household = form.get("household_id")
@@ -271,12 +291,22 @@ def create_app(episode_id: str = "ep_9031") -> FastAPI:
             raise FixtureError(
                 400, "invalid_request", "Invalid multipart order"
             ) from exc
-        duplicate = source_id in replay.source_ids
+        duplicate = source_id in orders
+        if not duplicate and scene_controls and not replay.paused:
+            if pending_order is None and not published:
+                raise FixtureError(409, "invalid_request", "Select a scene episode before upload")
+            if pending_order is not None:
+                upcoming = live_replay(pending_order, demo_mode=demo_mode)
+                upcoming.devices = replay.devices
+                upcoming.profile = replay.profile
+                upcoming.receipts = replay.receipts
+                replay, published, pending_order = upcoming, True, None
+        selected_id = orders[source_id] if duplicate else replay.episode.episode_id
         if source_id is not None:
-            replay.source_ids.add(source_id)
+            orders[source_id] = selected_id
         status = EpisodeStatus.PAUSED_SKIP if replay.paused else EpisodeStatus.RECEIVED
         return response(
-            OrderAccepted(episode_id=episode_id, status=status),
+            OrderAccepted(episode_id=selected_id, status=status),
             200 if duplicate else 202,
         )
 
@@ -308,7 +338,7 @@ def create_app(episode_id: str = "ep_9031") -> FastAPI:
 
     @app.post("/v1/cards/{card_id}/reactions", dependencies=app_auth)
     async def react(card_id: str, request: Request):
-        if not replay.card or replay.card.card_id != card_id or replay.finished:
+        if not published or not replay.card or replay.card.card_id != card_id or replay.finished:
             raise FixtureError(
                 404, "not_found", "No open card with this ID in the fixture"
             )
@@ -342,7 +372,7 @@ def create_app(episode_id: str = "ep_9031") -> FastAPI:
                 household_id=replay.household_id,
                 paused=replay.paused,
                 devices_revision=replay.devices.revision,
-                plans=[] if replay.finished else [replay.plan],
+                plans=[replay.plan] if published and not replay.finished else [],
             )
         )
 

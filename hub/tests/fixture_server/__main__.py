@@ -1,4 +1,5 @@
 import argparse
+import os
 
 import uvicorn
 
@@ -11,10 +12,20 @@ def main():
     parser.add_argument("--episode", choices=EPISODES, default=EPISODES[0])
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument(
+        "--scene-controls", action="store_true",
+        help="Enable live h_042 next-order replay test support; start unpublished",
+    )
     options = parser.parse_args()
+    if options.scene_controls and (options.host != "127.0.0.1" or options.episode == "ep_9120"):
+        parser.error("--scene-controls requires loopback and an h_042 episode")
     print(f"{LABEL} ({options.episode})", flush=True)
     uvicorn.run(
-        create_app(options.episode),
+        create_app(
+            options.episode,
+            scene_controls=options.scene_controls,
+            demo_mode=os.getenv("DEMO_MODE") == "1",
+        ),
         host=options.host,
         port=options.port,
         access_log=False,

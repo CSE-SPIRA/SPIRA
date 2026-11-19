@@ -1,7 +1,7 @@
 """State for one deterministic contract episode."""
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from spira_contracts.ack import Ack
@@ -87,7 +87,7 @@ class Replay:
             read_json(FIXTURES / "ep_9031" / "household.created.json")
         ).model_copy(update={"household_id": self.household_id})
         self.memory = Memory(household_id=self.household_id, intents=[])
-        self.source_ids: set[str] = set()
+        self.live = False
         self.acks: dict[int, Ack] = {}
         self.profile: list[str] = []
 
@@ -125,6 +125,8 @@ class Replay:
 
     def tick(self):
         self.clock += timedelta(microseconds=1)
+        if self.live:
+            self.clock = max(self.clock, datetime.now(timezone.utc))
         return self.clock.isoformat()
 
     def set_plan(self, plan: Plan):
@@ -231,6 +233,7 @@ class Replay:
                 return self.card
             canonical = (
                 wire(reaction) in self.files.get("reactions.json", [])
+                and not self.live
                 and wire(self.plan) == self.files["plan.v1.json"]
                 and not self.started(line.task_id)
             )
@@ -384,11 +387,15 @@ class Replay:
         ):
             return False
         released = self.load(Plan, "plan.v3.json")
-        if wire(self.plan) == self.files["plan.v2.json"]:
+        if not self.live and wire(self.plan) == self.files["plan.v2.json"]:
             self.set_plan(released)
             return True
         triggers = {
-            task.task_id: task.trigger
+            task.task_id: (
+                task.trigger.model_copy(update={"at": event.at})
+                if self.live
+                else task.trigger
+            )
             for task in released.tasks
             if task.source == "item"
         }
@@ -407,6 +414,7 @@ class Replay:
     def finish_if_replayed(self):
         if (
             self.finished
+            or self.live
             or not self.final_card
             or wire(self.plan) != self.files["plan.v3.json"]
         ):
