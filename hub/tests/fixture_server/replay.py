@@ -14,7 +14,7 @@ from spira_contracts.event import Event
 from spira_contracts.execution_result import ExecutionResult, RunResult
 from spira_contracts.household_created import HouseholdCreated
 from spira_contracts.memory import Memory
-from spira_contracts.plan import Cancelled, Plan
+from spira_contracts.plan import Cancelled, EventTrigger, Plan
 from spira_contracts.reaction import Reaction
 
 CONTRACTS = Path(__file__).resolve().parents[3] / "contracts"
@@ -379,35 +379,37 @@ class Replay:
         )
 
     def release_package(self, event: Event):
+        brought_in = datetime.fromisoformat(event.at)
         if (
             event.type != "package.brought_in"
             or self.paused
             or self.finished
-            or "plan.v3.json" not in self.files
+            or brought_in < datetime.fromisoformat(self.episode.shared_at)
         ):
             return False
-        released = self.load(Plan, "plan.v3.json")
-        if not self.live and wire(self.plan) == self.files["plan.v2.json"]:
-            self.set_plan(released)
-            return True
-        triggers = {
-            task.task_id: (
-                task.trigger.model_copy(update={"at": event.at})
-                if self.live
-                else task.trigger
-            )
-            for task in released.tasks
-            if task.source == "item"
-        }
+        release_at = event.at
+        if not self.live and "plan.v3.json" in self.files:
+            # The fixed birthday replay uses the committed release time even
+            # when a virtual Hub supplies its own event ID and timestamp.
+            if wire(self.plan) == self.files["plan.v2.json"]:
+                self.set_plan(self.load(Plan, "plan.v3.json"))
+                return True
+            release_at = self.files["events.json"][0]["at"]
         tasks = [
-            task.model_copy(update={"trigger": triggers[task.task_id]})
-            if task.task_id in triggers
+            task.model_copy(update={
+                "trigger": task.trigger.model_copy(update={"released": True, "at": release_at})
+            })
+            if task.source == "item"
+            and isinstance(task.trigger, EventTrigger)
+            and task.trigger.event == event.type
+            and task.trigger.released is False
             else task
             for task in self.plan.tasks
         ]
         if tasks == self.plan.tasks:
             return False
-        self.clock = max(self.clock, datetime.fromisoformat(released.sent_at))
+        if not self.live:
+            self.clock = max(self.clock, brought_in)
         self.replace_plan(tasks=tasks)
         return True
 

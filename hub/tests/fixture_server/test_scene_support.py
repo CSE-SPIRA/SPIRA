@@ -134,3 +134,32 @@ def test_scene_controls_are_off_by_default_and_authenticated_when_enabled():
     client = TestClient(create_app(scene_controls=True))
     assert client.post(SELECT, json=body).status_code == 401
     assert client.get(ACKS).status_code == 401
+
+
+@pytest.mark.parametrize("live", [False, True])
+def test_groceries_release_both_notices_on_an_eligible_package(live):
+    http = TestClient(create_app("ep_9150", scene_controls=live, demo_mode=live), headers=HEADERS)
+    client = ContractClient(http, "ep_9150", set())
+    if live:
+        assert http.post(SELECT, json={"episode_id": "ep_9150"}).status_code == 202
+        assert upload(http, "groceries").status_code == 202
+
+    waiting = client.pull()["plans"][0]
+    assert all(task["trigger"]["released"] is False for task in waiting["tasks"])
+    at = datetime.fromisoformat(waiting["sent_at"]) + timedelta(seconds=1)
+    event = {
+        "event_id": "ev_grocery_package", "household_id": "h_042", "source": "hub",
+        "type": "package.brought_in", "at": at.isoformat(), "payload": {"count": 1},
+    }
+    request = client.request
+    first = request("POST", "/v1/hub/events", json=[event])
+    assert first == {"accepted": [event["event_id"]], "plans_changed": True, "rejected": []}
+    released = client.pull()["plans"][0]
+    assert released["plan_version"] == waiting["plan_version"] + 1
+    assert [task["task_id"] for task in released["tasks"]] == ["t_fridge#1", "t_fridge#2"]
+    assert [task["actions"] for task in released["tasks"]] == [task["actions"] for task in waiting["tasks"]]
+    assert all(task["trigger"] == {"event": event["type"], "released": True, "at": event["at"]}
+               for task in released["tasks"])
+    assert request("POST", "/v1/hub/events", json=[event])["plans_changed"] is False
+    assert request("POST", "/v1/hub/events", json=[dict(event, event_id="ev_another_package")])["plans_changed"] is False
+    assert client.pull()["plans"] == [released]
