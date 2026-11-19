@@ -215,6 +215,10 @@ class Task(BaseModel):
     """
     source: common.TaskSource
     way: common.Way
+    protective: bool | None = False
+    """
+    Safety task (child lock, power cut). Released only when its end event is actually observed or it is cancelled; never at a time fallback (or_time / or_after). Set by the server from its command policy, never by the LLM (rules.md).
+    """
     actions: list[Action] = Field(..., min_length=1)
     trigger: TimeTrigger | EventTrigger
     end: End1 | End2

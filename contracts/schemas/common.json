@@ -221,7 +221,8 @@
         "skipped_user_changed",
         "failed",
         "unknown",
-        "not_needed"
+        "not_needed",
+        "withheld_end_not_observed"
       ]
     },
     "LineState": {
@@ -250,6 +251,7 @@
         "restored",
         "kept_user_change",
         "restore_failed",
+        "withheld",
         "none"
       ]
     },

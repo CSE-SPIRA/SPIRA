@@ -441,14 +441,16 @@ enum EndState {
     KEPT_USER_CHANGE,
     NONE,
     RESTORED,
-    RESTORE_FAILED
+    RESTORE_FAILED,
+    WITHHELD
 }
 
 final endStateValues = EnumValues({
     "kept_user_change": EndState.KEPT_USER_CHANGE,
     "none": EndState.NONE,
     "restored": EndState.RESTORED,
-    "restore_failed": EndState.RESTORE_FAILED
+    "restore_failed": EndState.RESTORE_FAILED,
+    "withheld": EndState.WITHHELD
 });
 
 enum LineState {
@@ -1604,7 +1606,8 @@ enum RestoreItemStatus {
     NOT_NEEDED,
     RESTORED,
     SKIPPED_USER_CHANGED,
-    UNKNOWN
+    UNKNOWN,
+    WITHHELD_END_NOT_OBSERVED
 }
 
 final restoreItemStatusValues = EnumValues({
@@ -1612,7 +1615,8 @@ final restoreItemStatusValues = EnumValues({
     "not_needed": RestoreItemStatus.NOT_NEEDED,
     "restored": RestoreItemStatus.RESTORED,
     "skipped_user_changed": RestoreItemStatus.SKIPPED_USER_CHANGED,
-    "unknown": RestoreItemStatus.UNKNOWN
+    "unknown": RestoreItemStatus.UNKNOWN,
+    "withheld_end_not_observed": RestoreItemStatus.WITHHELD_END_NOT_OBSERVED
 });
 
 enum Kind {
@@ -2106,6 +2110,11 @@ class CancelledElement {
 class TaskElement {
     final List<ActionElement> actions;
     final End end;
+    
+    ///Safety task (child lock, power cut). Released only when its end event is actually
+    ///observed or it is cancelled; never at a time fallback (or_time / or_after). Set by the
+    ///server from its command policy, never by the LLM (rules.md).
+    final bool? protective;
     final TaskSource source;
     final String taskId;
     final Trigger trigger;
@@ -2114,6 +2123,7 @@ class TaskElement {
     TaskElement({
         required this.actions,
         required this.end,
+        this.protective,
         required this.source,
         required this.taskId,
         required this.trigger,
@@ -2123,6 +2133,7 @@ class TaskElement {
     factory TaskElement.fromJson(Map<String, dynamic> json) => TaskElement(
         actions: List<ActionElement>.from(json["actions"].map((x) => ActionElement.fromJson(x))),
         end: End.fromJson(json["end"]),
+        protective: json["protective"],
         source: taskSourceValues.map[json["source"]]!,
         taskId: json["task_id"],
         trigger: Trigger.fromJson(json["trigger"]),
@@ -2132,6 +2143,7 @@ class TaskElement {
     Map<String, dynamic> toJson() => {
         "actions": List<dynamic>.from(actions.map((x) => x.toJson())),
         "end": end.toJson(),
+        "protective": protective,
         "source": taskSourceValues.reverse[source],
         "task_id": taskId,
         "trigger": trigger.toJson(),

@@ -179,7 +179,7 @@
       "line": "손님 오기 전 거실 청소",
       "need": "손님 오기 전 거실 정리",
       "way": "run",
-      "state": "done",
+      "state": "off",
       "devices": [
         {
           "id": "cleaner_01",
@@ -194,7 +194,7 @@
       "line": "아이 안전 모드 (인덕션 잠금·전기포트 차단)",
       "need": "파티 동안 아이가 주방 기기에 다치지 않게",
       "way": "run",
-      "state": "off",
+      "state": "done",
       "devices": [
         {
           "id": "cooktop_01",
@@ -276,11 +276,18 @@
       "at": "2026-10-16T18:05:21+09:00"
     },
     {
-      "task_id": "t_clean#1",
-      "device": "cleaner_01",
+      "task_id": "t_safe#2",
+      "device": "cooktop_01",
       "status": "completed",
       "substrate": "virtual",
-      "at": "2026-10-17T12:58:32+09:00"
+      "at": "2026-10-17T13:30:05+09:00"
+    },
+    {
+      "task_id": "t_safe#2",
+      "device": "plug_kettle",
+      "status": "completed",
+      "substrate": "virtual",
+      "at": "2026-10-17T13:30:06+09:00"
     },
     {
       "task_id": "t_mood#3",
@@ -317,7 +324,9 @@
               "clean"
             ]
           ],
-          "user": "kept"
+          "user": "off",
+          "when": "before_run",
+          "at": "2026-10-16"
         },
         {
           "task_id": "t_safe#2",
@@ -331,9 +340,7 @@
               "off"
             ]
           ],
-          "user": "off",
-          "when": "before_run",
-          "at": "2026-10-16"
+          "user": "kept"
         },
         {
           "task_id": "t_mood#3",

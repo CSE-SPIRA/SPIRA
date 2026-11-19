@@ -46,6 +46,7 @@ Rules every part follows when it sends or reads the shapes in `schemas/`. (COM-0
 - One result per action (device). `completed` needs a fresh read-back; an ACK alone is not completion (`unverifiable`).
 - A device "in use by a person" (`blocked: in_use_by_person`) means a job a person started is running (oven or cooktop cooking, cleaner cleaning). Lights and screens that are on are still run.
 - At the end, restore only what SPIRA still owns. A property a person changed after SPIRA is not restored (`skipped_user_changed`).
+- `protective: true` tasks (child lock, power cut; the server sets this, HUB-03): release only when the end event is actually observed (`end.on`, plus `after` if set) or the task is cancelled with `restore: true` (a person asked: Stop, line off, pause). At a time fallback (`or_time`, `or_after`) keep the protection and report each item `withheld_end_not_observed`. Tasks without `protective` (or `false`) restore at a time fallback as usual.
 
 ## Events (HUB-07)
 

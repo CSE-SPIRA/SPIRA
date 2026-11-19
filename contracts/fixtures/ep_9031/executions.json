@@ -34,34 +34,43 @@
     }
   },
   {
-    "result_id": "rs_5003",
+    "result_id": "rs_5005",
     "kind": "run",
-    "operation_id": "op_7710",
+    "operation_id": "op_7720",
     "plan_id": "ep_9031",
     "plan_version": 3,
-    "task_id": "t_clean#1",
-    "device": "cleaner_01",
-    "cmd": "clean",
-    "substrate": "virtual",
-    "status": "running",
-    "reason": null,
-    "at": "2026-10-17T12:30:05+09:00"
-  },
-  {
-    "result_id": "rs_5004",
-    "kind": "run",
-    "operation_id": "op_7710",
-    "plan_id": "ep_9031",
-    "plan_version": 3,
-    "task_id": "t_clean#1",
-    "device": "cleaner_01",
-    "cmd": "clean",
+    "task_id": "t_safe#2",
+    "device": "cooktop_01",
+    "cmd": "child_lock",
     "substrate": "virtual",
     "status": "completed",
     "reason": null,
-    "at": "2026-10-17T12:58:32+09:00",
+    "at": "2026-10-17T13:30:05+09:00",
+    "saved_state": {
+      "child_lock": false
+    },
     "observed": {
-      "job": "completed"
+      "child_lock": true
+    }
+  },
+  {
+    "result_id": "rs_5006",
+    "kind": "run",
+    "operation_id": "op_7721",
+    "plan_id": "ep_9031",
+    "plan_version": 3,
+    "task_id": "t_safe#2",
+    "device": "plug_kettle",
+    "cmd": "off",
+    "substrate": "virtual",
+    "status": "completed",
+    "reason": null,
+    "at": "2026-10-17T13:30:06+09:00",
+    "saved_state": {
+      "power": "on"
+    },
+    "observed": {
+      "power": "off"
     }
   },
   {
@@ -140,6 +149,24 @@
       },
       {
         "device": "display_01",
+        "status": "restored"
+      }
+    ]
+  },
+  {
+    "result_id": "rs_5091",
+    "kind": "restore",
+    "plan_id": "ep_9031",
+    "plan_version": 3,
+    "task_id": "t_safe#2",
+    "at": "2026-10-17T17:50:15+09:00",
+    "items": [
+      {
+        "device": "cooktop_01",
+        "status": "restored"
+      },
+      {
+        "device": "plug_kettle",
         "status": "restored"
       }
     ]
