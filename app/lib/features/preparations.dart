@@ -232,14 +232,17 @@ class _PreparationLine extends StatelessWidget {
         : null;
     final pending = app.linePending(card, line);
     final on = line.state == wire.LineState.OFF;
+    final end = line.endState;
+    final outcome = end == null ? null : endLabel(end);
+    final note = line.note;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(line.text, style: Theme.of(context).textTheme.titleMedium),
         Text(lineLabel(line.state)),
         if (timing != null) Text('실행 예정 · $timing'),
-        if (line.endState case final end?) Text(endLabel(end)),
-        if (line.note case final note?) Text(note),
+        if (outcome != null) Text(outcome),
+        if (note != null && note != outcome) Text(note),
         if (pending) const StatusMessage('항목 변경 확인 중…'),
         if (app.canSwitch(card, line))
           TextButton(

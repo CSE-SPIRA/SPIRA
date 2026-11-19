@@ -20,6 +20,7 @@ String endLabel(wire.EndState state) => switch (state) {
   wire.EndState.RESTORED => '이전 상태로 복원됨',
   wire.EndState.KEPT_USER_CHANGE => '사용자가 바꾼 상태를 유지함',
   wire.EndState.RESTORE_FAILED => '복원 실패 또는 결과 확인 불가',
+  wire.EndState.WITHHELD => '행사 끝을 확인하지 못해 잠금을 그대로 두었어요',
   wire.EndState.NONE => '복원 대상 없음',
 };
 

@@ -67,6 +67,10 @@ delivery, process recreation, and TalkBack still require an Android runtime.
   Interventions use the supplied line state and previously observed starts.
   Missing guidance release and closure fields are projected from item task
   states and the episode's `closed` status. The App consumes only App API data.
+- The App displays the Server's per-line `end_state` and `note`.
+  Device-level restore items, including `withheld_end_not_observed`, travel
+  from the Hub to the Server in C-4. A card line reports `withheld` when the
+  Server projects that outcome.
 - App API has no pause status read route. Settings uses the last successful
   pause/resume response and shows an unknown state before one is available.
 - Creating a household returns a one-time Hub key. Hub provisioning and

@@ -106,7 +106,10 @@ class Peer {
   final edits = <Object?>[];
   List<Map<String, dynamic>> cards = [];
   Map<String, dynamic> memory = fixture('memory.json');
-  Map<String, dynamic>? rationale = fixture('rationale.json');
+  final rationales = {
+    'ep_9031': fixture('rationale.json'),
+    'ep_9150': fixture('rationale.json', episode: 'ep_9150'),
+  };
   Map<String, dynamic> get birthday => episodes['ep_9031']!;
   bool failDelete = false;
   bool keepDeletedUntilRead = false;
@@ -194,6 +197,7 @@ class Peer {
         path.startsWith('/v1/episodes/') &&
         path.endsWith('/rationale')) {
       rationaleReads++;
+      final rationale = rationales[request.url.pathSegments[2]];
       if (rationale != null) return response(rationale);
       return response({'code': 'not_found', 'message': 'no rationale'}, 404);
     }
@@ -525,18 +529,25 @@ void main() {
         );
       }
       final finalCard = fixture('card.final.json');
-      lines(finalCard)[1]['end_state'] = 'restore_failed';
-      lines(finalCard)[3]['end_state'] = 'restored';
       peer.cards = [finalCard];
       await app.sync();
       await tester.pumpAndSettle();
       expect(find.text('3/3 준비'), findsOneWidget);
+      expect(find.text('꺼짐'), findsOneWidget);
       expect(find.text('사용자가 바꾼 상태를 유지함'), findsOneWidget);
       expect(find.text('사용자가 조명을 바꿔 현재 상태를 유지했어요'), findsOneWidget);
       expect(find.text('이전 상태로 복원됨'), findsOneWidget);
-      expect(find.text('복원 실패 또는 결과 확인 불가'), findsOneWidget);
       expect(find.text('복원 대상 없음'), findsOneWidget);
       expect(find.textContaining('종료 조건'), findsNothing);
+
+      final failedRestore = fixture('card.final.json')
+        ..['updated_at'] = '2026-10-17T17:50:17+09:00';
+      lines(failedRestore)[1]['end_state'] = 'restore_failed';
+      peer.cards = [failedRestore];
+      await app.sync();
+      await tester.pumpAndSettle();
+      expect(find.text('복원 실패 또는 결과 확인 불가'), findsOneWidget);
+      expect(find.text('이전 상태로 복원됨'), findsNothing);
 
       peer.unavailable = true;
       await app.sync();
@@ -553,6 +564,57 @@ void main() {
             .onPressed,
         isNull,
       );
+    },
+  );
+
+  testWidgets(
+    'APP-AT-04/05/10 shows withheld on the affected line until the Server reports restoration',
+    (tester) async {
+      final peer = Peer();
+      peer.episodes['ep_9031'] = fixture('episode.json');
+      final card = fixture('card.final.json');
+      final safety = lines(card)[1]..['end_state'] = null;
+      final mood = lines(card)[2];
+      peer.cards = [card];
+      final app = controller(peer);
+      await openApp(tester, app);
+      const explanation = '행사 끝을 확인하지 못해 잠금을 그대로 두었어요';
+      expect(find.text(explanation), findsNothing);
+
+      Finder lineText(Map<String, dynamic> line, String label) {
+        final row = find.byWidgetPredicate(
+          (widget) =>
+              widget is Column &&
+              widget.children.whereType<Text>().any(
+                (text) => text.data == line['text'],
+              ),
+        );
+        return find.descendant(of: row, matching: find.text(label));
+      }
+
+      card['updated_at'] = '2026-10-17T20:00:01+09:00';
+      safety['end_state'] = 'withheld';
+      await app.sync();
+      await tester.pumpAndSettle();
+      expect(lineText(safety, explanation), findsOneWidget);
+      expect(lineText(safety, '완료'), findsOneWidget);
+      expect(lineText(safety, '이전 상태로 복원됨'), findsNothing);
+      expect(lineText(mood, '사용자가 바꾼 상태를 유지함'), findsOneWidget);
+      expect(find.textContaining('종료 조건'), findsNothing);
+
+      card['updated_at'] = '2026-10-17T20:00:02+09:00';
+      safety['note'] = explanation;
+      await app.sync();
+      await tester.pumpAndSettle();
+      expect(find.text(explanation), findsOneWidget);
+
+      card['updated_at'] = '2026-10-17T20:01:00+09:00';
+      safety['end_state'] = 'restored';
+      safety['note'] = null;
+      await app.sync();
+      await tester.pumpAndSettle();
+      expect(find.text(explanation), findsNothing);
+      expect(lineText(safety, '이전 상태로 복원됨'), findsOneWidget);
     },
   );
 
@@ -810,60 +872,100 @@ void main() {
   );
 
   testWidgets(
-    'APP-AT-12 plain groceries remains card-free through the guidance lifecycle',
+    'APP-AT-11/12 plain groceries shows stored no-intent WHY and remains card-free',
     (tester) async {
       final peer = Peer();
       final episode = fixture('episode.json', episode: 'ep_9150');
       peer.episodes['ep_9150'] = episode;
-      peer.rationale = null;
+      final rationale = peer.rationales.remove('ep_9150')!;
       final app = controller(peer);
-      final text =
-          ((episode['item_tasks'] as List<dynamic>).first
-                  as Map<String, dynamic>)['text']
-              as String;
+      final tasks = (episode['item_tasks'] as List<dynamic>)
+          .cast<Map<String, dynamic>>();
+      final guidance = [for (final task in tasks) task['text'] as String];
       await openApp(tester, app);
       expect(find.byType(Card), findsNothing);
       expect(find.text('집에서 준비할 일이 없어요.'), findsOneWidget);
-      expect(find.text('읽은 품목 5개'), findsOneWidget);
-      expect(find.text('택배를 집 안으로 들이면 품목 안내가 표시돼요.'), findsOneWidget);
-      expect(find.text(text), findsNothing);
+      expect(find.text('읽은 품목 6개'), findsOneWidget);
+      expect(find.text('택배를 집 안으로 들이면 품목 안내가 표시돼요.'), findsNWidgets(2));
+      for (final text in guidance) {
+        expect(find.text(text), findsNothing);
+      }
       await tapText(tester, 'WHY · 이유 보기');
       expect(find.text('저장된 이유를 볼 수 없어요.'), findsOneWidget);
       await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
 
-      peer.rationale = {
-        ...fixture('rationale.json'),
-        'episode_id': 'ep_9150',
-        'intents': [],
-        'none_reason': '일상 장보기로 판단했어요.',
-        'unbundled': [],
-        'tasks': [],
-        'observations': [],
-        'executions': [],
-        'item_tasks': [],
-      };
+      peer.rationales['ep_9150'] = rationale;
       await tapText(tester, 'WHY · 이유 보기');
-      expect(find.text('일상 장보기로 판단했어요.'), findsOneWidget);
+      expect(find.text(rationale['none_reason'] as String), findsOneWidget);
+      expect(find.text('우유 · 계란 · 바지락 · 딸기 · 휴지 · 주방 세제'), findsOneWidget);
+      expect(find.textContaining('홈베이킹'), findsNothing);
+      expect(find.text('의도 없음'), findsNothing);
+      expect(find.textContaining('syn_A1-1_0107'), findsNothing);
+      for (final text in guidance) {
+        expect(find.text(text), findsNothing);
+      }
       await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
 
-      (episode['item_tasks'] as List<dynamic>)
-              .cast<Map<String, dynamic>>()
-              .first['state'] =
-          'done';
+      for (final task in tasks) {
+        task['state'] = 'done';
+      }
       await app.sync();
       await tester.pumpAndSettle();
-      expect(find.text(text), findsOneWidget);
-      expect(find.text('완료'), findsOneWidget);
+      for (final text in guidance) {
+        expect(find.text(text), findsOneWidget);
+      }
+      expect(find.text('완료'), findsNWidgets(2));
       expect(find.byType(Card), findsNothing);
 
       episode['status'] = 'closed';
       await app.sync();
       await tester.pumpAndSettle();
       expect(find.text('품목 안내가 종료됐어요.'), findsOneWidget);
-      expect(find.text(text), findsNothing);
+      for (final text in guidance) {
+        expect(find.text(text), findsNothing);
+      }
       expect(find.byType(Card), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'APP-AT-12 shows each episode’s own strawberry guidance after release',
+    (tester) async {
+      final peer = Peer();
+      final groceries = fixture('episode.json', episode: 'ep_9150');
+      final birthday = fixture('episode.json')..['status'] = 'notified';
+      peer.episodes.addAll({'ep_9150': groceries, 'ep_9031': birthday});
+      peer.cards = [fixture('card.v1.json')];
+
+      Map<String, dynamic> strawberry(Map<String, dynamic> episode) =>
+          (episode['item_tasks'] as List<dynamic>)
+              .cast<Map<String, dynamic>>()
+              .singleWhere((task) => task['item'] == '딸기');
+
+      final groceryTask = strawberry(groceries);
+      final groceryText = groceryTask['text'] as String;
+      final birthdayText = strawberry(birthday)['text'] as String;
+      expect(groceryText, isNot(birthdayText));
+      final app = controller(peer);
+      await openApp(tester, app);
+      expect(find.byType(Card), findsOneWidget);
+      expect(find.text(groceryText), findsNothing);
+      expect(find.text(birthdayText), findsOneWidget);
+
+      groceryTask['state'] = 'done';
+      await app.sync();
+      await tester.pumpAndSettle();
+      expect(find.byType(Card), findsOneWidget);
+      for (final text in [groceryText, birthdayText]) {
+        final notice = find.text(text);
+        expect(notice, findsOneWidget);
+        expect(
+          find.ancestor(of: notice, matching: find.byType(Card)),
+          findsNothing,
+        );
+      }
     },
   );
 
