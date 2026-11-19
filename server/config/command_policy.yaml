@@ -4,3 +4,5 @@ run: [clean, color, color_temp, play_mood, off, child_lock, mode, super_freeze]
 standby_pattern: "^set_[a-z0-9_]*_standby$"
 notice: [show_notice]
 deny_words: [start, ignite, heat, unlock, open, buy, order, pay, delete, reset]
+# Safety actions: a task with any of these is sent protective (released only on an observed end).
+protective: ["*.child_lock", "smart_plug.off"]
