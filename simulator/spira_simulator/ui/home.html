@@ -1,3 +1,18 @@
+{% macro device_tile(device) %}
+  <div class="device-position" data-device="{{ device.id }}">
+    <article class="home-device" data-observation="{{ device.observation }}"{% if device.change %} data-change="{{ device.change[0] }}"{% endif %}>
+      <h3>{{ device.name }} <span class="substrate{% if device.physical %} physical{% endif %}">{{ device.substrate }}</span></h3>
+      {% if device.content is not none %}<p class="device-value">{{ device.content }}</p>{% endif %}
+      {% if device.observation_label %}<p class="observation-warning">{{ device.observation_label }}{% if device.observation == "stale" %} · {{ device.observed_at }}{% endif %}</p>{% endif %}
+      {% if device.change %}<p class="change-marker">{{ device.change[1] }}</p>{% endif %}
+      {% if device.physical %}<p class="tile-note">미검증</p>{% endif %}
+      {% if device.class_a %}<p class="tile-note" title="{{ device.assumption }}">부류 A · 패널 조작 보고 가정</p>{% endif %}
+    </article>
+    {% for entry in device.planned %}
+    <p class="planned">{{ device.name }} · {{ entry.action }} · {{ entry.wait }}</p>
+    {% endfor %}
+  </div>
+{% endmacro %}
 <div id="home-state" data-live="">
   <div class="home-meta">
     <time class="wall-clock" datetime="{{ clock_at }}">{{ clock }}</time>
@@ -5,30 +20,16 @@
   </div>
   <div class="floor-plan">
     <div class="floor-rooms">
-      {% for room, devices in rooms.items() %}
+      {% for room, devices in rooms.items() if room != "entrance" %}
       <section class="floor-room" data-room="{{ room }}">
         <h2>{{ room_names.get(room, room) }}</h2>
         <div class="room-devices">
-          {% for device in devices %}
-          <div class="device-position" data-device="{{ device.id }}">
-            <article class="home-device" data-observation="{{ device.observation }}"{% if device.change %} data-change="{{ device.change[0] }}"{% endif %}>
-              <h3>{{ device.name }} <span class="substrate{% if device.physical %} physical{% endif %}">{{ device.substrate }}</span></h3>
-              {% if device.content is not none %}<p class="device-value">{{ device.content }}</p>{% endif %}
-              {% if device.observation_label %}<p class="observation-warning">{{ device.observation_label }}{% if device.observation == "stale" %} · {{ device.observed_at }}{% endif %}</p>{% endif %}
-              {% if device.change %}<p class="change-marker">{{ device.change[1] }}</p>{% endif %}
-              {% if device.physical %}<p class="tile-note">미검증</p>{% endif %}
-              {% if device.class_a %}<p class="tile-note" title="{{ device.assumption }}">부류 A · 패널 조작 보고 가정</p>{% endif %}
-            </article>
-            {% for entry in device.planned %}
-            <p class="planned">{{ device.name }} · {{ entry.action }} · {{ entry.wait }}</p>
-            {% endfor %}
-          </div>
-          {% endfor %}
+          {% for device in devices %}{{ device_tile(device) }}{% endfor %}
         </div>
       </section>
       {% endfor %}
     </div>
-    <section class="entrance">
+    <section class="entrance" data-room="entrance">
       <h2>현관</h2>
       {% if entrance %}
       <ul>
@@ -37,6 +38,7 @@
       {% else %}
       <p>관찰된 현관 사건 없음</p>
       {% endif %}
+      {% for device in rooms.get("entrance", []) %}{{ device_tile(device) }}{% endfor %}
     </section>
   </div>
   {% for device, entries in unplaced.items() %}

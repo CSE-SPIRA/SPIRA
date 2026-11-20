@@ -18,15 +18,20 @@ def test_sim_at01_configured_household_without_peers(wire, tmp_path):
     fixture = Devices.model_validate(fixture_json("ep_9031/devices.json"))
     configured = load_profile()
     logical = {d.target: d.logical_id for d in configured.devices}
-    expected = {d.id: d for d in fixture.devices}
+    expected = {
+        device.id: (device.type, [command.cmd for command in device.commands])
+        for device in fixture.devices
+    }
+    expected.update(
+        purifier_01=("purifier", ["mode"]),
+        styler_01=("styler", ["set_course_standby"]),
+    )
     assert {logical[d["target"]] for d in discovery["devices"]} == set(expected)
     assert not signals
     for device in discovery["devices"]:
-        source = expected[logical[device["target"]]]
-        assert device["device_type"] == source.type
-        assert device["capabilities"]["commands"] == [
-            command.cmd for command in source.commands
-        ]
+        device_type, commands = expected[logical[device["target"]]]
+        assert device["device_type"] == device_type
+        assert device["capabilities"]["commands"] == commands
         assert device["available"]
         assert wire.read(device["target"])["values"].keys() == set(
             device["capabilities"]["properties"]
@@ -35,8 +40,25 @@ def test_sim_at01_configured_household_without_peers(wire, tmp_path):
         assert client.get("/sim/viewer").status_code == 200
         snapshot = client.get("/sim/snapshot").json()
         assert snapshot["household_id"] == fixture.household_id
-        assert len(snapshot["devices"]) == 7
+        assert len(snapshot["devices"]) == 9
         assert all(d["observation"] == "current" for d in snapshot["devices"])
+        devices = {device["logical_id"]: device for device in snapshot["devices"]}
+        assert devices["purifier_01"]["room"] == "living_room"
+        assert devices["purifier_01"]["values"] == {"mode": "auto"}
+        assert devices["styler_01"]["room"] == "entrance"
+        assert devices["styler_01"]["values"] == {"course_standby": None}
+
+        world_wire = Wire(client.app.state.world)
+        for target, desired in (
+            ("mqtt:purifier_01", {"mode": "turbo"}),
+            ("mqtt:purifier_01", {"mode": "sleep"}),
+            ("mqtt:styler_01", {"course_standby": {"course": "standard"}}),
+        ):
+            receipt, _ = world_wire.command(target, desired)
+            assert receipt["status"] == "ACCEPTED" and receipt["job_id"] is None
+            updated = client.get("/sim/snapshot").json()["devices"]
+            actual = next(device for device in updated if device["target"] == target)
+            assert actual["values"] == desired
 
 
 def test_family_gathering_profile_and_speaker_binding(tmp_path, monkeypatch):

@@ -6,6 +6,7 @@ const OCCURRENCES = { guest_arrived: "손님 도착", event_end: "행사 종료"
 const DEVICE_TYPES = {
   light: "조명", display: "TV", cleaner: "로봇청소기", cooktop: "인덕션",
   oven: "오븐", fridge: "냉장고", smart_plug: "스마트 플러그", speaker: "스피커",
+  purifier: "공기청정기", styler: "스타일러",
 };
 export const HOUSE_DEVICES = {
   cleaner_01: { label: "로봇청소기", room: "living_room" },
@@ -15,6 +16,8 @@ export const HOUSE_DEVICES = {
   oven_01: { label: "오븐", room: "kitchen" },
   fridge_01: { label: "냉장고", room: "kitchen" },
   plug_kettle: { label: "전기포트 플러그", room: "kitchen" },
+  purifier_01: { label: DEVICE_TYPES.purifier, room: "living_room" },
+  styler_01: { label: DEVICE_TYPES.styler, room: "entrance" },
 };
 
 function lineTime(when, clock) {

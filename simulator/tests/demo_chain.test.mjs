@@ -32,6 +32,13 @@ test("birthday evidence can be followed from a topper to the light and back", ()
   const snapshot = { devices: [{ logical_id: "light_01", values: observed, available: true }] };
   const chain = buildChain({ ...input, hubLedger, snapshot });
 
+  assert.equal(chain.devices.length, 9);
+  for (const [id, room] of [["purifier_01", "living_room"], ["styler_01", "entrance"]]) {
+    const device = chain.devices.find(({ logicalId }) => logicalId === id);
+    assert.equal(device.room, room);
+    assert.equal(device.chosen, false);
+    assert.deepEqual(device.traces, []);
+  }
   assert.deepEqual(chain.funnel, { items: 9, similar: 12, bundled: 7, unbundled: 2, intents: 1, tasks: 4, cardLines: 4, devices: 7 });
   assert.deepEqual(chain.items.filter(({ unbundled }) => unbundled).map(({ id }) => id), input.rationale.unbundled);
   assert.deepEqual(chain.evidence.kbCounts, input.rationale.evidence.kb_counts);
@@ -79,7 +86,7 @@ test("groceries retain the item notices with an empty preparation chain", () => 
   assert.deepEqual(chain.tasks, []);
   assert.deepEqual(chain.item_tasks, episode.item_tasks);
   assert.ok(chain.items.every(({ unbundled }) => unbundled));
-  assert.equal(chain.devices.length, 7);
+  assert.equal(chain.devices.length, 9);
   assert.ok(chain.devices.every(({ chosen, traces }) => !chosen && traces.length === 0));
   assert.deepEqual(chain.funnel, { items: 6, similar: 12, bundled: 0, unbundled: 6, intents: 0, tasks: 0, cardLines: 0, devices: 1 });
   assert.equal(chain.cardReady, true);
@@ -108,7 +115,8 @@ test("birthday house traces follow the current timeline step", () => {
   assert.deepEqual(scenes.map(({ id }) => id), Object.keys(expected));
   for (const { id, focusDevices } of scenes) {
     const house = houseDevicePresentation(chain, focusDevices);
-    assert.deepEqual([...house].filter(([, label]) => label.resting).map(([device]) => device), ["fridge_01"]);
+    assert.deepEqual([...house].filter(([, label]) => label.resting).map(([device]) => device),
+      ["fridge_01", "purifier_01", "styler_01"]);
     const traces = Object.fromEntries([...house].filter(([, label]) => label.evidence)
       .map(([device, label]) => [device, label.evidence]));
     assert.deepEqual(traces, expected[id], id);
@@ -133,13 +141,13 @@ test("a named basis item supports a house trace only when it identifies a slot",
   assert.equal(trace(), "");
 });
 
-test("the grocery house rests all seven devices even with an observed item notice", () => {
+test("the grocery house rests all nine devices even with an observed item notice", () => {
   const episode = fixture("ep_9150", "episode");
   const rationale = fixture("ep_9150", "rationale");
   const hubPlan = fixture("ep_9150", "plan.v1");
   const snapshot = { devices: [{ logical_id: "fridge_01", values: { show_notice: rationale.item_tasks[0].text } }] };
   const house = houseDevicePresentation(buildChain({ episode, rationale, hubPlan, snapshot }));
-  assert.equal(house.size, 7);
+  assert.equal(house.size, 9);
   for (const presentation of house.values()) {
     assert.deepEqual(presentation, { focused: false, resting: true, evidence: "" });
   }

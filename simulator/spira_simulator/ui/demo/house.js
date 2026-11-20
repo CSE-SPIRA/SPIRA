@@ -229,6 +229,13 @@ export function createHouse(stage, overlay, view) {
   box(.089,.427,.474,cream,0,.23,0,.006,parcel);
   box(.20,.012,.12,ivory,.12,.449,.055,.003,parcel);
 
+  const styler=group(-6.14,.075,.58);
+  box(.65,1.96,.57,material("#baa391"),0,.98,0,.062,styler);
+  box(.58,1.85,.063,ivory,0,1.02,.307,.046,styler);
+  box(.041,.43,.047,brass,.207,1.05,.35,.013,styler);
+  box(.13,.085,.016,glass,0,1.63,.345,.017,styler);
+  box(.49,.055,.45,dark,0,.042,0,.013,styler);
+
   const windowGlass=material("#d6e5de",{emissive:"#d7e5e3",emissiveIntensity:.35});
   box(2.03,1.49,.05,wood,-3.85,1.68,-3.697,.035);
   box(1.84,1.31,.06,windowGlass,-3.85,1.68,-3.657,.03);
@@ -277,6 +284,13 @@ export function createHouse(stage, overlay, view) {
     }
   }
   plant(1.00,.075,-1.96,1.35);plant(-4.45,.075,2.90,.79);
+
+  const purifier=group(-3.95,.075,-2.16);
+  disk(.228,.055,dark,0,.028,0,purifier);
+  disk(.236,.66,ivory,0,.365,0,purifier,.218);
+  for(let i=0;i<5;i++) disk(.238-i*.001,.012,steel,0,.137+i*.046,0,purifier);
+  disk(.191,.025,dark,0,.704,0,purifier);
+  for(let i=-2;i<=2;i++) box(.24,.011,.015,steel,0,.721,i*.052,.004,purifier);
 
   box(2.27,.48,.60,oak,-.72,.35,-3.15,.055);
   for(let i=0;i<3;i++){
@@ -413,6 +427,7 @@ export function createHouse(stage, overlay, view) {
     cleaner_01: [.82, .52, -2.50], light_01: [-1.42, 2.51, -.23], display_01: [-.70, 2.17, -3.41],
     cooktop_01: [2.28, 1.43, -2.79], oven_01: [3.74, 1.00, -2.40],
     fridge_01: [6.13, 2.14, -2.55], plug_kettle: [5.25, 1.72, -3.00],
+    purifier_01: [-3.95, .84, -2.16], styler_01: [-6.14, 2.14, .88],
   };
   const projected = new THREE.Vector3();
   const cleanPosition = new THREE.Vector3();
@@ -425,6 +440,7 @@ export function createHouse(stage, overlay, view) {
   const models = {
     cleaner_01: cleanerModel, light_01: pendant, display_01: display, cooktop_01: cooktop,
     oven_01: oven, fridge_01: fridge, plug_kettle: kettle,
+    purifier_01: purifier, styler_01: styler,
   };
   const normalMaterials = new Map();
   const restingMaterials = new Map();
@@ -552,6 +568,13 @@ export function createHouse(stage, overlay, view) {
       plugLed.emissiveIntensity = power ? 1.4 : 0;
       return power ? "전원 켜짐" : "전원 차단";
     },
+    purifier_01({ mode }) {
+      return { auto: "자동", turbo: "터보", sleep: "취침" }[mode];
+    },
+    styler_01({ course_standby }) {
+      const course = { standard: "표준", wool_care: "울케어" }[course_standby?.course];
+      return course ? `${course} 코스 대기` : "대기 설정 없음";
+    },
     cleaner_01({ job_status, in_use, clean }) {
       const running = job_status === "running" || in_use === true;
       if (running && !jobRunning) cleanSince = performance.now();
@@ -656,6 +679,7 @@ export function createHouse(stage, overlay, view) {
         display_01: Boolean(values.play_mood), oven_01: Boolean(values.preset || values.in_use),
         cooktop_01: Boolean(values.child_lock || values.in_use), plug_kettle: values.power === false,
         cleaner_01: jobRunning || values.job_status === "completed",
+        purifier_01: Boolean(values.mode && values.mode !== "auto"), styler_01: Boolean(values.course_standby),
       }[id];
       readings.set(id, {
         key, show: Boolean(quality || active || previous),

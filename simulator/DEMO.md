@@ -5,7 +5,7 @@ Two pages served by the Simulator at `/demo`.
 | Page | Left | Middle / right | Bottom |
 | --- | --- | --- | --- |
 | 1 · 판단 | Phone with the shared order, preparation card and 우리 집 map | 주문 → 추출 → 맥락 → 의도 → 할 일 → 계획 → 허브 | 이전 / 다음 |
-| 2 · 집 | 3D house with the entrance, living room, kitchen and seven devices | What the Hub saw and reported (ledger) | Timeline stepped with 다음 |
+| 2 · 집 | 3D house with the entrance, living room, kitchen and nine devices | What the Hub saw and reported (ledger) | Timeline stepped with 다음 |
 
 Page 1 reads the team contract: `GET /v1/episodes/{id}` (S1 items),
 `GET /v1/episodes/{id}/rationale` (S2 evidence, S3 intents, S4 tasks) and the
@@ -50,8 +50,10 @@ Add `owners=1` to the query string to show the owner tags. They are hidden by de
 | The active stage and flow strip | `ui/demo/flow.js` (`createFlow(root, nodes)` returns `setStage(n)` and `setCounts(counts)`, with one optional count label per node, shown when reached) | |
 | Stage titles, leads, order; timeline steps and cameras | `ui/demo/scenes.json` | code |
 | Layout and component styles | `ui/demo/index.html`, `ui/demo/demo.css` | |
+| World inventory, room placement and initial values for `h_042` | `spira_simulator/profiles/ep_9031.json` | Recorded plans |
+| Hub device registration and command bindings | `scripts/demo-devices.json`, added to `hub/installation.example.json` by `scripts/demo_up.py` | Shared contract fixtures |
 | 3D models, device faces and lamp anchor | `ui/demo/house.js` (`createHouse` reads values through `update(snapshot)` and label focus through `setChain(chain, focusDevices)`) | |
-| Web evidence chain shape and joins | `ui/demo/chain.js` | Panel renderers |
+| Web evidence chain shape, joins and fixed map devices | `ui/demo/chain.js` | Panel renderers |
 | Data fetching, stage output, phone and handoff | `ui/demo/demo.js` | |
 | Story clock and time formatting | `ui/demo/story-time.js` | |
 | Allowed assets, upstream routes and fixture sample upload selection | `spira_simulator/demo.py` | |
@@ -88,7 +90,9 @@ Rules the demo keeps:
   delivery, arrival and end, sends the corresponding World event. Ledger times
   and delivery status come from the Hub.
 - Once the Hub has received the plan, devices outside preparation rest without
-  labels, with an exception for observed fridge notices. The current timeline
+  labels in the 3D house and phone map. The living-room air purifier and
+  entrance styler rest for the birthday, and every device rests for groceries.
+  The 3D fridge can still show an observed item notice. The current timeline
   step's devices can add a task below their observed values. A slot and its basis
   item require a clear mention of the slot's value or basis item in the task or
   need. Other changed devices show compact value tags where they fit. On the

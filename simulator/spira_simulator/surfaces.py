@@ -19,8 +19,10 @@ DEVICE_NAMES = {
     "fridge": "냉장고",
     "smart_plug": "플러그",
     "speaker": "스피커",
+    "purifier": "공기청정기",
+    "styler": "스타일러",
 }
-ROOM_NAMES = {"living_room": "거실", "kitchen": "주방", "bedroom": "침실"}
+ROOM_NAMES = {"living_room": "거실", "kitchen": "주방", "bedroom": "침실", "entrance": "현관"}
 SCENES = {
     "kids_party": "공주 화면",
     "party": "파티 화면",
@@ -28,6 +30,8 @@ SCENES = {
     "cinema": "영화 화면",
 }
 PLAYLISTS = {"calm": "잔잔한 음악", "party": "파티 음악", "family": "가족 모임 음악"}
+PURIFIER_MODES = {"auto": "자동", "turbo": "터보", "sleep": "취침"}
+STYLER_COURSES = {"standard": "표준", "wool_care": "울케어"}
 COMMAND_NAMES = {
     "clean": "청소",
     "color": "조명 색상 변경",
@@ -39,6 +43,8 @@ COMMAND_NAMES = {
     "show_notice": "안내 표시",
     "play": "음악 재생",
     "stop": "정지",
+    "mode": "운전 모드 변경",
+    "set_course_standby": "코스 설정 대기",
 }
 TRIGGER_NAMES = {
     "package.brought_in": "택배를 들이면",
@@ -165,6 +171,14 @@ def household_content(tile: dict) -> str | None:
             if play:
                 return f"{PLAYLISTS.get(play['playlist'], '음악 재생')} · 볼륨 {number_text(play['volume'])}"
             return "재생 안 함"
+        case "purifier":
+            return PURIFIER_MODES.get(values.get("mode"))
+        case "styler":
+            preset = values.get("course_standby")
+            if preset:
+                course = STYLER_COURSES.get(preset.get("course"), "")
+                return f"{course} 코스 대기".strip()
+            return "대기 설정 없음"
     if "power" in values:
         return ON if values["power"] else OFF
     return None
@@ -350,6 +364,17 @@ def device_controls(device: Device, *, appliance: bool) -> list[Control]:
         )
     if "stop" in commands:
         controls.append(Control("stop", "음악 정지", {"play": None}))
+    if device.device_type == "purifier" and "mode" in commands:
+        controls.extend(
+            Control(mode, label, {"mode": mode})
+            for mode, label in PURIFIER_MODES.items()
+        )
+    if device.device_type == "styler" and "set_course_standby" in commands:
+        controls.extend(
+            Control(course, f"{label} 코스 대기", {"course_standby": {"course": course}})
+            for course, label in STYLER_COURSES.items()
+        )
+        controls.append(Control("clear_course", "대기 설정 해제", {"course_standby": None}))
     if (
         device.device_type == "oven"
         and device.job

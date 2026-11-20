@@ -25,6 +25,16 @@ HOUSEHOLD = "h_042"
 PROFILES = {"ep_9031": "ep_9031.json"}
 
 
+def write_demo_installation(path):
+    base = ROOT / "hub/installation.example.json"
+    additions = Path(__file__).with_name("demo-devices.json")
+    installation = json.loads(base.read_text(encoding="utf-8"))
+    demo = json.loads(additions.read_text(encoding="utf-8"))
+    installation["devices"]["devices"].extend(demo["devices"])
+    installation["bindings"].update(demo["bindings"])
+    path.write_text(json.dumps(installation, ensure_ascii=False), encoding="utf-8")
+
+
 def free_port():
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -102,8 +112,10 @@ def main():
         wait("MQTT broker", lambda: socket.create_connection(("127.0.0.1", ports["mqtt"]), timeout=1).close() or True)
 
         prefix = f"spira/demo/{HOUSEHOLD}"
+        installation = logs / "installation.json"
+        write_demo_installation(installation)
         launch("hub", [sys.executable, "-m", "hub.spira_hub", "--port", str(ports["hub"]),
-                       "--db", str(logs / "hub.db"), "--installation", str(ROOT / "hub/installation.example.json")],
+                       "--db", str(logs / "hub.db"), "--installation", str(installation)],
                ROOT, SPIRA_SERVER_URL=urls["fixture"], SPIRA_HOUSEHOLD=HOUSEHOLD, SPIRA_HUB_KEY=hub_key,
                SPIRA_MQTT_PORT=str(ports["mqtt"]), SPIRA_MQTT_PREFIX=prefix)
 

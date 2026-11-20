@@ -113,13 +113,19 @@ function receipt(items) {
 }
 
 function phoneMap() {
-  const devices = state.chain.devices.filter((device) => device.modeled);
-  return `<div class="phone-head"><h2>우리 집</h2><p>거실과 주방에 연결된 기기 ${devices.length}대</p></div>
+  const { devices: inventory, hasHubPlan } = state.chain;
+  const devices = inventory.filter((device) => device.modeled);
+  return `<div class="phone-head"><h2>우리 집</h2><p>연결된 기기 ${devices.length}대</p></div>
     <div class="app-map" aria-label="우리 집 평면 지도">
-      <div class="app-room"><strong>현관</strong><span>출입문</span></div>
-      ${rows([["living_room", "거실"], ["kitchen", "주방"]], ([room, name]) => `<div class="app-room">
-        <strong>${name}</strong>${rows(devices.filter((device) => device.room === room),
-          (device) => `<span>${esc(device.label)}</span>`)}
+      ${rows([["entrance", "현관"], ["living_room", "거실"], ["kitchen", "주방"]], ([room, name]) => `<div class="app-room">
+        <strong>${name}</strong>${room === "entrance" ? '<span class="app-door">출입문</span>' : ""}
+        ${rows(devices.filter((device) => device.room === room), ({ logicalId, label, chosen }) => {
+          const resting = hasHubPlan && !chosen;
+          return `<div class="app-device${resting ? " resting" : ""}" data-device="${esc(logicalId)}">
+            <span class="app-device-icon" role="img"${resting ? ` aria-label="${esc(label)} · 쉬는 중"` : ' aria-hidden="true"'}></span>
+            ${resting ? "" : `<span>${esc(label)}</span>`}
+          </div>`;
+        })}
       </div>`)}
     </div>`;
 }

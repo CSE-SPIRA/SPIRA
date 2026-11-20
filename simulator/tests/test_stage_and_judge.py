@@ -866,14 +866,17 @@ def test_sim_at19_live_floor_plans_and_household_content(tmp_path, monkeypatch, 
             for room in view.findall(".//section[@data-room]")
         }
         assert rooms == {
-            "거실": {"cleaner_01", "light_01", "display_01"},
+            "거실": {"cleaner_01", "light_01", "display_01", "purifier_01"},
             "주방": {"cooktop_01", "oven_01", "fridge_01", "plug_kettle"},
+            "현관": {"styler_01"},
         }
         for device, content in {
             "oven_01": "170° · 19분 남음 · 굽는 중",
             "light_01": "분홍 330/45/70",
             "display_01": "공주 화면",
             "fridge_01": notice,
+            "purifier_01": "자동",
+            "styler_01": "대기 설정 없음",
         }.items():
             assert (
                 view.findtext(
@@ -924,6 +927,7 @@ def test_sim_at19_live_floor_plans_and_household_content(tmp_path, monkeypatch, 
         } == {
             "living_room": {"cleaner_01", "speaker_01"},
             "kitchen": {"oven_01", "fridge_01"},
+            "entrance": set(),
         }
         assert (
             view.findtext(

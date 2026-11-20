@@ -1,0 +1,32 @@
+{
+  "devices": [
+    {
+      "id": "purifier_01",
+      "type": "purifier",
+      "room": "거실",
+      "substrate": "virtual",
+      "commands": [
+        {"cmd": "mode", "value_schema": {"mode": {"enum": ["auto", "turbo", "sleep"], "default": "auto"}}}
+      ],
+      "events": ["changed"],
+      "never": [],
+      "noisy": false
+    },
+    {
+      "id": "styler_01",
+      "type": "styler",
+      "room": "현관",
+      "substrate": "virtual",
+      "commands": [
+        {"cmd": "set_course_standby", "value_schema": {"course": {"enum": ["standard", "wool_care"], "default": "standard"}}}
+      ],
+      "events": ["changed"],
+      "never": ["start"],
+      "noisy": true
+    }
+  ],
+  "bindings": {
+    "purifier_01": {"target": "mqtt:purifier_01", "commands": {"mode": {"properties": {"mode": "mode"}}}},
+    "styler_01": {"target": "mqtt:styler_01", "commands": {"set_course_standby": "course_standby"}}
+  }
+}

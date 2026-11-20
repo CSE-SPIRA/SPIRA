@@ -92,8 +92,27 @@ time,.numeric{font-variant-numeric:tabular-nums}
 .app-room{padding:9px 5px;background:var(--soft);color:var(--ink)}
 .app-room:nth-child(2){background:var(--green-soft)}
 .app-room strong{display:block;margin:2px 3px 10px;font-size:15px}
-.app-room span{display:block;padding:7px 4px;background:var(--surface);border:1px solid var(--line);border-radius:6px;margin-bottom:7px;font-size:13px;line-height:1.2}
-.app-room:nth-child(1) span{background:transparent;border:0;font-size:12px;color:var(--muted)}
+.app-door{display:block;margin:0 4px 10px;font-size:12px;color:var(--muted)}
+.app-device{display:flex;align-items:center;gap:5px;min-height:39px;padding:5px 4px;background:var(--surface);border:1px solid var(--line);border-radius:6px;margin-bottom:7px;font-size:13px;line-height:1.2}
+.app-device.resting{filter:saturate(.2);opacity:.52}
+.app-device-icon{position:relative;display:block;flex:none;width:19px;height:18px;border:1px solid var(--green-deep);border-radius:3px;background:var(--green-soft);color:var(--green-deep)}
+.app-device-icon::after{content:"";position:absolute;inset:4px;border-radius:1px;background:currentColor;opacity:.65}
+[data-device="cleaner_01"] .app-device-icon{width:18px;border-radius:50%}
+[data-device="cleaner_01"] .app-device-icon::after{inset:3px auto auto 5px;width:4px;height:4px;border-radius:50%}
+[data-device="light_01"] .app-device-icon{height:14px;clip-path:polygon(24% 0,76% 0,100% 100%,0 100%);background:#e4c18c}
+[data-device="light_01"] .app-device-icon::after{inset:auto 1px 1px;height:2px}
+[data-device="display_01"] .app-device-icon{height:14px;background:var(--green-deep)}
+[data-device="display_01"] .app-device-icon::after{inset:2px;background:var(--green-soft)}
+[data-device="cooktop_01"] .app-device-icon::after{inset:2px;background:radial-gradient(circle,currentColor 35%,transparent 45%) 0 0/50% 50%}
+[data-device="oven_01"] .app-device-icon::after{inset:6px 2px 2px}
+[data-device="fridge_01"] .app-device-icon{width:14px;height:25px}
+[data-device="fridge_01"] .app-device-icon::after{inset:7px 0 auto;height:1px}
+[data-device="plug_kettle"] .app-device-icon{width:13px;height:14px}
+[data-device="plug_kettle"] .app-device-icon::after{inset:3px 2px auto;height:3px;border-radius:50%}
+[data-device="purifier_01"] .app-device-icon{width:16px;height:25px;border-radius:6px}
+[data-device="purifier_01"] .app-device-icon::after{inset:7px 2px 4px;background:repeating-linear-gradient(0deg,currentColor 0 1px,transparent 1px 3px)}
+[data-device="styler_01"] .app-device-icon{width:15px;height:29px;background:#d3b6a3}
+[data-device="styler_01"] .app-device-icon::after{inset:3px 3px 3px 2px;border-right:1px solid currentColor;background:#f1e4d7}
 #stage-copy{position:absolute;top:43px;left:var(--copy-x);right:18px;bottom:24px;overflow:auto;padding:0 3px}
 #reason-layout[data-stage="share"] #stage-copy,#reason-layout[data-stage="plan"] #stage-copy{top:134px}
 #reason-layout[data-stage="hub"] #stage-copy{top:130px}
