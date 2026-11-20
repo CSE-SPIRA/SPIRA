@@ -97,7 +97,7 @@ class World:
             "local_operation_reporting": device.local_operation_reporting,
             **({"assumption": device.assumption} if device.assumption else {}),
             "capabilities": {
-                "commands": device.commands,
+                "commands": [command.cmd for command in device.commands],
                 "properties": list(device.properties),
             },
         }

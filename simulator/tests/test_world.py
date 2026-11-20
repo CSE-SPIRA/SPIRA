@@ -13,6 +13,13 @@ from spira_simulator.storage import UnsupportedSchema
 from spira_simulator.world import World
 
 
+def advertised_commands(device):
+    commands = [command.cmd for command in device.commands]
+    if device.id == "fridge_01":
+        commands.append("clear_notice")
+    return commands
+
+
 def test_sim_at01_configured_household_without_peers(wire, tmp_path):
     discovery, signals = wire.request("discover")
     fixture = Devices.model_validate(fixture_json("ep_9031/devices.json"))
@@ -24,9 +31,7 @@ def test_sim_at01_configured_household_without_peers(wire, tmp_path):
     for device in discovery["devices"]:
         source = expected[logical[device["target"]]]
         assert device["device_type"] == source.type
-        assert device["capabilities"]["commands"] == [
-            command.cmd for command in source.commands
-        ]
+        assert device["capabilities"]["commands"] == advertised_commands(source)
         assert device["available"]
         assert wire.read(device["target"])["values"].keys() == set(
             device["capabilities"]["properties"]
@@ -56,9 +61,7 @@ def test_family_gathering_profile_and_speaker_binding(tmp_path, monkeypatch):
         for device in discovered["devices"]:
             source = expected[device["target"]]
             assert device["device_type"] == source.type
-            assert device["capabilities"]["commands"] == [
-                command.cmd for command in source.commands
-            ]
+            assert device["capabilities"]["commands"] == advertised_commands(source)
         assert world.profile.home_signals == load_profile().home_signals
         for action, facts in load_profile().home_signals.items():
             assert [
@@ -106,8 +109,11 @@ def test_family_gathering_profile_and_speaker_binding(tmp_path, monkeypatch):
 def test_demo_profiles_label_every_command_basis(episode):
     profile = load_profile(DEFAULT_PROFILE.with_name(f"{episode}.json"))
     for device in profile.devices:
-        assert set(device.command_basis) == set(device.commands)
-        assert set(device.command_basis.values()) <= {"sdk", "lg_assumed", "standard"}
+        assert set(device.command_basis) == {command.cmd for command in device.commands}
+        if device.device_type in {"light", "smart_plug"}:
+            assert set(device.command_basis.values()) <= {"standard"}
+        else:
+            assert set(device.command_basis.values()) <= {"sdk", "lg_assumed"}
 
 
 @pytest.mark.parametrize(

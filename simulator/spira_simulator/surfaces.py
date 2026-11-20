@@ -71,12 +71,16 @@ COMMAND_NAMES = {
     "child_lock": "잠금",
     "set_cook_standby": "굽기 설정 대기",
     "show_notice": "안내 표시",
+    "clear_notice": "안내 지우기",
     "play": "음악 재생",
     "stop": "정지",
     "mode": "청정 모드",
     "wind_strength": "바람 세기",
     "set_course_standby": "코스 대기",
     "delayed_start": "예약 시작",
+    "purchase": "구매",
+    "heat": "가열",
+    "start": "시작",
 }
 BASIS_LABELS = {"sdk": "SDK", "lg_assumed": "LG 가정", "standard": "일반 기기"}
 TRIGGER_NAMES = {
@@ -255,12 +259,13 @@ def tiles(world: World, snapshot: dict, changes: dict | None = None) -> list[dic
                 "assumption": device.assumption,
                 "verbs": [
                     (
-                        COMMAND_NAMES.get(command, command),
-                        BASIS_LABELS[device.command_basis[command]],
+                        COMMAND_NAMES.get(command.cmd, command.cmd),
+                        BASIS_LABELS[device.command_basis[command.cmd]],
                     )
                     for command in device.commands
-                    if command in device.command_basis
+                    if command.cmd in device.command_basis
                 ],
+                "never": [COMMAND_NAMES.get(cmd, cmd) for cmd in device.never],
                 "change": (
                     changes.get(target)
                     if changes is not None and status == "current"
@@ -365,7 +370,7 @@ class Control:
 def device_controls(device: Device, *, appliance: bool) -> list[Control]:
     if device.substrate != "virtual":
         return []
-    commands = set(device.commands)
+    commands = {command.cmd for command in device.commands}
     controls = []
     if "color_temp" in commands:
         controls.extend(

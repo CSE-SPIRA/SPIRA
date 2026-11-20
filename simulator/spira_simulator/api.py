@@ -250,6 +250,27 @@ def create_app(
     def style():
         return FileResponse(UI / "style.css", media_type="text/css")
 
+    @application.get("/lg/devices", dependencies=[Depends(require_operator)])
+    def lg_devices(request: Request):
+        devices = []
+        for device in request.app.state.world.profile.devices:
+            commands = []
+            for command in device.commands:
+                basis = device.command_basis.get(command.cmd)
+                if basis in {"sdk", "lg_assumed"}:
+                    commands.append({**command.model_dump(mode="json"), "basis": basis})
+            if commands:
+                devices.append(
+                    {
+                        "id": device.logical_id,
+                        "type": device.device_type,
+                        "label": device.label,
+                        "commands": commands,
+                        "never": device.never,
+                    }
+                )
+        return devices
+
     @application.get("/operator", dependencies=[Depends(require_operator)])
     def operator(request: Request):
         world = request.app.state.world
@@ -459,6 +480,7 @@ def create_app(
             (
                 "/operator",
                 "/app",
+                "/lg/devices",
                 "/sim/viewer",
                 "/sim/snapshot",
                 "/sim/overlay",

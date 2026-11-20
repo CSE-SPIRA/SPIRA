@@ -1098,7 +1098,11 @@ def test_expanded_home_tiles_and_person_controls(
         tile = view.find(f'.//div[@data-device="{device}"]/article')
         assert tile.findtext('p[@class="device-value"]') == content
         assert tile.findtext('p[@class="change-marker"]') == "아빠 · 가전 앱"
-        badges = {row.text.strip(): row.findtext("span") for row in tile.findall("ul/li")}
+        badges = {
+            row.text.strip(): row.findtext('span[@class="command-basis"]')
+            for row in tile.findall("ul/li")
+            if row.get("data-locked") is None
+        }
         assert badges == verbs
         expected_note = "부류 A · 패널 조작 보고 가정" if class_a else None
         assert tile.findtext('p[@class="tile-note"]') == expected_note

@@ -2,10 +2,22 @@
   "household_id": "h_042",
   "display_name": "지아네",
   "demo_people": [
-    {"name": "엄마", "role": "resident"},
-    {"name": "아빠", "role": "resident"},
-    {"name": "지아", "role": "child"},
-    {"name": "손님", "role": "guest"}
+    {
+      "name": "엄마",
+      "role": "resident"
+    },
+    {
+      "name": "아빠",
+      "role": "resident"
+    },
+    {
+      "name": "지아",
+      "role": "child"
+    },
+    {
+      "name": "손님",
+      "role": "guest"
+    }
   ],
   "devices": [
     {
@@ -18,7 +30,18 @@
       "local_operation_reporting": true,
       "assumption": "Virtual LG local-operation reporting",
       "commands": [
-        "clean"
+        {
+          "cmd": "clean",
+          "value_schema": {
+            "room": {
+              "enum": [
+                "거실",
+                "주방"
+              ],
+              "default": "거실"
+            }
+          }
+        }
       ],
       "command_basis": {
         "clean": "sdk"
@@ -74,7 +97,8 @@
       "job": {
         "trigger_property": "clean",
         "duration_seconds": 30
-      }
+      },
+      "label": "청소기"
     },
     {
       "target": "mqtt:light_01",
@@ -86,8 +110,44 @@
       "local_operation_reporting": true,
       "assumption": "Virtual light panel local-operation reporting",
       "commands": [
-        "color",
-        "color_temp"
+        {
+          "cmd": "color",
+          "value_schema": {
+            "hue": {
+              "range": [
+                0,
+                360
+              ],
+              "default": 40
+            },
+            "saturation": {
+              "range": [
+                0,
+                100
+              ],
+              "default": 30
+            },
+            "brightness": {
+              "range": [
+                0,
+                100
+              ],
+              "default": 70
+            }
+          }
+        },
+        {
+          "cmd": "color_temp",
+          "value_schema": {
+            "kelvin": {
+              "range": [
+                2700,
+                6500
+              ],
+              "default": 3000
+            }
+          }
+        }
       ],
       "command_basis": {
         "color": "standard",
@@ -162,8 +222,23 @@
       "local_operation_reporting": true,
       "assumption": "Virtual LG local-operation reporting",
       "commands": [
-        "play_mood",
-        "off"
+        {
+          "cmd": "play_mood",
+          "value_schema": {
+            "scene": {
+              "enum": [
+                "kids_party",
+                "party",
+                "calm",
+                "cinema"
+              ],
+              "default": "calm"
+            }
+          }
+        },
+        {
+          "cmd": "off"
+        }
       ],
       "command_basis": {
         "play_mood": "lg_assumed",
@@ -197,7 +272,11 @@
             ]
           }
         }
-      }
+      },
+      "label": "TV",
+      "never": [
+        "purchase"
+      ]
     },
     {
       "target": "mqtt:cooktop_01",
@@ -209,7 +288,9 @@
       "local_operation_reporting": true,
       "assumption": "Virtual LG local-operation reporting",
       "commands": [
-        "child_lock"
+        {
+          "cmd": "child_lock"
+        }
       ],
       "command_basis": {
         "child_lock": "lg_assumed"
@@ -231,6 +312,10 @@
       },
       "prohibited_properties": [
         "heat"
+      ],
+      "label": "인덕션",
+      "never": [
+        "heat"
       ]
     },
     {
@@ -243,7 +328,25 @@
       "local_operation_reporting": true,
       "assumption": "Virtual LG local-operation reporting",
       "commands": [
-        "set_cook_standby"
+        {
+          "cmd": "set_cook_standby",
+          "value_schema": {
+            "temp_c": {
+              "range": [
+                40,
+                250
+              ],
+              "default": 180
+            },
+            "minutes": {
+              "range": [
+                1,
+                180
+              ],
+              "default": 20
+            }
+          }
+        }
       ],
       "command_basis": {
         "set_cook_standby": "lg_assumed"
@@ -308,6 +411,10 @@
       "prohibited_properties": [
         "start",
         "in_use"
+      ],
+      "label": "오븐",
+      "never": [
+        "start"
       ]
     },
     {
@@ -320,10 +427,17 @@
       "local_operation_reporting": true,
       "assumption": "Virtual LG local-operation reporting",
       "commands": [
-        "show_notice"
+        {
+          "cmd": "show_notice",
+          "value_schema": "text"
+        },
+        {
+          "cmd": "clear_notice"
+        }
       ],
       "command_basis": {
-        "show_notice": "lg_assumed"
+        "show_notice": "lg_assumed",
+        "clear_notice": "lg_assumed"
       },
       "properties": {
         "show_notice": {
@@ -348,7 +462,8 @@
           "hub_write": false,
           "event_type": "fridge.door_opened"
         }
-      }
+      },
+      "label": "냉장고"
     },
     {
       "target": "mqtt:plug_kettle",
@@ -359,7 +474,9 @@
       "available": true,
       "local_operation_reporting": false,
       "commands": [
-        "off"
+        {
+          "cmd": "off"
+        }
       ],
       "command_basis": {
         "off": "standard"
@@ -384,8 +501,35 @@
       "local_operation_reporting": true,
       "assumption": "Virtual LG local-operation reporting",
       "commands": [
-        "mode",
-        "wind_strength"
+        {
+          "cmd": "mode",
+          "value_schema": {
+            "mode": {
+              "enum": [
+                "CLEAN",
+                "AUTO",
+                "CIRCULATOR",
+                "DUAL_CLEAN"
+              ],
+              "default": "CLEAN"
+            }
+          }
+        },
+        {
+          "cmd": "wind_strength",
+          "value_schema": {
+            "wind_strength": {
+              "enum": [
+                "LOW",
+                "MID",
+                "HIGH",
+                "AUTO",
+                "POWER"
+              ],
+              "default": "MID"
+            }
+          }
+        }
       ],
       "command_basis": {
         "mode": "sdk",
@@ -415,7 +559,8 @@
             ]
           }
         }
-      }
+      },
+      "label": "공기청정기"
     },
     {
       "target": "mqtt:dishwasher_01",
@@ -427,8 +572,38 @@
       "local_operation_reporting": true,
       "assumption": "Virtual LG local-operation reporting",
       "commands": [
-        "set_course_standby",
-        "delayed_start"
+        {
+          "cmd": "set_course_standby",
+          "value_schema": {
+            "course": {
+              "enum": [
+                "DELICATE",
+                "TURBO",
+                "RINSE",
+                "REFRESH",
+                "HEAVY",
+                "NORMAL",
+                "AUTO",
+                "EXPRESS",
+                "MACHINE_CLEAN",
+                "DOWNLOAD_CYCLE"
+              ],
+              "default": "NORMAL"
+            }
+          }
+        },
+        {
+          "cmd": "delayed_start",
+          "value_schema": {
+            "hours": {
+              "range": [
+                1,
+                12
+              ],
+              "default": 1
+            }
+          }
+        }
       ],
       "command_basis": {
         "set_course_standby": "lg_assumed",
@@ -467,7 +642,11 @@
             "maximum": 12
           }
         }
-      }
+      },
+      "label": "식기세척기",
+      "never": [
+        "start"
+      ]
     },
     {
       "target": "mqtt:washer_01",
@@ -479,7 +658,18 @@
       "local_operation_reporting": true,
       "assumption": "Virtual LG local-operation reporting",
       "commands": [
-        "set_course_standby"
+        {
+          "cmd": "set_course_standby",
+          "value_schema": {
+            "course": {
+              "enum": [
+                "NORMAL",
+                "DELICATES"
+              ],
+              "default": "NORMAL"
+            }
+          }
+        }
       ],
       "command_basis": {
         "set_course_standby": "lg_assumed"
@@ -498,7 +688,11 @@
             ]
           }
         }
-      }
+      },
+      "label": "세탁기",
+      "never": [
+        "start"
+      ]
     },
     {
       "target": "mqtt:plug_iron",
@@ -509,7 +703,9 @@
       "available": true,
       "local_operation_reporting": false,
       "commands": [
-        "off"
+        {
+          "cmd": "off"
+        }
       ],
       "command_basis": {
         "off": "standard"
@@ -546,7 +742,10 @@
           },
           "hub_write": false
         }
-      }
+      },
+      "never": [
+        "off"
+      ]
     }
   ],
   "home_signals": {

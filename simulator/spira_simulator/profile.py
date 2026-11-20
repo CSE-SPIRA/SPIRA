@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from jsonschema import Draft202012Validator
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from spira_contracts.devices import Command
 
 PRIVATE_FIELDS = frozenset(
     {"actor", "actor_name", "action_path", "ground_truth_actor", "provenance", "by"}
@@ -66,17 +67,32 @@ class Device(ProfileModel):
     available: bool
     local_operation_reporting: bool
     assumption: str | None = None
-    commands: list[str]
-    command_basis: dict[str, Literal["sdk", "lg_assumed", "standard"]] = Field(default_factory=dict)
+    commands: list[Command]
+    command_basis: dict[str, Literal["sdk", "lg_assumed", "standard"]] = Field(
+        default_factory=dict
+    )
+    never: list[str] = Field(default_factory=list)
     properties: dict[str, Property] = Field(min_length=1)
     job: Job | None = None
     prohibited_properties: list[str] = Field(default_factory=list)
+
+    @field_validator("commands", mode="before")
+    @classmethod
+    def accept_command_names(cls, value):
+        if isinstance(value, list):
+            return [
+                {"cmd": command} if isinstance(command, str) else command
+                for command in value
+            ]
+        return value
 
     @model_validator(mode="after")
     def check_capability(self):
         if self.local_operation_reporting and not self.assumption:
             raise ValueError("Class A requires a displayed assumption")
-        if self.command_basis and self.command_basis.keys() != set(self.commands):
+        if self.command_basis and self.command_basis.keys() != {
+            command.cmd for command in self.commands
+        }:
             raise ValueError("command basis must cover the device commands")
         if any(not re.fullmatch(r"[a-z][a-z0-9_]*", key) for key in self.properties):
             raise ValueError("invalid property name")

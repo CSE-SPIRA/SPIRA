@@ -34,7 +34,7 @@ Select the inventory at startup with `WORLD_PROFILE`. Give each process a separa
 | [`h_042` (default)](spira_simulator/profiles/ep_9031.json) | 12, including the living-room purifier, kitchen dishwasher, laundry-room washer and iron plug, and living-room router plug | [`hub/installation.example.json`](../hub/installation.example.json) |
 | [`h_051`](spira_simulator/profiles/ep_9120.json) | 5, including the living-room purifier | [`hub/installation.h_051.example.json`](../hub/installation.h_051.example.json) |
 
-The viewer labels each verb `SDK` or `LG 가정`. The badge describes the command's basis in ThinQ Connect. The Class A label describes the simulator's assumed panel signal.
+The viewer labels verbs `SDK`, `LG 가정`, or `표준` and shows profile `never` actions with a lock and `하지 않아요`. The Class A label describes the simulator's assumed panel signal.
 
 | Added device | Panel and appliance-app actions |
 | --- | --- |
@@ -48,6 +48,8 @@ The viewer labels each verb `SDK` or `LG 가정`. The badge describes the comman
 Set the Hub's MQTT endpoint and prefix to match the Simulator. `MQTT_HOST`, `MQTT_PORT`, and `MQTT_PREFIX` default to loopback, `1883`, and `spira/g0`. MQTT credentials, if configured, are separate from the operator credentials.
 
 The [`h_042` protocol](protocol.md#11-default-h_042-profile) and [`h_051` protocol](protocol.md#12-h_051-profile) define the Hub command mappings and operator raw signals.
+
+For demo onboarding, the Hub can discover the loaded profile's LG inventory at `GET /lg/devices` on the same HTTP listener. Enable `WORLD_OPERATOR=1` and set `WORLD_OPERATOR_TOKEN` in the environment. For `h_042` on port 8730, `curl --user operator http://127.0.0.1:8730/lg/devices` prompts for the token. Assign device rooms through onboarding. Add standard lights and plugs through the Hub installation file.
 
 Read replies carry `operation_id: null` and `local_operation: false`. A stale read retains its cached observation time. Missing readback has empty values and revisions with `available: true`. Unavailable readback uses empty values and revisions with `available: false`. The viewer shows the MQTT connection and last observed gap. Device event delivery after a gap starts with new observations.
 
@@ -64,7 +66,7 @@ Leave `WORLD_HUB_STATE_URL` unset to use fixture receipts for evidence. For a li
 
 The attribution judge labels its source as `fixture_receipts` or `hub_state`. In Hub mode, it compares only device events the Hub marks delivered. Pending device events appear under `not_delivered` with the Hub's delivery error when available. In the viewer, local run outcomes from Hub task stories clear the corresponding waiting entries. Restore reports retain their outcome and show **pending delivery** when the Hub has yet to confirm delivery.
 
-The grocery fixture `../contracts/fixtures/ep_9150/plan.v1.json` shows two planned fridge actions and no household preparation. Planned actions show the device, action, and trigger or time. The fridge tile shows notice text once World observes it. The birthday fixture keeps the protective actions in the plan after the cleaning line is switched off. The viewer shows withheld releases in the Hub restore reports. Its filled device tiles come from World readback, and their latest-change labels come from World truth.
+The grocery fixture `../contracts/fixtures/ep_9150/plan.v1.json` shows two planned fridge actions and no household preparation. Planned actions show the device, action, and trigger or time. The fridge tile shows observed notice text and returns to `평소 화면` after the Hub sends `clear_notice` and the device reports an empty slot. The birthday fixture keeps the protective actions in the plan after the cleaning line is switched off. The viewer shows withheld releases in the Hub restore reports. Its filled device tiles come from World readback, and their latest-change labels come from World truth.
 
 Under **Private evidence**, set a command marker before an episode, then select **Count Hub commands**. Enter both offset timestamps to count over an explicit interval instead. The API is `POST /operator/judge/marker` and `GET /operator/judge/commands`, optionally with `start` and `end` query parameters. The count includes the start time and excludes the end time. A marker uses journal order so it works even when a command shares its timestamp. It persists in `WORLD_DB`.
 
@@ -87,6 +89,7 @@ Tests use in-process protocol fakes, HTTP stubs for both evidence sources, and a
 | SIM-AT-19 | Both profiles render their rooms, device values, entrance, wall clock, and configured links in HTTP tests. |
 | SIM-AT-20 | HTTP tests check the viewer and its data for World change labels and action-only overlays. They check that items, intents, rationale, card text, Hub attribution, and judge output stay out of the viewer. |
 | SIM-AT-21 | HTTP tests submit the named panel and appliance-app forms and check the emitted signals and truth journal. The Class A panel signal is provisional pending PQ-01. |
+| SIM-AT-22, 23, 24 | Both profiles are covered by HTTP tests for the LG inventory and locked actions, and protocol tests for notice clearing, independent readback, and operation deduplication. |
 | Expanded household inventory | MQTT protocol tests cover writes, change events, independent readback, and refusal of Hub writes to the router plug. HTTP tests cover Korean tile values, verb badges, and both person-control paths. |
 
 ## Needs integration

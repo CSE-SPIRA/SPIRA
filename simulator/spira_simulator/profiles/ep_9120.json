@@ -2,9 +2,18 @@
   "household_id": "h_051",
   "display_name": "부모님 댁",
   "demo_people": [
-    {"name": "할머니", "role": "resident"},
-    {"name": "할아버지", "role": "resident"},
-    {"name": "손님", "role": "guest"}
+    {
+      "name": "할머니",
+      "role": "resident"
+    },
+    {
+      "name": "할아버지",
+      "role": "resident"
+    },
+    {
+      "name": "손님",
+      "role": "guest"
+    }
   ],
   "devices": [
     {
@@ -17,7 +26,19 @@
       "local_operation_reporting": true,
       "assumption": "Virtual LG local-operation reporting",
       "commands": [
-        "clean"
+        {
+          "cmd": "clean",
+          "value_schema": {
+            "room": {
+              "enum": [
+                "거실",
+                "주방",
+                "침실"
+              ],
+              "default": "거실"
+            }
+          }
+        }
       ],
       "command_basis": {
         "clean": "sdk"
@@ -74,7 +95,8 @@
       "job": {
         "trigger_property": "clean",
         "duration_seconds": 30
-      }
+      },
+      "label": "청소기"
     },
     {
       "target": "mqtt:speaker_01",
@@ -85,8 +107,29 @@
       "available": true,
       "local_operation_reporting": false,
       "commands": [
-        "play",
-        "stop"
+        {
+          "cmd": "play",
+          "value_schema": {
+            "playlist": {
+              "enum": [
+                "calm",
+                "party",
+                "family"
+              ],
+              "default": "calm"
+            },
+            "volume": {
+              "range": [
+                0,
+                100
+              ],
+              "default": 30
+            }
+          }
+        },
+        {
+          "cmd": "stop"
+        }
       ],
       "command_basis": {
         "play": "lg_assumed",
@@ -125,7 +168,11 @@
             ]
           }
         }
-      }
+      },
+      "label": "스피커",
+      "never": [
+        "purchase"
+      ]
     },
     {
       "target": "mqtt:oven_01",
@@ -137,7 +184,25 @@
       "local_operation_reporting": true,
       "assumption": "Virtual LG local-operation reporting",
       "commands": [
-        "set_cook_standby"
+        {
+          "cmd": "set_cook_standby",
+          "value_schema": {
+            "temp_c": {
+              "range": [
+                40,
+                250
+              ],
+              "default": 180
+            },
+            "minutes": {
+              "range": [
+                1,
+                180
+              ],
+              "default": 20
+            }
+          }
+        }
       ],
       "command_basis": {
         "set_cook_standby": "lg_assumed"
@@ -202,6 +267,10 @@
       "prohibited_properties": [
         "start",
         "in_use"
+      ],
+      "label": "오븐",
+      "never": [
+        "start"
       ]
     },
     {
@@ -214,10 +283,17 @@
       "local_operation_reporting": true,
       "assumption": "Virtual LG local-operation reporting",
       "commands": [
-        "show_notice"
+        {
+          "cmd": "show_notice",
+          "value_schema": "text"
+        },
+        {
+          "cmd": "clear_notice"
+        }
       ],
       "command_basis": {
-        "show_notice": "lg_assumed"
+        "show_notice": "lg_assumed",
+        "clear_notice": "lg_assumed"
       },
       "properties": {
         "show_notice": {
@@ -242,7 +318,8 @@
           "hub_write": false,
           "event_type": "fridge.door_opened"
         }
-      }
+      },
+      "label": "냉장고"
     },
     {
       "target": "mqtt:air_purifier_01",
@@ -254,8 +331,35 @@
       "local_operation_reporting": true,
       "assumption": "Virtual LG local-operation reporting",
       "commands": [
-        "mode",
-        "wind_strength"
+        {
+          "cmd": "mode",
+          "value_schema": {
+            "mode": {
+              "enum": [
+                "CLEAN",
+                "AUTO",
+                "CIRCULATOR",
+                "DUAL_CLEAN"
+              ],
+              "default": "CLEAN"
+            }
+          }
+        },
+        {
+          "cmd": "wind_strength",
+          "value_schema": {
+            "wind_strength": {
+              "enum": [
+                "LOW",
+                "MID",
+                "HIGH",
+                "AUTO",
+                "POWER"
+              ],
+              "default": "MID"
+            }
+          }
+        }
       ],
       "command_basis": {
         "mode": "sdk",
@@ -285,7 +389,8 @@
             ]
           }
         }
-      }
+      },
+      "label": "공기청정기"
     }
   ],
   "home_signals": {
