@@ -796,6 +796,7 @@ Every `when` satisfies `start > now` and `end > start`; a window that fails is s
 Order: `[의도 n]` per bundle (unclassified first line added) → `[관리법 문구가 필요한 물건]` → `[이 집]` (household types if any, rooms) → `[이 집 기기]` → `[이 집이 지난번 같은 의도에서 남긴 반응]` (only when reactions exist).
 
 - Intent block: situation fields "모름" when empty; time `"{요일}요일 {start}~{end} ({days}일 뒤)"` or `"모름 (일정이 아직 없음)"`; items with qty and attributes.
+- Notice item line: `- {type} × {qty or 모름} [{key}: {value}, …] · {group}{ · 의도 n의 물건}` — attributes included, so the notice can see 냉동, 손질 and the like (R47).
 - Device line: `- {id} · {Korean name} · {room or 방 모름} · {cmd}({param} {lo}~{hi} / {a}/{b}/…), …`; text commands as `{cmd}(글자)`; commands without values as the name only.
 - Reaction lines: off → line text + action keys; changed → `"{일정 시작 n분 뒤 }{Korean device name}을 {property}({param value, …})로 바꿈"` from `changes` (the time part only when `after_start_minutes` is set), e.g. `"일정 시작 70분 뒤 조명을 color_temp(kelvin 2700)로 바꿈"`.
 
@@ -1359,3 +1360,4 @@ Not yet in the Notion server spec (synchronised in one pass later). B.2 lists th
 | R44 | S3 links a calendar event only if its tags share one of the intent's `related_tags` (intents with related tags only): one retry, then the link is removed and the bundle kept. Prompt: no link to an event of another occasion; `intent_text` repeats the fields' words (dry run A 02: birthday items linked to "가족 모임"; a reworded activity caused a retry, 11-21, 서진) | §9.2, §9.5 |
 | R45 | S1 `테마` is written only for decorating goods (party and event supplies, decorations, cakes, gift wrap); colour and size options of clothes, shoes, accessories and household goods are not a theme (dry run A 08 and 04/06/07: "화이트", "그레이+블랙" read as themes, 11-21, 서진) | §7, `s1_system.txt` |
 | R46 | S4 fridge notices for items that arrive frozen: no thaw, wipe or chill advice on arrival; without an intent only "put it in the freezer at once", with an intent `intent_change` says to move it to the fridge the day before (one notice at arrival, no separate thaw task). Prompt examples for both (dry run A 04/06/07: frozen 삼겹살 and 고등어 were told to be wiped and chilled, 11-21, 서진) | §10.8, `s4_system.txt` |
+| R47 | S4 `[관리법 문구가 필요한 물건]` lines carry the item attributes (`[가공: 냉동, 보관: 냉동]`); without them the R46 frozen rule could not apply (dry run A 04/06/07 rerun: frozen 삼겹살 and 고등어 still told to chill, the block showed no attributes, 11-21, 서진) | §10.8, `s4_blocks.yaml`, `s4_tasks.py` |
