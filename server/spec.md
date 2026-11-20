@@ -34,7 +34,7 @@ Implementation spec for `server/`. A coding agent should be able to build the se
 
 ## 0. Overview and scope
 
-The server receives order screenshots and runs a pipeline:
+The server receives shopping screenshots (order screen, cart or product page) and runs a pipeline:
 
 | Step | What | LLM |
 | --- | --- | --- |
@@ -489,7 +489,7 @@ The exact texts are in those files; each stage section below gives the schema, t
 
 ## 7. S1 Order intake and extraction
 
-**Purpose.** Receive screenshots, group captures into one episode, read items with one LLM call per quiet period, then label, mask and merge them in code.
+**Purpose.** Receive screenshots of an order screen, a cart or a product page, group captures into one episode, read items with one LLM call per quiet period, then label, mask and merge them in code.
 
 **Inputs.** `POST /v1/orders` multipart: `household_id`, `images` (1–3, jpg/png, ≤ 5 MB each), optional `shared_at`, optional `source_id` (APP-02).
 **Outputs.** `202 {episode_id, status}` at once (no notification); later `order_items` rows and the next steps.
@@ -534,7 +534,7 @@ class OrderExtraction(BaseModel): items: list[Item]; orders: list[Order] = []
 
 - Validation is two-step (S1 only): the provider is asked for `OrderExtraction`, but the server parses the raw JSON envelope `{items: [...], orders: [...]}` and validates `orders` and **each item on its own** with `Item`. An item that fails is dropped alone (not the whole answer). If no item survives (and the envelope was not `items: []`) → retry once with `s1_retry.txt` listing the errors (e.g. `- 물건 3의 group "파티용품"은 상품군 목록에 없다`). Still nothing → no items from this pass. `LLM.structured` therefore has a `raw=True` mode returning the parsed JSON (§6.1).
 - Default (refusal / timeout twice): no items from this pass.
-- **Prompt summary.** Read only ordered and paid items (no recommendations, ads, cart, cancelled, fees); same item across overlapping images once; `type` is a 2–3 word plain name without brand/size; `qty` null if not visible (never 1 by default); `deal` copied, never multiplied; attributes only from the product name/options with the exact `source` text; flag five sensitive categories, when unsure pick the closest (mask); daily supplements and hygiene goods are not sensitive.
+- **Prompt summary.** Three screens are read: order screens (ordered items, not cancelled or returned), carts (items in the cart, except unchecked, sold-out or unavailable ones; all items when no checkboxes are visible) and product pages (that one product with its chosen options). Never read recommendations, "bought together", recently viewed, ads, fees or coupons; a shop home, search results or category lists give no items even when they show products; same item across overlapping images once; `type` is a 2–3 word plain name without brand/size; `qty` null if not visible (never 1 by default); `deal` copied, never multiplied; attributes only from the product name/options with the exact `source` text; flag five sensitive categories, when unsure pick the closest (mask); daily supplements and hygiene goods are not sensitive.
 
 ### 7.4 Post-processing (code)
 
@@ -558,7 +558,7 @@ Masked items never reach S2 embedding, S3, S4, notices, rationale or the order e
 | One item fails the schema | Drop that item only |
 | Zero items after retry, whole episode empty | `read_failed`, notify once |
 | LLM timeout (60 s) | Retry once, then as above |
-| Not an order screen | Zero items from that image; other images still count |
+| Not an order, cart or product screen (shop home, search results, other apps) | Zero items from that image; other images still count |
 | Type / group unclear | `core_noun`; group null → `clue` |
 | Missing qty / order_no / eta | null, continue |
 
@@ -1351,3 +1351,4 @@ Not yet in the Notion server spec (synchronised in one pass later). B.2 lists th
 | R37 | Line state: an ack rejection is checked before the task status (`dropped` + `rejected` → `failed`) | §11.5, T31 |
 | R38 | Ack answers 204 as `hub.yaml` says (the spec said 200 for a repeat); a different body for an acked version is ignored; duplicate device ids → 422; unencoded `+` in `since` accepted (11-19, 서진) | §12.2, T50 |
 | R39 | Build order (11-19, 서진): S1–S5 → dry run tool → S6 minimal API (households, profile, calendar, cards, devices, plan pull, ack) → dry run A/B → review → rest of S6 and S7 → hub integration 11/27 | §12, §13 |
+| R40 | S1 reads carts and product pages as well as order screens (tests and demos share a temporary cart); unchecked, sold-out and recommended items are skipped; `qty` / `order_no` null when not shown (11-21, 서진) | §0, §7, `s1_*.txt` |
