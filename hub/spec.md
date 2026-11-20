@@ -19,9 +19,9 @@ waiting work. (PC-4, PC-5, PC-6)
 The Hub does not infer purchase intent, create preparation work, choose a
 different target or value, judge household preference, or implement Server
 plan-time policy such as quiet hours or room suitability. The Server owns those
-judgments and S7 memory. The Hub communicates with the Server only by the pull,
-acknowledgement, event, and result routes in `contracts/openapi/hub.yaml`; the
-Server never calls the Hub or Simulator. (PC-1, PC-2, PC-4, PC-6)
+judgments and S7 memory. The Hub communicates with the Server through the
+routes in `contracts/openapi/hub.yaml`. The Server never calls the Hub or
+Simulator. (PC-1, PC-2, PC-4, PC-6)
 
 ## 2. Requirements
 
@@ -42,6 +42,28 @@ devices revision. It MUST NOT execute a command that is no longer delegated.
 previously unseen device type MUST remain usable as data when its declared
 capabilities satisfy the contract; virtual success MUST NOT be presented as
 physical-device qualification. (PC-3, PC-4)
+
+**H2-R3.** The Hub MUST expose `GET /home/onboarding/devices` and
+`PUT /home/onboarding/devices` to the App on the home network. Both routes
+MUST require the household Hub key in `X-API-Key` (as HUB-10). The paths
+and payloads are owned by the Hub outside the team contract (APP-13).
+GET MUST return every candidate with its ID, type, source label and room,
+source (`lg_account` or `installation`), offered commands with their
+value schemas and basis when known, `never` list, and the currently stored
+room, label, and delegated commands.
+
+**H2-R4.** The Hub MUST discover LG account candidates from the test home's
+`GET /lg/devices` using the Simulator's operator authentication. LG account
+devices have no source room. The installation file supplies non-LG
+candidates such as lights and plugs. The Hub MUST return null when a source
+provides no room and MUST NOT invent rooms.
+
+**H2-R5.** PUT MUST accept room, label, and delegated commands per submitted
+device. The Hub MUST reject delegation of commands the device does not
+offer or lists in `never`. The Hub MUST store accepted values and upload
+one new C-2 revision using the existing device-list upload route. Each
+C-2 device's `commands` MUST contain only its delegated commands and
+`never` MUST carry the device's prohibitions.
 
 ### H3. Plans, admission, and versions
 
@@ -165,6 +187,13 @@ cards, the whole house, or item notices outside the card. The Hub MUST expose no
 Stop All or Server-less stop path; Stop reaches it only as the Server's newer
 plan version. (PC-5, PC-6)
 
+**H7-R5.** An item notice stays until its C-1 end condition is met. When
+the first matching `fridge.door_opened` after release has aged by `after`,
+or the trigger-relative fallback (`or_after` in C-1) is reached, the Hub
+MUST send the no-value `clear_notice` command to the fridge. The Hub MUST
+verify that the display slot is empty with fresh readback and report the
+outcome through the existing execution-result route.
+
 ### H8. Evidence and dashboard
 
 **H8-R1.** C-3 events and C-4 run/restore results MUST use stable
@@ -239,6 +268,9 @@ internals is not acceptance evidence.
 | HUB-AT18 | The three demo surfaces run with Server `DEMO_MODE` off and on | All timestamps advance on wall time; only Server-supplied absolute/duration values shorten in demo mode; Hub exposes no separate demo-clock control | PC-4 | H4-R4 |
 | HUB-AT19 | App and Hub clients replay all three contract episodes, including card reactions, C-3 events, and C-4 results | The fixture answers every App/Hub OpenAPI route with schema-valid responses; the Simulator judge reads `by` from the fixture's received C-3 records; surfaces label the peer as a fixture with no inference claim | PC-1, PC-2, PC-3, PC-4, PC-5, PC-6 | H10-R1 |
 | HUB-AT20 | Run the ep_9031 birthday scene against the fixture and open the dashboard | The first screen lists, in time order, plan admission and ack, the safety commands, guest arrival, mood commands, the oven start by a person, the light change, the end and each restore or skip, each with who and what was sent to the Server and whether it was delivered; H8-R3 detail is still reachable | PC-4, PC-6 | H8-R4 |
+| HUB-AT21 | Query onboarding with and without the Hub key against a test LG account and an installation with manually added devices | Only an authenticated request returns candidates. Both sources appear with capabilities, prohibitions, and current settings. LG source rooms are null. | PC-3 | H2-R3, H2-R4 |
+| HUB-AT22 | Submit an unoffered or prohibited command, then submit valid room, label, and delegation changes | Invalid submissions change nothing. The valid submission is visible after restart and sends one new C-2 revision with only delegated commands and the original prohibitions. | PC-3, PC-5 | H2-R3, H2-R5 |
+| HUB-AT23 | Run a released fridge notice with one opening before release and two openings after release; separately run with no opening | The slot remains filled until the first eligible opening plus `after`, or the trigger-relative fallback. The Hub sends `clear_notice` and C-4 reflects independent readback, including an unverified outcome when the slot cannot be confirmed empty. | PC-4, PC-6 | H6-R1, H7-R5, H8-R1 |
 
 ## 4. Open items
 
