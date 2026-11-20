@@ -715,7 +715,7 @@ def build_schema(item_types, cal_ids, intent_ids):
 - an item in two bundles;
 - two bundles with the same `intent_id` (except `unclassified`);
 - bundles empty and `none_reason` empty, or bundles present and `none_reason` set;
-- a filled situation field whose key word is not in `intent_text` (key word = the value itself, or for multi-word values its longest word);
+- a filled situation field that is not in `intent_text`: the whole value ignoring spaces and the list marks `,` `·` `/` is not there, and neither is its key word (the value itself, or for several words its longest word; words are split on spaces and those marks). "하츄핑, 공주, 핑크" is found in "하츄핑·공주·핑크 테마…";
 - (schema already rejects unknown labels, items, calendar ids).
 
 ### 9.6 Failure handling
@@ -1354,3 +1354,4 @@ Not yet in the Notion server spec (synchronised in one pass later). B.2 lists th
 | R40 | S1 reads carts and product pages as well as order screens (tests and demos share a temporary cart); unchecked, sold-out and recommended items are skipped; `qty` / `order_no` null when not shown (11-21, 서진) | §0, §7, `s1_*.txt` |
 | R41 | Anthropic calls use JSON outputs (`output_config.format`), not forced tool use; the enforced schemas (S1, calendar, S3) stay within the documented strict-schema limits (16 unions, 24 optional fields; test). Found in dry run A (11-21) | §6.1, §3.2 |
 | R42 | S4 runs without an enforced schema: the schema is sent as prompt text and the stage validates (its schema grows with the devices; Anthropic refused it as too large in dry run A). `s4_system.txt` [답의 형식] states the format; prose or code fences around the JSON are cut away (11-21, 서진) | §6.1, §10.8 |
+| R43 | S3 format check: situation values are compared with `intent_text` ignoring spaces and the list marks `,` `·` `/`, and the key word is split on them too (a theme "하츄핑, 공주, 핑크" written as "하츄핑·공주·핑크" was retried in dry run A, 11-21) | §9.5 |

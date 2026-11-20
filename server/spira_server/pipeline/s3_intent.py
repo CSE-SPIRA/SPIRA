@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, datetime, timedelta
 from typing import Literal
 
@@ -128,9 +129,21 @@ def build_schema(item_types: list[str], cal_ids: list[str], intent_ids: list[str
 
 # -------------------------------------------------------------------------------------------- format check (§9.5)
 
+WORD_SEPARATORS = re.compile(r"[\s,·・/、]+")
+
+
 def key_word(value: str) -> str:
-    words = value.split()
-    return max(words, key=len) if len(words) > 1 else value
+    """The value itself, or for several words its longest word. Words are split on spaces and the list marks
+    `,` `·` `/` (spec §9.5): "하츄핑, 공주, 핑크" -> "하츄핑"."""
+    words = [w for w in WORD_SEPARATORS.split(value) if w]
+    return max(words, key=len) if len(words) > 1 else value.strip()
+
+
+def in_text(value: str, text: str) -> bool:
+    """A situation value counts as written in intent_text when, ignoring spaces and list marks, the whole value is
+    there ("하츄핑, 공주, 핑크" ~ "하츄핑·공주·핑크"), or its key word is."""
+    squash = lambda s: WORD_SEPARATORS.sub("", s)  # noqa: E731
+    return squash(value) in squash(text) or key_word(value) in text
 
 
 def format_check(decision: BaseModel) -> list[str]:
@@ -150,7 +163,7 @@ def format_check(decision: BaseModel) -> list[str]:
             intents.setdefault(bundle.intent_id, n)
         for key in SITUATION_KEYS:
             value = getattr(bundle.situation, key)
-            if value and value not in bundle.intent_text and key_word(value) not in bundle.intent_text:
+            if value and not in_text(value, bundle.intent_text):
                 errors.append(f'묶음 {n}의 {key} "{value}": intent_text에 없다. '
                               "채운 상황 칸을 intent_text에 모두 담는다")
     reason = (decision.none_reason or "").strip()

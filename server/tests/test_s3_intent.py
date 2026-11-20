@@ -172,3 +172,16 @@ def test_run_stores_intent(mock_llm):
         e = s.get(Episode, ep)
         assert e.intent["bundles"][0]["intent_id"] == "kid_birthday_party"
         assert e.stage == "s2"
+
+
+def test_key_word_and_in_text_ignore_list_marks():
+    """Dry run A 01b (11-21): theme "하츄핑, 공주, 핑크" written as "하츄핑·공주·핑크 테마" was retried."""
+    from spira_server.pipeline.s3_intent import in_text, key_word
+
+    assert key_word("하츄핑, 공주, 핑크") == "하츄핑"
+    assert key_word("컵케이크 굽고 꾸미기") == "컵케이크"
+    assert key_word("생일") == "생일"
+    assert in_text("하츄핑, 공주, 핑크", "하츄핑·공주·핑크 테마의 생일 파티")
+    assert in_text("하츄핑, 공주, 핑크", "하츄핑/공주/핑크 테마")
+    assert in_text("디즈니 공주", "디즈니 공주 테마로 손님 여럿이 오는 생일")
+    assert not in_text("하츄핑, 공주, 핑크", "공룡 테마의 생일 파티")
