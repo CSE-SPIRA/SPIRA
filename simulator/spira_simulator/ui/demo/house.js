@@ -1,327 +1,625 @@
-// The 3D house on page 2: living room + kitchen + entrance, fixed layout.
-// Device looks come only from World snapshot values (update); the timeline only
-// moves the camera and shows people that the world events put in the house.
 import * as THREE from "three";
-import { OrbitControls } from "/demo/assets/orbit-controls.js";
 
-const FONT = '"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif';
-const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-const CAMS = {
-  overview: [[12, 13, 15.5], [0, 0.2, -0.4]],
-  fridge: [[1.6, 4.6, 4.6], [5.0, 1.0, -3.4]],
-  living: [[5.5, 8.5, 11.5], [-2.2, 0.4, -0.6]],
-  party: [[8.5, 9.5, 13.5], [-1.4, 0.6, -0.6]],
-  kitchen: [[1.8, 3.8, 3.4], [4.2, 0.8, -3.4]],
+export const DEVICES = {
+  cleaner_01: { name: "로봇청소기", room: "living_room" },
+  light_01: { name: "거실 조명", room: "living_room" },
+  display_01: { name: "TV", room: "living_room" },
+  cooktop_01: { name: "인덕션", room: "kitchen" },
+  oven_01: { name: "오븐", room: "kitchen" },
+  fridge_01: { name: "냉장고", room: "kitchen" },
+  plug_kettle: { name: "전기포트 플러그", room: "kitchen" },
 };
-const moodOf = (v) => (v && typeof v === "object" ? v.scene : v) || null;
-const SCENES = { kids_party: "어린이 파티", party: "파티", calm: "차분한 분위기", cinema: "영화" };
 
-function hsvColor(h, s, v) {
-  s /= 100; v /= 100;
-  const l = v * (1 - s / 2);
-  const sl = l === 0 || l === 1 ? 0 : (v - l) / Math.min(l, 1 - l);
-  return new THREE.Color().setHSL(h / 360, sl, l);
-}
-function kelvinColor(k) {
-  const t = k / 100;
-  const r = t <= 66 ? 255 : 329.7 * Math.pow(t - 60, -0.1332);
-  const g = t <= 66 ? 99.47 * Math.log(t) - 161.1 : 288.1 * Math.pow(t - 60, -0.0755);
-  const b = t >= 66 ? 255 : t <= 19 ? 0 : 138.5 * Math.log(t - 10) - 305.0;
-  const c = (x) => Math.max(0, Math.min(255, x)) / 255;
-  return new THREE.Color(c(r), c(g), c(b));
-}
-function noticeText(v) {
-  if (!v) return [];
-  if (typeof v === "string") return [v];
-  if (Array.isArray(v)) return v.map((x) => (typeof x === "string" ? x : x.text || x.item || JSON.stringify(x)));
-  return [v.text || JSON.stringify(v)];
+export function hsvColor({ hue, saturation, brightness } = {}) {
+  if (![hue, saturation, brightness].every(Number.isFinite)) return null;
+  const value = brightness / 100;
+  const chroma = value * saturation / 100;
+  const segment = ((hue % 360 + 360) % 360) / 60;
+  const offset = chroma * (1 - Math.abs(segment % 2 - 1));
+  const colors = [[chroma, offset, 0], [offset, chroma, 0], [0, chroma, offset],
+    [0, offset, chroma], [offset, 0, chroma], [chroma, 0, offset]];
+  return "#" + colors[Math.floor(segment)]
+    .map((channel) => Math.round((channel + value - chroma) * 255).toString(16).padStart(2, "0"))
+    .join("");
 }
 
-export function createHouse(stage, tagsRoot, hud) {
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+// The fixed I1 cutaway. View direction and entrance cues are separate from device values.
+export function createHouse(stage, overlay, view) {
+  const motion = matchMedia("(prefers-reduced-motion: reduce)");
+  const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.needsUpdate = true;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  stage.appendChild(renderer.domElement);
+  renderer.toneMappingExposure = 1.16;
+  stage.append(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color("#171a20");
-  const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 200);
-  const controls = new OrbitControls(camera, renderer.domElement);
-  Object.assign(controls, { enableDamping: true, enablePan: false, maxPolarAngle: 1.32, minDistance: 4, maxDistance: 32 });
+  const camera = new THREE.OrthographicCamera();
+  const floorGlow = new THREE.Color();
+  const reflectedWhite = new THREE.Color("#fff4ea");
+  const mainLight = new THREE.DirectionalLight("#fff0d8", 2.4);
+  mainLight.position.set(-5,12,7); mainLight.castShadow = true;
+  Object.assign(mainLight.shadow.camera,{left:-11,right:11,top:9,bottom:-9,near:.5,far:35});
+  mainLight.shadow.mapSize.set(2048,2048);
+  mainLight.shadow.normalBias = .03;
+  scene.add(mainLight, new THREE.HemisphereLight("#fff5e7","#ac8877",1.65));
+  const fill = new THREE.DirectionalLight("#eee6ff", .75);
+  fill.position.set(5,5,-7); scene.add(fill);
 
-  scene.add(new THREE.HemisphereLight("#e4e9ff", "#3b3029", 0.9));
-  const sun = new THREE.DirectionalLight("#fff3e2", 2.0);
-  sun.position.set(9, 15, 11); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
-  Object.assign(sun.shadow.camera, { left: -12, right: 12, top: 12, bottom: -12 });
-  sun.shadow.bias = -0.0006; scene.add(sun);
-  const roomLight = new THREE.PointLight("#ffd9a8", 18, 16, 1.4);
-  roomLight.position.set(-2, 2.6, -0.6); scene.add(roomLight);
-
-  const mat = (color, r = 0.8, m = 0) => new THREE.MeshStandardMaterial({ color, roughness: r, metalness: m });
-  function box(w, h, d, color, x, y, z, o = {}) {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), o.material || mat(color, o.r ?? 0.8, o.m ?? 0));
-    m.position.set(x, y, z); m.castShadow = o.cast ?? true; m.receiveShadow = true; (o.parent || scene).add(m); return m;
+  const material = (color, props={}) => new THREE.MeshStandardMaterial({color,roughness:.78,...props});
+  const oak=material("#b98f65"), wood=material("#936d51"), stone=material("#efe4ca"), wall=material("#e9dfca");
+  const sage=material("#777d68"), cream=material("#e5c8a5"), dark=material("#403936"), glass=material("#292334",{roughness:.29});
+  const brass=material("#ad7544",{metalness:.5,roughness:.31}), linen=material("#b18b72"), ivory=material("#eee0c5");
+  const steel=material("#c4a99f",{metalness:.31}), tile=material("#c4b49e");
+  const foliage=["#65744e","#88946a","#a3a67a"].map(color=>material(color));
+  const roundGeometry = new Map();
+  function roundedGeometry(w,h,d,r) {
+    const key = [w,h,d,r].join(",");
+    if (roundGeometry.has(key)) return roundGeometry.get(key);
+    const bevel = Math.min(r,w*.22,h*.22,d*.22);
+    const x=w/2-bevel,y=h/2-bevel;
+    const shape = new THREE.Shape();
+    shape.moveTo(-x,-y); shape.lineTo(x,-y); shape.lineTo(x,y); shape.lineTo(-x,y); shape.closePath();
+    const geo = new THREE.ExtrudeGeometry(shape,{depth:d-2*bevel,bevelEnabled:true,bevelSize:bevel,bevelThickness:bevel,bevelSegments:3,steps:1});
+    geo.translate(0,0,-d/2+bevel);
+    roundGeometry.set(key,geo);
+    return geo;
   }
-  function cyl(rt, rb, h, color, x, y, z, o = {}) {
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, o.seg || 32), o.material || mat(color, o.r ?? 0.6, o.m ?? 0));
-    m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; (o.parent || scene).add(m); return m;
+  function mesh(geometry, surface, x,y,z,parent=scene) {
+    const object = new THREE.Mesh(geometry,surface);
+    object.position.set(x,y,z); object.castShadow=true;object.receiveShadow=true;parent.add(object);return object;
   }
-  function canvasTex(w, h) {
-    const c = document.createElement("canvas"); c.width = w; c.height = h;
-    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
-    return { c, g: c.getContext("2d"), t };
+  function box(w,h,d,s,x,y,z,r=.035,parent=scene) {
+    return mesh(roundedGeometry(w,h,d,r),s,x,y,z,parent);
   }
-  function screen(w, h, tex, x, y, z) {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex.t, toneMapped: false }));
-    m.position.set(x, y, z); scene.add(m); return m;
+  function disk(r,h,s,x,y,z,parent=scene,bottom=r) {
+    return mesh(new THREE.CylinderGeometry(r,bottom,h,48),s,x,y,z,parent);
   }
-
-  // Shell: living room (left), kitchen (right), entrance strip (far left).
-  const WALL = "#e3ded6";
-  box(15.6, 0.4, 10.4, "#262a31", 0, -0.2, 0, { cast: false });
-  box(8.5, 0.06, 9, "#b58b5d", -2.75, 0.03, 0, { cast: false, r: 0.7 });
-  box(5.5, 0.06, 9, "#d4d6d2", 4.25, 0.03, 0, { cast: false, r: 0.5 });
-  box(2.2, 0.07, 3.3, "#8e8981", -5.9, 0.035, 2.85, { cast: false });
-  box(14.2, 3, 0.2, WALL, 0, 1.5, -4.6);
-  box(0.2, 3, 6.7, WALL, -7.1, 1.5, -1.15);
-  box(0.2, 3, 1.1, WALL, -7.1, 1.5, 3.95);
-  box(0.2, 0.9, 1.2, WALL, -7.1, 2.55, 2.8);
-  box(0.2, 1.1, 2.7, WALL, 1.5, 0.55, -3.15);
-
-  const doorPivot = new THREE.Group(); doorPivot.position.set(-7.05, 0, 2.2); scene.add(doorPivot);
-  box(0.08, 2.1, 1.2, "#6d5a48", 0, 1.05, 0.6, { parent: doorPivot });
-  const pkg = box(0.6, 0.45, 0.5, "#b88a57", -7.85, 0.32, 2.75);
-
-  // Living room
-  box(4.2, 0.02, 3, "#ccb9a6", -1.8, 0.07, 0.5, { cast: false, r: 1 });
-  const SOFA = "#5c6b7a";
-  box(3.4, 0.45, 1.0, SOFA, -1.8, 0.3, 2.5); box(3.4, 0.8, 0.28, SOFA, -1.8, 0.7, 2.95);
-  box(0.3, 0.65, 1.0, SOFA, -3.35, 0.4, 2.5); box(0.3, 0.65, 1.0, SOFA, -0.25, 0.4, 2.5);
-  box(1.5, 0.08, 0.8, "#7c5a3c", -1.8, 0.42, 0.6); box(1.3, 0.38, 0.6, "#6b4d33", -1.8, 0.2, 0.6);
-  box(2.6, 0.55, 0.5, "#4a3b2f", -1.8, 0.33, -4.15);
-  box(2.5, 1.42, 0.08, "#111317", -1.8, 1.6, -4.45, { m: 0.4, r: 0.4 });
-  const tvTex = canvasTex(1024, 576);
-  screen(2.36, 1.3, tvTex, -1.8, 1.6, -4.405);
-  const glowMat = new THREE.MeshStandardMaterial({ color: "#fff", emissive: "#ffd9a8", emissiveIntensity: 1.4 });
-  box(6.0, 0.06, 0.06, null, -1.75, 2.9, -4.47, { material: glowMat, cast: false });
-  cyl(0.22, 0.18, 0.4, "#8a6a52", 0.9, 0.26, 2.9);
-  const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.42, 16, 12), mat("#4f7a52", 0.9));
-  leaf.position.set(0.9, 0.8, 2.9); leaf.castShadow = true; scene.add(leaf);
-
-  const vac = new THREE.Group(); scene.add(vac);
-  cyl(0.27, 0.27, 0.09, "#2b2e35", 0, 0.1, 0, { parent: vac, r: 0.3, m: 0.3 });
-  cyl(0.09, 0.09, 0.04, "#9aa3b0", 0, 0.16, 0, { parent: vac, m: 0.5 });
-  const VAC_DOCK = new THREE.Vector3(0.7, 0, -3.9);
-  vac.position.copy(VAC_DOCK);
-
-  function person(scale, color, hat) {
-    const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.6, 6, 16), mat(color, 0.8));
-    body.position.y = 0.55; body.castShadow = true; g.add(body);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.19, 20, 16), mat("#f0cfb4", 0.7));
-    head.position.y = 1.12; head.castShadow = true; g.add(head);
-    if (hat) { const h = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.3, 20), mat(hat, 0.6)); h.position.y = 1.4; g.add(h); }
-    g.scale.setScalar(scale); scene.add(g); return g;
+  function sphere(w,h,d,s,x,y,z,parent=scene) {
+    const object=mesh(new THREE.SphereGeometry(1,24,14),s,x,y,z,parent);
+    object.scale.set(w,h,d);return object;
   }
-  const guests = [
-    [person(0.75, "#e58fb6", "#ffd66b"), [-2.7, 0.07, 0.3]],
-    [person(0.72, "#8fb0e5", "#ff8fc0"), [-1.1, 0.07, 0.9]],
-    [person(0.78, "#f2c46d", "#b99cff"), [-2.0, 0.07, -0.6]],
-    [person(1.0, "#6c7f73", null), [-5.6, 0.07, 3.0]],
-  ];
-  guests.forEach(([m, p]) => { m.position.set(...p); m.visible = false; });
-
-  // Kitchen
-  box(3.8, 0.9, 0.7, "#e9e6e0", 3.8, 0.45, -4.1, { r: 0.6 });
-  box(3.9, 0.05, 0.75, "#5b5e66", 3.8, 0.925, -4.1, { r: 0.4 });
-  const indTex = canvasTex(256, 180);
-  const ind = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.56), new THREE.MeshBasicMaterial({ map: indTex.t, toneMapped: false }));
-  ind.rotation.x = -Math.PI / 2; ind.position.set(2.65, 0.952, -4.1); scene.add(ind);
-  box(0.82, 0.62, 0.04, "#2a2c31", 4.4, 0.42, -3.73, { m: 0.4, r: 0.35 });
-  const ovenTex = canvasTex(256, 64);
-  screen(0.6, 0.15, ovenTex, 4.4, 0.64, -3.705);
-  const kettle = cyl(0.12, 0.14, 0.26, "#d8d8d8", 5.25, 1.08, -4.15, { m: 0.6, r: 0.3 });
-  box(1.0, 2.15, 0.85, "#c9ccd1", 6.4, 1.08, -3.95, { m: 0.35, r: 0.35 });
-  const frTex = canvasTex(256, 360);
-  screen(0.36, 0.5, frTex, 6.15, 1.45, -3.515);
-  box(1.6, 0.06, 0.9, "#a07a55", 4.0, 0.78, -1.1);
-  [[3.35, -1.45], [4.65, -1.45], [3.35, -0.75], [4.65, -0.75]].forEach(([x, z]) => box(0.07, 0.75, 0.07, "#8a6748", x, 0.39, z));
-
-  // ---------- device faces, drawn from values ----------
-  function drawTV(mood) {
-    const { g, c, t } = tvTex, W = c.width, H = c.height;
-    if (!mood) {
-      g.fillStyle = "#0b0c10"; g.fillRect(0, 0, W, H); t.needsUpdate = true; return;
-    }
-    const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#ff9ccb";
-    const bg = g.createLinearGradient(0, 0, W, H); bg.addColorStop(0, accent); bg.addColorStop(1, "#a98cff");
-    g.fillStyle = bg; g.fillRect(0, 0, W, H);
-    let seed = 7; const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
-    for (let i = 0; i < 70; i++) { g.fillStyle = `rgba(255,255,255,${0.35 + rnd() * 0.5})`; g.beginPath(); g.arc(rnd() * W, rnd() * H, 1.5 + rnd() * 3.5, 0, 7); g.fill(); }
-    g.fillStyle = "#fff"; g.textAlign = "center";
-    g.font = `700 88px ${FONT}`; g.fillText(SCENES[mood] || mood, W / 2, 320);
-    g.font = `500 34px ${FONT}`; g.fillStyle = "rgba(255,255,255,.9)"; g.fillText("♪ 분위기 화면", W / 2, 420);
-    t.needsUpdate = true;
+  function tube(points,r,s,parent=scene) {
+    const path=new THREE.CatmullRomCurve3(points.map(point=>new THREE.Vector3(...point)));
+    return mesh(new THREE.TubeGeometry(path,24,r,8,false),s,0,0,0,parent);
   }
-  function drawOven(preset) {
-    const { g, c, t } = ovenTex; g.fillStyle = "#07080a"; g.fillRect(0, 0, c.width, c.height);
-    g.textAlign = "center"; g.textBaseline = "middle"; g.font = `600 28px ${FONT}`;
-    const on = preset && (preset.temp_c || preset.minutes);
-    g.fillStyle = on ? "#ffb24a" : "#2a2c31";
-    g.fillText(on ? `${preset.temp_c}℃ ${preset.minutes}분 대기` : "--:--", c.width / 2, c.height / 2 + 2);
-    t.needsUpdate = true;
+  function plane(w,h,s,x,y,z,parent=scene) {
+    const object=mesh(new THREE.PlaneGeometry(w,h),s,x,y,z,parent);
+    object.castShadow=false;return object;
   }
-  function drawFridge(lines) {
-    const { g, c, t } = frTex; g.fillStyle = lines.length ? "#18202c" : "#0d0f13"; g.fillRect(0, 0, c.width, c.height);
-    g.textAlign = "left"; g.font = `500 21px ${FONT}`;
-    lines.slice(0, 3).forEach((text, i) => {
-      const y = 20 + i * 112;
-      g.fillStyle = "#263247"; g.beginPath(); g.roundRect(14, y, c.width - 28, 100, 12); g.fill();
-      g.fillStyle = "#e7ecf5";
-      const words = text.split(" "); let line = "", ly = y + 30;
-      for (const w of words) {
-        if (g.measureText(line + w).width > c.width - 56) { g.fillText(line, 28, ly); line = ""; ly += 26; if (ly > y + 90) break; }
-        line += w + " ";
+  function group(x,y,z) {
+    const object=new THREE.Group();object.position.set(x,y,z);scene.add(object);return object;
+  }
+  function canvasTexture(width,height,draw) {
+    const canvas=document.createElement("canvas");canvas.width=width;canvas.height=height;
+    const ctx=canvas.getContext("2d");const texture=new THREE.CanvasTexture(canvas);
+    texture.colorSpace=THREE.SRGBColorSpace;texture.anisotropy=renderer.capabilities.getMaxAnisotropy();
+    return {texture, paint(painter=draw){painter(ctx,width,height);texture.needsUpdate=true}};
+  }
+  function textile(base, thread) {
+    const surface=canvasTexture(512,256,(ctx,w,h)=>{
+      ctx.fillStyle=base;ctx.fillRect(0,0,w,h);
+      for(let i=0;i<3000;i++){
+        ctx.globalAlpha=.13 + (i%6)*.045;ctx.fillStyle=thread;
+        ctx.fillRect((i*239)%w,(i*137)%h,1+(i%6),1);
       }
-      if (ly <= y + 90) g.fillText(line, 28, ly);
+      ctx.globalAlpha=1;
     });
-    t.needsUpdate = true;
+    surface.paint();
+    return material("#ffffff",{map:surface.texture,bumpMap:surface.texture,bumpScale:.025});
   }
-  function drawInduction(locked) {
-    const { g, c, t } = indTex; g.fillStyle = "#121317"; g.fillRect(0, 0, c.width, c.height);
-    g.strokeStyle = "#3a3d45"; g.lineWidth = 4;
-    [[70, 90, 50], [180, 70, 38], [180, 130, 30]].forEach(([x, y, r]) => { g.beginPath(); g.arc(x, y, r, 0, 7); g.stroke(); });
-    if (locked) { g.fillStyle = "#ff6b6b"; g.font = `700 26px ${FONT}`; g.textAlign = "center"; g.fillText("잠금", 128, 168); }
-    t.needsUpdate = true;
-  }
-  drawTV(null); drawOven(null); drawFridge([]); drawInduction(false);
 
-  // ---------- tags ----------
-  const TAGS = {
-    light_01: { name: "거실 조명", at: new THREE.Vector3(-4.2, 3.15, -4.4) },
-    display_01: { name: "TV", at: new THREE.Vector3(-1.8, 2.5, -4.3) },
-    fridge_01: { name: "냉장고 화면", at: new THREE.Vector3(6.4, 2.35, -3.5) },
-    oven_01: { name: "오븐", at: new THREE.Vector3(4.4, 0.95, -3.6) },
-    cooktop_01: { name: "인덕션", at: new THREE.Vector3(2.65, 1.25, -4.1) },
-    plug_kettle: { name: "전기포트 플러그", at: new THREE.Vector3(5.25, 1.45, -4.15) },
-    cleaner_01: { name: "로봇청소기", at: null },
-  };
-  for (const tag of Object.values(TAGS)) {
-    tag.el = document.createElement("div"); tag.el.className = "tag"; tagsRoot.appendChild(tag.el);
-    tag.changedAt = 0; tag.text = "";
-  }
-  let reasons = {};
-  let lastValues = {};
-
-  function statusText(id, v) {
-    switch (id) {
-      case "light_01":
-        if (v.power === false) return "꺼짐";
-        if (v.color?.hue != null) return `색 ${v.color.hue}° · 밝기 ${v.color.brightness}`;
-        return v.color?.kelvin ? `${v.color.kelvin}K (평소)` : "켜짐";
-      case "display_01": { const m = moodOf(v.play_mood); return m ? SCENES[m] || m : "꺼짐"; }
-      case "fridge_01": return noticeText(v.show_notice).length ? "안내 표시 중" : "평소 화면";
-      case "oven_01": return v.preset ? `${v.preset.temp_c}℃ ${v.preset.minutes}분 대기` : v.in_use ? "사용 중" : "꺼짐";
-      case "cooktop_01": return v.child_lock ? "잠금" : v.in_use ? "사용 중" : "평소";
-      case "plug_kettle": return v.power === false ? "전원 차단" : "켜짐";
-      case "cleaner_01": return v.job_status === "running" || v.in_use ? "청소 중" : "충전 중";
-      default: return "";
+  const backing = new THREE.Mesh(new THREE.PlaneGeometry(120,120),new THREE.ShadowMaterial({opacity:.16}));
+  backing.rotation.x=-Math.PI/2;backing.position.y=-.48;backing.receiveShadow=true;scene.add(backing);
+  box(13.6,.42,7.95,material("#d6b498"),0,-.22,0,.12);
+  box(13.35,.12,7.73,stone,0,-.026,0,.08);
+  const planks=["#c48e61","#c5956b","#c99768","#d0a276","#d2a576","#c99265"].map(color=>material(color));
+  for(let row=0;row<19;row++){
+    const z=-3.54+row*.393;
+    let x=-4.96,n=0;
+    while (x<1.46){
+      const width=Math.min(n===0?[.74,1.29,1.82][row%3]:2.1,1.46-x);
+      if(width>.035) box(width-.015,.04,.378,planks[(row*7+n*3)%planks.length],x+width/2,.055,z,.009);
+      x+=width;n++;
     }
   }
+  for(let row=0;row<10;row++) for(let col=0;col<7;col++){
+    box(.724,.028,.735,(row+col)%4===0?stone:tile,1.852+col*.74,.052,-3.38+row*.75,.006);
+  }
+  for(let row=0;row<10;row++) for(let col=0;col<3;col++){
+    box(.52,.025,.737,(row+col)%2===0?tile:stone,-6.35+col*.535,.052,-3.38+row*.75,.006);
+  }
 
-  const target = { light: new THREE.Color("#ffd9a8"), lightI: 18, door: 0 };
-  let cleaning = false;
+  box(13.38,2.70,.22,wall,0,1.37,-3.85,.05);
+  box(13.35,.15,.076,ivory,0,.15,-3.705,.012);
+  box(.22,2.7,2.3,wall,-6.61,1.37,-2.78,.035);
+  box(1.43,2.36,.10,oak,-5.73,1.23,-3.685,.048);
+  box(1.16,2.13,.06,wood,-5.73,1.23,-3.61,.045);
+  box(.028,1.78,.023,oak,-6.11,1.23,-3.57,.006);
+  const entrySignal=material("#694a3c",{emissive:"#f0bc82",emissiveIntensity:0});
+  box(.10,.24,.06,entrySignal,-5.29,1.17,-3.53,.02);
+  box(1.22,.035,.79,textile("#7e6654","#b5a089"),-5.73,.07,-2.19,.06);
+  box(1.36,.46,.49,oak,-5.77,.38,1.93,.06);
+  box(1.25,.12,.53,cream,-5.77,.66,1.93,.045);
+  for(const x of [-6.26,-5.27]) box(.10,.22,.36,wood,x,.16,1.93,.02);
+  const parcel=group(-5.68,.08,-1.65);
+  box(.54,.42,.46,material("#bf8e5f"),0,.22,0,.035,parcel);
+  box(.089,.427,.474,cream,0,.23,0,.006,parcel);
+  box(.20,.012,.12,ivory,.12,.449,.055,.003,parcel);
+
+  const windowGlass=material("#d6e5de",{emissive:"#d7e5e3",emissiveIntensity:.35});
+  box(2.03,1.49,.05,wood,-3.85,1.68,-3.697,.035);
+  box(1.84,1.31,.06,windowGlass,-3.85,1.68,-3.657,.03);
+  box(.05,1.33,.06,ivory,-3.85,1.68,-3.61,.02);
+  box(1.87,.06,.06,ivory,-3.85,1.72,-3.61,.01);
+  box(2.24,.10,.25,ivory,-3.85,.95,-3.60,.025);
+  for(let pleat=0;pleat<12;pleat++){
+    const x=-4.95+(pleat%6)*.077+(pleat>5?1.81:0);
+    box(.108,1.78,.11,pleat%2?ivory:cream,x,1.58,-3.51+(pleat%2)*.027,.037);
+  }
+  tube([[-5.02,2.52,-3.46],[-3.81,2.52,-3.46],[-2.60,2.52,-3.46]],.025,brass);
+
+  box(3.83,.052,2.64,textile("#d5b59d","#805f4c"),-1.77,.10,.46,.11);
+  const carpetLines=material("#ddc5ad");
+  for (const z of [-.69,1.61]) box(3.52,.008,.023,carpetLines,-1.77,.13,z,.002);
+  for(let i=0;i<40;i++) for(const z of [-.89,1.80]) box(.024,.012,.107,carpetLines,-3.55+i*.091,.119,z,.003);
+
+  const fabric=textile("#dfc5a8","#8c7355");
+  box(3.18,.36,.98,fabric,-1.86,.35,2.38,.14);
+  box(3.17,.64,.25,fabric,-1.86,.65,2.78,.09);
+  for(const x of [-3.30,-.42]){
+    box(.28,.49,1.10,fabric,x,.56,2.38,.09);
+    for(const z of [2.02,2.77]) box(.095,.22,.10,wood,x,.18,z,.022);
+  }
+  for(const x of [-2.56,-1.16]){
+    box(1.32,.16,.69,fabric,x,.543,2.25,.09);
+    const cushion=box(1.30,.48,.19,fabric,x,.798,2.57,.08);cushion.rotation.x=-.11;
+  }
+  const pillow=box(.44,.43,.22,linen,-2.98,.83,2.47,.09);pillow.rotation.z=-.19;
+  const pillow2=box(.43,.40,.23,sage,-.79,.81,2.49,.09);pillow2.rotation.z=.23;
+  const throwFold=box(.52,.052,.53,textile("#e9d2a8","#aa8669"),-.62,.835,2.50,.019);
+  throwFold.rotation.z=-.08;
+  const coffee=disk(.76,.09,oak,-1.69,.57,.54);coffee.scale.set(1.25,1,.71);
+  for(const [x,z] of [[-2.06,.38],[-1.26,.37],[-1.69,.78]]) disk(.055,.45,wood,x,.31,z,scene,.068);
+  box(.37,.047,.26,cream,-1.93,.64,.54,.01).rotation.y=.16;
+  box(.31,.033,.22,sage,-1.94,.68,.54,.01).rotation.y=.10;
+  disk(.115,.078,ivory,-1.36,.66,.45,scene,.075);
+  disk(.082,.005,wood,-1.36,.702,.45);
+  function plant(x,y,z,scale){
+    const plantGroup=group(x,y,z);plantGroup.scale.setScalar(scale);
+    disk(.24,.38,linen,0,.23,0,plantGroup,.18);disk(.215,.016,wood,0,.423,0,plantGroup);
+    for(let i=0;i<8;i++){
+      const angle=i*2.399, dx=Math.cos(angle)*(.22+i*.016), dz=Math.sin(angle)*(.22+i*.016), top=.68+(i%4)*.105;
+      tube([[0,.43,0],[dx*.35,top-.11,dz*.35],[dx,top,dz]],.014,foliage[0],plantGroup);
+      const leaf=sphere(.092,.036,.23,foliage[i%3],dx,top,dz,plantGroup);leaf.rotation.set(.35-i*.08,angle,.10);
+    }
+  }
+  plant(1.00,.075,-1.96,1.35);plant(-4.45,.075,2.90,.79);
+
+  box(2.27,.48,.60,oak,-.72,.35,-3.15,.055);
+  for(let i=0;i<3;i++){
+    const x=-1.44+i*.72;
+    box(.68,.35,.026,wood,x,.36,-2.84,.025);
+    for(let slat=0;slat<8;slat++) box(.024,.30,.021,oak,x-.26+slat*.072,.36,-2.818,.006);
+  }
+  for(const x of [-1.52,.13]) box(.16,.11,.40,wood,x,.12,-3.14,.03);
+  const tvTexture=canvasTexture(1024,576);
+  const tvMaterial=new THREE.MeshBasicMaterial({map:tvTexture.texture,color:"#ffffff",toneMapped:false});
+  box(2.25,1.28,.10,dark,-.70,1.52,-3.48,.057);
+  plane(2.12,1.16,tvMaterial,-.70,1.52,-3.419);
+  const tvReflect = new THREE.PointLight("#df83bd",0,4,2);
+  tvReflect.position.set(-.72,1.53,-3.17);scene.add(tvReflect);
+
+  const pendant = group(-1.42,2.73,-.23);
+  mesh(new THREE.LatheGeometry([
+    new THREE.Vector2(.10,.16),new THREE.Vector2(.16,.16),new THREE.Vector2(.19,.09),
+    new THREE.Vector2(.49,-.17),new THREE.Vector2(.49,-.22),new THREE.Vector2(.46,-.23),
+    new THREE.Vector2(.16,.08),new THREE.Vector2(.10,.10)
+  ],48),material("#f3d6af",{side:THREE.DoubleSide}),0,0,0,pendant);
+  const lampSource=material("#ffe4b4",{emissive:"#ffe4b4",emissiveIntensity:0});
+  disk(.43,.016,lampSource,0,-.22,0,pendant);
+  disk(.053,.47,brass,0,.37,0,pendant);
+  disk(.15,.061,brass,0,.61,0,pendant);
+  const lamp=new THREE.PointLight("#ffcf99",0,9,2);
+  lamp.position.set(-1.42,2.44,-.23);scene.add(lamp);
+
+  const spillTexture=canvasTexture(256,256,(ctx,w,h)=>{
+    const grad=ctx.createRadialGradient(w/2,h/2,1,w/2,h/2,w/2);
+    grad.addColorStop(0,"rgba(255,255,255,.92)");grad.addColorStop(.44,"rgba(255,255,255,.42)");grad.addColorStop(1,"rgba(255,255,255,0)");
+    ctx.fillStyle=grad;ctx.fillRect(0,0,w,h);
+  });
+  spillTexture.paint();
+  function lightPatch(w,h,x,y,z,flat) {
+    const surface=new THREE.MeshBasicMaterial({map:spillTexture.texture,transparent:true,depthWrite:false,opacity:0,polygonOffset:true,polygonOffsetFactor:-2,toneMapped:false});
+    const patch=plane(w,h,surface,x,y,z);
+    if(flat) patch.rotation.x=-Math.PI/2;
+    return surface;
+  }
+  const floorSpill=lightPatch(6.0,5.8,-1.55,.145,-.17,true);
+  const wallSpill=lightPatch(4.8,3.1,-1.28,1.45,-3.726,false);
+
+  box(.53,.19,.30,dark,.82,.16,-2.82,.055);
+  const cleaner=group(.82,.064,-2.59);
+  disk(.275,.098,dark,0,.062,0,cleaner);disk(.264,.064,ivory,0,.125,0,cleaner);
+  disk(.082,.052,steel,-.07,.171,-.053,cleaner);disk(.058,.014,dark,-.07,.200,-.053,cleaner);
+  const vacuumLed=material("#778875",{emissive:"#85bfb6",emissiveIntensity:.3});
+  disk(.020,.007,vacuumLed,.088,.159,.03,cleaner);
+  const dock = cleaner.position.clone();
+  const trailMaterial = new THREE.MeshBasicMaterial({color:"#66715f",transparent:true,opacity:.62});
+  const cleaningTrail = [];
+  const route = [[.61,-2.27],[.42,-1.73],[.53,-.70],[.94,.38],[.71,1.21],[.44,1.88],[.61,2.80]];
+  const routeCurve=new THREE.CatmullRomCurve3(route.map(([x,z])=>new THREE.Vector3(x,.078,z)));
+  for(let i=0;i<=22;i++){
+    const point=routeCurve.getPoint(i/22);
+    const dot=disk(.020,.009,trailMaterial,point.x,point.y,point.z);dot.castShadow=false;cleaningTrail.push(dot);
+  }
+
+  const cabinet=material("#aba68b");
+  box(4.31,.87,.98,cabinet,3.72,.52,-3.10,.047);
+  box(4.43,.105,1.09,ivory,3.72,1.015,-3.08,.047);
+  box(4.45,.34,.036,stone,3.73,1.235,-3.712,.010);
+  for(let i=0;i<14;i++) box(.012,.29,.016,tile,1.66+i*.314,1.245,-3.685,.003);
+  for(const x of [1.96,2.52,3.09,4.51,5.04,5.56]){
+    box(.51,.72,.048,cabinet,x,.54,-2.585,.033);
+    box(.496,.676,.019,sage,x,.54,-2.556,.023);
+    box(.397,.562,.019,cabinet,x,.54,-2.543,.018);
+    box(.17,.022,.049,brass,x,.795,-2.505,.008);
+  }
+
+  box(1.18,.063,.65,glass,2.24,1.088,-3.03,.034);
+  function ring(radius,stroke,s,x,y,z) {
+    const object=mesh(new THREE.TorusGeometry(radius,stroke,8,42),s,x,y,z);
+    object.rotation.x=-Math.PI/2;return object;
+  }
+  const burner=material("#60576a");
+  ring(.157,.009,burner,2.00,1.124,-3.00);
+  ring(.107,.008,burner,2.43,1.124,-3.13);
+  ring(.079,.008,burner,2.50,1.124,-2.88);
+  const lockMaterial=material("#9c5c54",{emissive:"#ef7852",emissiveIntensity:0});
+  const lockIcon=box(.12,.012,.096,lockMaterial,2.25,1.128,-2.755,.010);
+  const lockShackle=ring(.039,.011,lockMaterial,2.25,1.13,-2.807);
+
+  box(1.05,.73,.14,dark,3.73,.59,-2.569,.052);
+  box(.93,.47,.053,glass,3.73,.49,-2.477,.036);
+  const ovenWindow=material("#392f42",{roughness:.29,emissive:"#f3bd69",emissiveIntensity:0});
+  box(.82,.35,.015,ovenWindow,3.73,.49,-2.447,.048);
+  box(.76,.039,.064,steel,3.73,.711,-2.42,.012);
+  const ovenTexture=canvasTexture(600,150);
+  const ovenScreen=new THREE.MeshBasicMaterial({map:ovenTexture.texture,toneMapped:false});
+  plane(.65,.14,ovenScreen,3.73,.846,-2.488);
+
+  box(.21,.27,.12,ivory,5.14,1.27,-3.53,.027);
+  const plugLed=material("#778875",{emissive:"#78d6ae",emissiveIntensity:0});
+  disk(.025,.012,plugLed,5.14,1.29,-3.452).rotation.x=Math.PI/2;
+  tube([[5.14,1.17,-3.45],[5.23,1.08,-3.40],[5.38,1.11,-3.28]],.022,dark);
+  disk(.203,.059,dark,5.43,1.10,-3.16);
+  disk(.154,.39,material("#d1a37c"),5.43,1.32,-3.16,scene,.176);
+  disk(.154,.035,brass,5.43,1.522,-3.16);disk(.046,.05,wood,5.43,1.558,-3.16);
+  tube([[5.55,1.44,-3.16],[5.67,1.43,-3.16],[5.67,1.22,-3.16],[5.55,1.22,-3.16]],.033,dark);
+  tube([[5.30,1.31,-3.13],[5.22,1.39,-3.12],[5.20,1.47,-3.11]],.041,brass);
+
+  box(.95,2.20,1.04,steel,6.12,1.17,-3.23,.08);
+  box(.91,1.57,.075,ivory,6.12,1.48,-2.665,.046);
+  box(.91,.55,.075,ivory,6.12,.382,-2.665,.046);
+  box(.034,.44,.069,steel,5.79,1.39,-2.603,.014);
+  box(.38,.034,.070,steel,6.09,.56,-2.603,.013);
+  const fridgeTexture=canvasTexture(360,420);
+  const fridgeScreen=new THREE.MeshBasicMaterial({map:fridgeTexture.texture,toneMapped:false});
+  box(.37,.47,.034,dark,6.18,1.64,-2.616,.025);
+  plane(.329,.426,fridgeScreen,6.18,1.64,-2.595);
+
+  const tableTop=disk(.82,.094,oak,4.15,.86,1.50);tableTop.scale.x=1.23;
+  disk(.18,.74,wood,4.15,.44,1.50,scene,.25);disk(.36,.08,wood,4.15,.13,1.50);
+  disk(.22,.065,ivory,4.15,.938,1.53,scene,.14);
+  for(const [x,z,rotation] of [[4.03,2.69,0],[2.87,1.27,Math.PI/2],[5.43,1.55,-Math.PI/2]]){
+    const chair=group(x,.08,z);chair.rotation.y=rotation;
+    box(.61,.09,.58,oak,0,.49,0,.047,chair);
+    box(.61,.37,.095,sage,0,.86,.255,.037,chair);
+    for(const a of [-.23,.23])for(const b of [-.21,.21])disk(.038,b > 0 ? .76 : .45,wood,a,b > 0 ? .38 : .23,b,chair,.031);
+  }
+
+  const anchors = {
+    cleaner_01: [.82, .52, -2.50], light_01: [-1.42, 2.51, -.23], display_01: [-.70, 2.17, -3.41],
+    cooktop_01: [2.28, 1.43, -2.79], oven_01: [3.74, 1.00, -2.40],
+    fridge_01: [6.13, 2.14, -2.55], plug_kettle: [5.25, 1.72, -3.00],
+  };
+  const projected = new THREE.Vector3();
+  const cleanPosition = new THREE.Vector3();
+  const goalCamera = new THREE.Vector3();
+  const goalTarget = new THREE.Vector3();
+  const currentCamera = new THREE.Vector3();
+  const currentTarget = new THREE.Vector3();
+  const targetLamp = new THREE.Color("#ffd29a");
+  const currentLamp = targetLamp.clone();
+  const previous = new Map();
+  const labels = new Map();
+  let spill = 0, targetSpill = 0, targetIntensity = 0;
+  let jobRunning = false, cleanSince = 0, tvScene;
+  let entrance = "";
+  let zoom = 1, targetZoom = 1, hasDirection = false;
+  let viewport = 1, viewWidth = 0, viewHeight = 0, request = 0, readyAt = 0;
+
+  parcel.visible = false;
+  lockIcon.visible = lockShackle.visible = false;
+  cleaningTrail.forEach((dot) => { dot.visible = false; });
+  const castle = new Image();
+  castle.onload = () => {
+    if (tvScene === "kids_party") {
+      paintTv();
+      queue();
+    }
+  };
+  castle.src = "/demo/assets/castle.jpg";
+
+  const moods = { kids_party: "어린이 파티", party: "파티", calm: "차분한 분위기", cinema: "영화" };
+  const tvColors = {
+    kids_party: ["#dec2de", "#795184"], party: ["#e7a4ad", "#ad496e"],
+    calm: ["#c6e0c7", "#587c78"], cinema: ["#b0add6", "#444076"],
+  };
+
+  function paintTv() {
+    tvTexture.paint((ctx, w, h) => {
+      const gradient = ctx.createLinearGradient(0, 0, w, h);
+      const [start, end] = tvColors[tvScene] || ["#292633", "#191822"];
+      gradient.addColorStop(0, start);
+      gradient.addColorStop(1, end);
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, w, h);
+      if (tvScene === "kids_party" && castle.naturalWidth) {
+        const scale = Math.max(w / castle.naturalWidth, h / castle.naturalHeight);
+        const width = castle.naturalWidth * scale, height = castle.naturalHeight * scale;
+        ctx.drawImage(castle, (w - width) / 2, (h - height) / 2, width, height);
+      } else if (tvScene) {
+        ctx.fillStyle = "#fff9ed";
+        ctx.font = '600 80px "IBM Plex Sans KR", sans-serif';
+        ctx.textAlign = "center";
+        ctx.fillText(moods[tvScene] || tvScene, w / 2, h / 2, w - 80);
+      }
+    });
+  }
+
+  function paintOven({ preset, in_use, job_status }) {
+    const standby = Boolean(preset && !in_use && job_status === "idle");
+    ovenWindow.emissiveIntensity = in_use ? .65 : 0;
+    ovenTexture.paint((ctx, w, h) => {
+      ctx.fillStyle = "#282632";
+      ctx.fillRect(0, 0, w, h);
+      if (!preset || (!standby && !in_use)) return;
+      ctx.fillStyle = "#ffdfaa";
+      ctx.font = "600 75px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(`${preset.temp_c}°  ${preset.minutes}m`, w / 2, 101);
+    });
+    if (in_use) return "사용 중";
+    if (standby) return `${preset.temp_c}℃ · ${preset.minutes}분 대기`;
+    return job_status === "completed" ? "사용 완료" : "대기 설정 없음";
+  }
+
+  function paintFridge(notice) {
+    fridgeTexture.paint((ctx, w, h) => {
+      ctx.fillStyle = notice ? "#edf0dc" : "#2b2c2b";
+      ctx.fillRect(0, 0, w, h);
+      if (!notice) return;
+      ctx.fillStyle = "#385447";
+      ctx.font = '600 34px "IBM Plex Sans KR", sans-serif';
+      ctx.fillText("냉장고 안내", 22, 58);
+      ctx.fillRect(22, 79, w - 44, 3);
+      ctx.font = '500 25px "IBM Plex Sans KR", sans-serif';
+      let line = "", y = 122;
+      for (const char of notice) {
+        if (ctx.measureText(line + char).width > w - 44) {
+          ctx.fillText(line, 22, y);
+          line = "";
+          y += 37;
+        }
+        line += char;
+      }
+      ctx.fillText(line, 22, y);
+    });
+  }
+
+  function paintLight({ power, color }) {
+    const hsv = power && hsvColor(color || {});
+    const warmHue = Math.min(44, 27 + ((color?.kelvin ?? 3000) - 2700) / 38);
+    const tint = hsv || `hsl(${warmHue}, 90%, 76%)`;
+    targetLamp.set(tint);
+    targetIntensity = power ? (hsv ? 87 * color.brightness / 70 : 26) : 0;
+    targetSpill = hsv ? color.brightness / 100 : 0;
+    view.classList.toggle("has-color", targetSpill > 0);
+    view.style.setProperty("--glow-tint", tint);
+    if (power === false) return "꺼짐";
+    if (hsv) return `색조 ${color.hue}° · 밝기 ${color.brightness}`;
+    return color?.kelvin ? `${color.kelvin} K` : "켜짐";
+  }
+
+  const painters = {
+    light_01: paintLight,
+    display_01({ play_mood }) {
+      tvScene = play_mood?.scene ?? null;
+      paintTv();
+      tvReflect.intensity = tvScene === "kids_party" ? 12 : 0;
+      return moods[tvScene] || tvScene || "꺼짐";
+    },
+    oven_01: paintOven,
+    fridge_01({ show_notice }) {
+      paintFridge(show_notice);
+      return show_notice ? "보관·준비 안내" : "안내 없음";
+    },
+    cooktop_01({ child_lock, in_use }) {
+      lockIcon.visible = lockShackle.visible = child_lock === true;
+      lockMaterial.emissiveIntensity = child_lock ? .82 : 0;
+      return child_lock ? "잠금" : in_use ? "사용 중" : "잠금 해제";
+    },
+    plug_kettle({ power }) {
+      plugLed.color.set(power ? "#778875" : "#8a6c5b");
+      plugLed.emissive.set(power ? "#78d6ae" : "#b9946e");
+      plugLed.emissiveIntensity = power ? 1.4 : 0;
+      return power ? "전원 켜짐" : "전원 차단";
+    },
+    cleaner_01({ job_status, in_use, clean }) {
+      const running = job_status === "running" || in_use === true;
+      if (running && !jobRunning) cleanSince = performance.now();
+      jobRunning = running;
+      vacuumLed.emissiveIntensity = running ? 1.7 : .3;
+      if (!running) {
+        cleaner.position.copy(dock);
+        cleaningTrail.forEach((dot) => { dot.visible = false; });
+      }
+      return running ? `${clean?.room || ""} 청소 중`.trim() : job_status === "completed" ? "청소 완료" : "충전 위치";
+    },
+  };
+  paintTv();
+  paintOven({});
+  paintFridge(null);
 
   function update(snapshot) {
-    const now = performance.now();
-    for (const d of snapshot.devices) {
-      const v = d.values, id = d.logical_id;
-      const key = JSON.stringify(v);
-      const changed = lastValues[id] !== undefined && lastValues[id] !== key;
-      lastValues[id] = key;
-      if (id === "light_01") {
-        if (v.power === false) { target.light.set("#222"); target.lightI = 2; }
-        else if (v.color?.hue != null) {
-          target.light.copy(hsvColor(v.color.hue, v.color.saturation, v.color.brightness));
-          target.lightI = 14 + (v.color.brightness || 70) * 0.25;
-          document.documentElement.style.setProperty("--house-accent", `#${target.light.getHexString()}`);
-        } else { target.light.copy(kelvinColor(v.color?.kelvin || 3000)); target.lightI = 18; }
+    let changed = false;
+    const live = new Map(snapshot.devices.map((device) => [device.logical_id, device]));
+    for (const [id, paint] of Object.entries(painters)) {
+      const device = live.get(id);
+      const values = device?.values || {};
+      const observed = Object.keys(values).length > 0;
+      const quality = !device || device.available === false ? "연결 끊김"
+        : !observed ? "확인할 수 없음" : device.observation === "stale" ? "이전 관측" : "";
+      const key = JSON.stringify([values, quality]);
+      const old = previous.get(id);
+      if (old === key) continue;
+      previous.set(id, key);
+      changed = true;
+
+      const detail = paint(values);
+      const active = {
+        light_01: Boolean(values.color?.hue != null && values.power) || values.power === false,
+        display_01: Boolean(values.play_mood), oven_01: Boolean(values.preset || values.in_use),
+        fridge_01: Boolean(values.show_notice), cooktop_01: Boolean(values.child_lock || values.in_use),
+        plug_kettle: values.power === false, cleaner_01: jobRunning,
+      }[id];
+      const existing = labels.get(id);
+      if (!quality && !active && old === undefined && !existing) continue;
+      const label = existing || document.createElement("span");
+      label.className = "marker";
+      label.textContent = [DEVICES[id].name, observed && detail, quality].filter(Boolean).join(" · ");
+      label.classList.toggle("theme", Boolean(id === "light_01" && targetSpill || id === "display_01" && tvScene === "kids_party"));
+      if (!existing) {
+        labels.set(id, label);
+        overlay.append(label);
       }
-      if (id === "display_01") drawTV(moodOf(v.play_mood));
-      if (id === "oven_01") drawOven(v.preset);
-      if (id === "fridge_01") drawFridge(noticeText(v.show_notice));
-      if (id === "cooktop_01") drawInduction(v.child_lock);
-      if (id === "plug_kettle") kettle.material.color.set(v.power === false ? "#7a7a7a" : "#d8d8d8");
-      if (id === "cleaner_01") cleaning = v.job_status === "running" || !!v.in_use;
-      const tag = TAGS[id];
-      if (!tag) continue;
-      if (changed) tag.changedAt = now;
-      const on = now - tag.changedAt < 10000;
-      const why = on && reasons[id] ? `<span class="why">${reasons[id]}</span>` : "";
-      const html = `<b>${tag.name}</b><span class="st">${statusText(id, v)}</span>${why}`;
-      if (html !== tag.text) { tag.el.innerHTML = html; tag.text = html; }
-      tag.el.classList.toggle("on", on);
+    }
+    if (changed) {
+      renderer.shadowMap.needsUpdate = true;
+      queue();
     }
   }
 
-  function setMoment(id) {
-    const inHouse = id === "guests" || id === "party";
-    guests.forEach(([m]) => (m.visible = inHouse));
-    pkg.visible = !["delivery", "before", "guests", "party", "end"].includes(id);
-    target.door = id === "delivery" || id === "guests" ? 1.25 : 0;
-    hud.innerHTML = "";
+  function project(id) {
+    if (id === "cleaner_01" && jobRunning) projected.set(cleaner.position.x, .50, cleaner.position.z);
+    else projected.fromArray(anchors[id]);
+    projected.project(camera);
+    return { x: (projected.x + 1) / 2, y: (1 - projected.y) / 2 };
   }
 
-  const camFrom = { p: new THREE.Vector3(), t: new THREE.Vector3() };
-  const camTo = { p: new THREE.Vector3(), t: new THREE.Vector3() };
-  let camT = 1;
-  function focus(name) {
-    const [p, t] = CAMS[name] || CAMS.overview;
-    camFrom.p.copy(camera.position); camFrom.t.copy(controls.target);
-    const k = camera.aspect < 1 ? 1.7 : camera.aspect < 1.45 ? 1.3 : 1;
-    camTo.t.set(...t); camTo.p.set(...p).sub(camTo.t).multiplyScalar(k).add(camTo.t);
-    camT = reduce ? 1 : 0;
-    if (reduce) { camera.position.copy(camTo.p); controls.target.copy(camTo.t); }
+  function projection() {
+    const extent = Math.max(5.35, 7.56 / viewport) / zoom;
+    Object.assign(camera, { left: -extent * viewport, right: extent * viewport,
+      top: extent, bottom: -extent, near: .1, far: 100 });
+    camera.updateProjectionMatrix();
+  }
+
+  function syncViewport() {
+    const width = stage.clientWidth, height = stage.clientHeight;
+    if (!width || !height) return false;
+    const scale = stage.getBoundingClientRect().width / width;
+    const ratio = Math.min(devicePixelRatio * scale, 1.5);
+    if (width === viewWidth && height === viewHeight && ratio === renderer.getPixelRatio()) return false;
+    viewWidth = width;
+    viewHeight = height;
+    renderer.setPixelRatio(ratio);
+    renderer.setSize(width, height, false);
+    viewport = width / height;
+    projection();
+    return true;
   }
 
   function resize() {
-    const w = stage.clientWidth, h = stage.clientHeight;
-    if (!w || !h) return;
-    renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+    syncViewport();
+    queue();
   }
-  new ResizeObserver(resize).observe(stage);
 
-  const v = new THREE.Vector3(); let vacA = 0; const clock = new THREE.Clock();
-  const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
-  function frame() {
-    const dt = Math.min(clock.getDelta(), 0.05);
-    if (camT < 1) {
-      camT = Math.min(1, camT + dt / 1.4); const e = ease(camT);
-      camera.position.lerpVectors(camFrom.p, camTo.p, e); controls.target.lerpVectors(camFrom.t, camTo.t, e);
+  function focus(setting, { instant = false } = {}) {
+    goalCamera.fromArray(setting.eye);
+    goalTarget.fromArray(setting.aim);
+    targetZoom = setting.zoom;
+    if (!hasDirection || instant || motion.matches) {
+      currentCamera.copy(goalCamera);
+      currentTarget.copy(goalTarget);
+      zoom = targetZoom;
+      orient();
     }
-    controls.update();
-    roomLight.color.lerp(target.light, 0.06); roomLight.intensity += (target.lightI - roomLight.intensity) * 0.06;
-    glowMat.emissive.copy(roomLight.color);
-    doorPivot.rotation.y += (target.door - doorPivot.rotation.y) * 0.08;
-    if (cleaning) { vacA += dt * 0.7; vac.position.set(-1.8 + Math.cos(vacA) * 2.3, 0, 0.4 + Math.sin(vacA) * 1.5); vac.rotation.y = -vacA; }
-    else vac.position.lerp(VAC_DOCK, 0.05);
-    const w = stage.clientWidth, h = stage.clientHeight;
-    for (const tag of Object.values(TAGS)) {
-      const p = (tag.at ? v.copy(tag.at) : v.set(vac.position.x, 0.6, vac.position.z)).project(camera);
-      if (p.z > 1 || Math.abs(p.x) > 1.1 || Math.abs(p.y) > 1.1) { tag.el.style.opacity = 0; continue; }
-      tag.el.style.opacity = "";
-      tag.el.style.transform = `translate(-50%,-100%) translate(${(p.x * 0.5 + 0.5) * w}px,${(-p.y * 0.5 + 0.5) * h - 6}px)`;
+    hasDirection = true;
+    queue();
+  }
+
+  function setMoment(entry) {
+    if (entry === entrance) return;
+    entrance = entry;
+    parcel.visible = entry === "package";
+    entrySignal.emissiveIntensity = entry ? .9 : 0;
+    renderer.shadowMap.needsUpdate = true;
+    queue();
+  }
+
+  function queue() {
+    readyAt = performance.now() + 1350;
+    if (!request) request = requestAnimationFrame(frame);
+  }
+
+  function orient() {
+    projection();
+    camera.position.copy(currentCamera);
+    camera.lookAt(currentTarget);
+    camera.updateMatrixWorld();
+  }
+
+  function frame(now) {
+    request = 0;
+    if (!hasDirection || !stage.clientWidth) return;
+    syncViewport();
+    const amount = motion.matches || now > readyAt ? 1 : .093;
+    currentCamera.lerp(goalCamera, amount);
+    currentTarget.lerp(goalTarget, amount);
+    zoom = THREE.MathUtils.lerp(zoom, targetZoom, amount);
+    orient();
+    currentLamp.lerp(targetLamp, amount);
+    lamp.color.copy(currentLamp);
+    lamp.intensity = THREE.MathUtils.lerp(lamp.intensity, targetIntensity, amount);
+    lampSource.color.copy(currentLamp).lerp(reflectedWhite, .45);
+    lampSource.emissive.copy(currentLamp);
+    lampSource.emissiveIntensity = lamp.intensity / 26;
+    spill = THREE.MathUtils.lerp(spill, targetSpill, amount);
+    floorGlow.copy(currentLamp).lerp(reflectedWhite, .18);
+    floorSpill.color.copy(floorGlow);
+    floorSpill.opacity = spill * .46;
+    wallSpill.color.copy(floorGlow);
+    wallSpill.opacity = spill * .33;
+    if (jobRunning) {
+      const progress = motion.matches ? .30 : ((now - cleanSince) % 6800) / 3400;
+      const distance = 1 - Math.abs(1 - progress);
+      routeCurve.getPoint(distance, cleanPosition);
+      cleaner.position.set(cleanPosition.x, .064, cleanPosition.z);
+      cleaningTrail.forEach((dot, index) => { dot.visible = index / 22 <= distance; });
+      renderer.shadowMap.needsUpdate = true;
     }
     renderer.render(scene, camera);
-    requestAnimationFrame(frame);
+    for (const [id, label] of labels) {
+      const { x, y } = project(id);
+      label.style.left = `${x * 100}%`;
+      label.style.top = `${y * 100}%`;
+    }
+    if (!motion.matches && (now < readyAt || jobRunning)) request = requestAnimationFrame(frame);
   }
-  camera.position.set(...CAMS.overview[0]); controls.target.set(...CAMS.overview[1]);
-  resize();
-  frame();
 
-  return { resize, update, focus, setMoment, setReasons: (r) => (reasons = r || {}) };
+  new ResizeObserver(resize).observe(stage);
+  return { resize, update, focus, setMoment, anchor: project };
 }

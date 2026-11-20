@@ -1,26 +1,14 @@
-/* Design tokens for the demo shell. Change the look here, not in demo.css. */
-:root {
-  --bg: #121419;
-  --panel: #1a1d24;
-  --panel-2: #222631;
-  --line: #2c313c;
-  --fg: #ece9e4;
-  --muted: #9aa0ab;
-  --accent: #ff8fc0;        /* concept colour; the house page also takes it from the plan */
-  --accent-2: #b99cff;
-  --ok: #7fd3a9;
-  --wait: #f2c46d;
-  --sim: #94b6ff;
-
-  --f-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
-  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
-
-  --r-s: 8px;
-  --r-m: 12px;
-  --r-l: 20px;
-  --gap: 16px;
-
-  --t-fast: 180ms;
-  --t-slow: 520ms;
-  color-scheme: dark;
+/* Palette, typography, spacing and motion for the demo stage. */
+:root{
+  color-scheme:light;
+  --paper:#f6f5ee;--surface:#fffefa;--soft:#edeee5;--cream:#f0e9dc;--ink:#192e28;
+  --green:#265446;--green-deep:#1e4036;--green-soft:#e4ede3;--green-line:#8baa99;
+  --muted:#51665c;--line:#d4dbcf;--white:#fff;--frame:#253c33;--black:#111b16;
+  --pink-ink:#783c5a;--pink-soft:#f5e2eb;--pink-edge:#d8aac2;
+  --shadow:0 22px 64px #23362b17,0 5px 14px #23362b12;
+  --sans:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --size-note:19px;--size-body:24px;--size-subtitle:34px;--size-heading:60px;--size-hero:86px;
+  --space-xs:8px;--space-sm:16px;--space-md:24px;--space-lg:32px;--space-xl:48px;
+  --radius-sm:12px;--radius:22px;--radius-lg:32px;--gutter:76px;
+  --ease:cubic-bezier(.22,.73,.23,1);--settle:560ms;--phone-motion:780ms;--handoff-motion:1800ms;--stage-width:1920px;--stage-height:1080px;
 }

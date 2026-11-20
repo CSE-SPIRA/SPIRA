@@ -5,12 +5,14 @@ small allow-listed proxy, the World snapshot, and the Hub's read-only state.
 Nothing here decides what the house does.
 """
 
+import asyncio
 import os
 import re
 from pathlib import Path
+from typing import Literal
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
 DEMO_UI = Path(__file__).with_name("ui") / "demo"
@@ -26,6 +28,7 @@ SERVER_READS = (
     re.compile(r"^v1/episodes/ep_[A-Za-z0-9_]+/rationale$"),
     re.compile(r"^v1/households/h_[A-Za-z0-9_]+/cards$"),
 )
+SAMPLE_EPISODES = {"birthday": "ep_9031", "groceries": "ep_9150"}
 
 
 def demo_config():
@@ -44,6 +47,8 @@ def same_origin(request: Request):
 
 
 def mount_demo(application: FastAPI, apply_home_event):
+    fixture_share = asyncio.Lock()
+
     @application.get("/demo")
     def demo_page():
         return FileResponse(DEMO_UI / "index.html", media_type="text/html")
@@ -81,7 +86,11 @@ def mount_demo(application: FastAPI, apply_home_event):
         return JSONResponse(upstream.json(), status_code=upstream.status_code)
 
     @application.post("/demo/api/order")
-    async def share_order(request: Request, images: list[UploadFile]):
+    async def share_order(
+        request: Request,
+        images: list[UploadFile],
+        sample: Literal["birthday", "groceries"] | None = Form(default=None),
+    ):
         """Stand-in for the phone's share: send the screenshots as the App would."""
         same_origin(request)
         cfg = demo_config()
@@ -91,23 +100,31 @@ def mount_demo(application: FastAPI, apply_home_event):
             raise HTTPException(400, "One to three screenshots")
         household = request.app.state.world.profile.household_id
         auth = {"Authorization": f"Bearer {cfg['token']}"}
+        files = [
+            ("images", (image.filename or "order.png", await image.read(),
+                        image.content_type or "image/png"))
+            for image in images
+        ]
         async with httpx.AsyncClient(timeout=30) as client:
-            if cfg["fixture_episode"]:
-                # The fixture replays a recorded judgment; it must be told which one.
-                await client.post(
-                    f"{cfg['server']}/_fixture/scene/next-order", headers=auth,
-                    json={"episode_id": cfg["fixture_episode"],
-                          "starts_in_seconds": int(os.getenv("DEMO_STARTS_IN") or "90")},
+            async def upload():
+                return await client.post(
+                    f"{cfg['server']}/v1/orders", headers=auth,
+                    data={"household_id": household}, files=files,
                 )
-            files = [
-                ("images", (image.filename or "order.png", await image.read(),
-                            image.content_type or "image/png"))
-                for image in images
-            ]
-            upstream = await client.post(
-                f"{cfg['server']}/v1/orders", headers=auth,
-                data={"household_id": household}, files=files,
-            )
+
+            if cfg["fixture_episode"]:
+                # The fixture holds a single selection for the next upload.
+                async with fixture_share:
+                    selection = await client.post(
+                        f"{cfg['server']}/_fixture/scene/next-order", headers=auth,
+                        json={"episode_id": SAMPLE_EPISODES[sample] if sample else cfg["fixture_episode"],
+                              "starts_in_seconds": int(os.getenv("DEMO_STARTS_IN") or "90")},
+                    )
+                    if sample and not selection.is_success:
+                        raise HTTPException(502, "Could not select the fixture order")
+                    upstream = await upload()
+            else:
+                upstream = await upload()
         return JSONResponse(upstream.json(), status_code=upstream.status_code)
 
     @application.get("/demo/api/hub")

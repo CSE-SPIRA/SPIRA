@@ -1,27 +1,35 @@
 {
-  "$comment": "The storyboard as data. Page 1 stages follow the Server pipeline (S1-S5); page 2 steps are world events. Text and order can change here without touching code.",
+  "$comment": "Reasoning stages, house navigation and camera views. Timeline times come from live Hub records and the card.",
   "reason": [
-    {"id": "share", "node": 0, "title": "주문 공유", "lead": "쿠팡 주문 화면을 SPIRA 앱으로 공유합니다. 묻지 않습니다."},
-    {"id": "extract", "node": 1, "title": "주문 추출", "lead": "스크린샷에서 물건과 수량을 읽습니다. 화면에 적힌 것만."},
-    {"id": "context", "node": 2, "title": "맥락 붙이기", "lead": "이 집의 평소 주문, 캘린더, 그리고 비슷한 다른 집 주문(합성 지식 베이스)을 찾아 붙입니다."},
-    {"id": "intent", "node": 3, "title": "의도 판단", "lead": "물건이 가장 강한 근거입니다. 상황 칸은 근거가 있을 때만 채웁니다."},
-    {"id": "tasks", "node": 4, "title": "할 일 생성", "lead": "그날 집에 필요한 것을 찾고, 이 집 기기로 채울 수 있는 것만 할 일로 만듭니다."},
-    {"id": "plan", "node": 5, "title": "계획 확정 → 집 허브", "lead": "알림 카드는 한 번. 계획은 집 허브로 넘어가고, 그다음은 집이 합니다."}
+    {"id": "share", "node": 0, "title": "장보기 사진을 보내요", "lead": "주문 화면을 SPIRA에 공유해요."},
+    {"id": "extract", "node": 1, "title": "사진에서 물건을 읽어요", "readyTitle": "사진에서 물건 {count}종을 읽었어요", "lead": "상품 이름과 종류, 수량을 정리해요."},
+    {"id": "context", "node": 2, "title": "이 집의 평소와 비교했어요", "lead": "가까운 일정과 낯선 물건을 보고, 비슷한 다른 집 주문도 찾아봤어요."},
+    {"id": "intent", "node": 3, "title": "무엇을 준비하는 주문일까요?", "lead": "물건과 일정이 가리키는 상황을 하나씩 연결했어요."},
+    {"id": "tasks", "node": 4, "title": "이 집에서 할 일", "lead": "필요한 준비마다 이 집에서 도울 수 있는 기기를 골랐어요."},
+    {"id": "plan", "node": 5, "title": "앱에서 준비 계획을 확인해요", "readyTitle": "준비 카드가 왔어요", "noCardTitle": "이번 주문에는 준비 카드가 없어요", "lead": "무엇을 할지, 언제 할지 확인해요."},
+    {"id": "hub", "node": 6, "title": "계획을 집으로", "lead": "집 허브는 계획을 받아 언제 기기가 움직일지 확인해요."}
   ],
   "flow": [
-    {"title": "주문", "sub": "앱 공유"},
-    {"title": "추출", "sub": "S1"},
-    {"title": "맥락", "sub": "S2 · RAG"},
-    {"title": "의도", "sub": "S3"},
-    {"title": "할 일", "sub": "S4"},
-    {"title": "계획", "sub": "S5 → 허브"}
+    {"title": "주문"}, {"title": "추출"}, {"title": "맥락"}, {"title": "의도"},
+    {"title": "할 일"}, {"title": "계획"}, {"title": "허브"}
   ],
+  "samples": {
+    "birthday": {"episode": "ep_9031"},
+    "groceries": {"episode": "ep_9150"}
+  },
+  "cameras": {
+    "overview": {"eye": [8.5, 10.6, 17.4], "aim": [-0.10, 0.76, 0], "zoom": 1},
+    "fridge": {"eye": [6.9, 9.8, 17.9], "aim": [0.22, 0.80, -0.13], "zoom": 1},
+    "kitchen": {"eye": [7.0, 10.5, 17.8], "aim": [0.25, 0.85, -0.19], "zoom": 1.02},
+    "party": {"eye": [8.7, 9.6, 17.9], "aim": [-0.38, 0.86, -0.19], "zoom": 1.03},
+    "oven": {"eye": [6.5, 9.6, 17.9], "aim": [0.22, 0.83, -0.20], "zoom": 1.02}
+  },
   "house": [
-    {"id": "plan", "time": "목 21:11", "title": "계획 받음", "camera": "overview"},
-    {"id": "delivery", "time": "금 19:30", "title": "택배 들여옴", "action": "delivery", "camera": "fridge"},
-    {"id": "before", "time": "토 13:30", "title": "손님 오기 전", "camera": "living"},
-    {"id": "guests", "time": "토 13:52", "title": "첫 손님 도착", "action": "guests_arrive", "camera": "party"},
-    {"id": "party", "time": "토 14:00", "title": "파티 시간", "camera": "kitchen"},
-    {"id": "end", "time": "토 17:50", "title": "파티 끝", "action": "event_end", "camera": "overview"}
+    {"id": "plan", "title": "계획 받음", "heading": "계획을 받은 집", "lead": "집 허브가 받은 계획과 실행 결과를 장부에서 확인해요.", "camera": "overview"},
+    {"id": "delivery", "title": "택배 들여옴", "heading": "택배를 들여왔어요", "lead": "택배 신호가 들어오면 허브가 냉장고에 안내를 보낼 수 있어요.", "action": "delivery", "event": "package.brought_in", "entry": "package", "camera": "fridge"},
+    {"id": "before", "title": "손님 오기 전", "heading": "손님을 맞을 준비", "lead": "예약한 준비와 주방의 현재 상태를 살펴봐요.", "camera": "kitchen"},
+    {"id": "guests", "title": "첫 손님 도착", "heading": "첫 손님이 왔어요", "lead": "현관 신호 뒤에 거실이 어떻게 달라졌는지 살펴봐요.", "action": "guests_arrive", "event": "guest_arrived", "entry": "guest", "camera": "party"},
+    {"id": "party", "title": "파티 시간", "heading": "주방의 오븐을 살펴봐요", "lead": "오븐에 설정이 들어오면 온도와 시간이 표시돼요.", "camera": "oven"},
+    {"id": "end", "title": "파티 끝", "heading": "파티가 끝났어요", "lead": "행사 종료 뒤 집에 남은 상태와 허브의 결과를 살펴봐요.", "action": "event_end", "event": "event_end", "camera": "overview"}
   ]
 }
