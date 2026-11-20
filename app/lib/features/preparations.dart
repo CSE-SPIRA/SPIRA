@@ -181,12 +181,7 @@ class _PreparationCard extends StatelessWidget {
               alignment: WrapAlignment.spaceBetween,
               children: [
                 TextButton(
-                  onPressed: () => openRationale(
-                    context,
-                    app,
-                    card.episodeId,
-                    cardId: card.cardId,
-                  ),
+                  onPressed: () => openRationale(context, app, card.episodeId),
                   child: const Text('WHY · 이유 보기'),
                 ),
                 if (!card.stopped &&
@@ -222,18 +217,7 @@ class _PreparationLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final timing = switch ((line.when?.time, line.when?.event)) {
-      (final time?, _) =>
-        card.startsAt != null &&
-                DateTime.parse(time)
-                    .isAtSameMomentAs(DateTime.parse(card.startsAt!))
-            ? '일정이 시작될 때'
-            : '${seoulWeekdayTime(time, relativeTo: card.startsAt)}에',
-      (_, wire.TriggerEvent.GUEST_ARRIVED) => '손님이 오면',
-      (_, wire.TriggerEvent.EVENT_END) => '일정이 끝나면',
-      (_, wire.TriggerEvent.PACKAGE_BROUGHT_IN) => '택배를 집 안으로 들이면',
-      _ => null,
-    };
+    final timing = lineTimeLabel(line);
     final state = visibleLineLabel(line.state);
     final pending = app.linePending(card, line);
     final on = line.state == wire.LineState.OFF;
@@ -249,14 +233,28 @@ class _PreparationLine extends StatelessWidget {
         if (outcome != null) Text(outcome),
         if (note != null && note != outcome) Text(note),
         if (pending) const StatusMessage('항목 변경 확인 중…'),
-        if (app.canSwitch(card, line))
-          TextButton(
-            onPressed: pending ? null : () => app.switchLine(card, line),
-            child: Text(
-              on ? '항목 켜기' : '항목 끄기',
-              semanticsLabel: '${line.text} ${on ? '켜기' : '끄기'}',
+        Wrap(
+          spacing: 8,
+          children: [
+            TextButton(
+              onPressed: () => openRationale(
+                context,
+                app,
+                card.episodeId,
+                focus: (cardId: card.cardId, taskId: line.taskId),
+              ),
+              child: Text('왜?', semanticsLabel: '${line.text} · 왜?'),
             ),
-          ),
+            if (app.canSwitch(card, line))
+              TextButton(
+                onPressed: pending ? null : () => app.switchLine(card, line),
+                child: Text(
+                  on ? '항목 켜기' : '항목 끄기',
+                  semanticsLabel: '${line.text} ${on ? '켜기' : '끄기'}',
+                ),
+              ),
+          ],
+        ),
       ],
     );
   }

@@ -12,6 +12,7 @@ import 'features/settings.dart';
 import 'features/setup.dart';
 import 'platform/android_bridge.dart';
 import 'platform/google_calendar.dart';
+import 'theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -73,20 +74,9 @@ class SpiraApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = ThemeData(
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: const Color(0xFF1D634D),
-        surface: const Color(0xFFF7F8F3),
-      ),
-      scaffoldBackgroundColor: const Color(0xFFF7F8F3),
-      cardTheme: const CardThemeData(color: Colors.white, elevation: 0),
-      inputDecorationTheme: const InputDecorationTheme(
-        border: OutlineInputBorder(),
-      ),
-    );
     return MaterialApp(
       title: 'SPIRA',
-      theme: theme,
+      theme: buildAppTheme(),
       locale: const Locale('ko'),
       supportedLocales: const [Locale('ko')],
       // ignore: deprecated_member_use

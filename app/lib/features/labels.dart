@@ -33,7 +33,7 @@ String eventLabel(wire.TriggerEvent event) => switch (event) {
   wire.TriggerEvent.PACKAGE_BROUGHT_IN => '택배를 집 안으로 들이는 때',
 };
 
-String deviceLabel(String type) => switch (type) {
+String deviceLabel(String type, {String? unknownLabel}) => switch (type) {
   'cleaner' => '로봇청소기',
   'light' => '조명',
   'display' => '화면',
@@ -42,7 +42,7 @@ String deviceLabel(String type) => switch (type) {
   'fridge' => '냉장고',
   'smart_plug' => '스마트 플러그',
   'speaker' => '스피커',
-  _ => type,
+  _ => unknownLabel ?? type,
 };
 
 String commandLabel(String command) => switch (command) {
@@ -73,30 +73,29 @@ String seoulDateTime(String raw) {
 
 const koreanWeekdays = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일'];
 
-String seoulWeekdayTime(String raw, {String? relativeTo}) {
+String seoulWeekdayTime(String raw) {
   final dt = _seoulTime(raw);
-  final reference = relativeTo == null ? null : _seoulTime(relativeTo);
-  final date =
-      reference != null &&
-          dt.year == reference.year &&
-          dt.month == reference.month &&
-          dt.day == reference.day
-      ? ''
-      : '${dt.month}월 ${dt.day}일 ';
-  return '$date${koreanWeekdays[dt.weekday - 1]} ${koreanClock(dt.hour, dt.minute)}';
+  return '${dt.month}월 ${dt.day}일 ${koreanWeekdays[dt.weekday - 1]} ${_koreanClock(dt.hour, dt.minute)}';
 }
 
-String koreanClock(
-  int hour,
-  int minute, {
-  bool showPeriod = true,
-  bool showHourUnit = true,
-}) {
-  final period = showPeriod ? (hour < 12 ? '오전 ' : '오후 ') : '';
+String _koreanClock(int hour, int minute) {
+  final period = hour < 12 ? '오전 ' : '오후 ';
   final clockHour = hour % 12 == 0 ? 12 : hour % 12;
-  final units = switch (minute) {
-    0 => showHourUnit ? '시' : '',
-    _ => '시 $minute분',
-  };
-  return '$period$clockHour$units';
+  return '$period$clockHour시${minute == 0 ? '' : ' $minute분'}';
+}
+
+String? lineTimeLabel(wire.LineElement? line) =>
+    switch ((line?.when?.time, line?.when?.event)) {
+      (final time?, _) => _lineClock(_seoulTime(time)),
+      (_, wire.TriggerEvent.GUEST_ARRIVED) => '손님이 오면',
+      (_, wire.TriggerEvent.EVENT_END) => '일정이 끝나면',
+      (_, wire.TriggerEvent.PACKAGE_BROUGHT_IN) => '택배를 집 안으로 들이면',
+      _ => null,
+    };
+
+String _lineClock(DateTime seoul) {
+  final day = koreanWeekdays[seoul.weekday - 1][0];
+  final hour = seoul.hour.toString().padLeft(2, '0');
+  final minute = seoul.minute.toString().padLeft(2, '0');
+  return '$day $hour:$minute';
 }
