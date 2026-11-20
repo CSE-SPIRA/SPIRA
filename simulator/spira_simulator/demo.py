@@ -14,6 +14,7 @@ from typing import Literal
 import httpx
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
+from spira_contracts.plan import Action
 
 DEMO_UI = Path(__file__).with_name("ui") / "demo"
 ASSET = re.compile(r"^[a-z0-9_.\-]+\.(?:html|css|js|json|svg|png|jpg|woff2)$")
@@ -29,6 +30,7 @@ SERVER_READS = (
     re.compile(r"^v1/households/h_[A-Za-z0-9_]+/cards$"),
 )
 SAMPLE_EPISODES = {"birthday": "ep_9031", "groceries": "ep_9150"}
+COMMAND_PROPERTIES = {"color": "color", "play_mood": "play_mood", "set_cook_standby": "preset"}
 
 
 def demo_config():
@@ -44,6 +46,38 @@ def same_origin(request: Request):
     origin = request.headers.get("origin")
     if origin is not None and origin != str(request.base_url).rstrip("/"):
         raise HTTPException(403, "Use the demo page")
+
+
+def received_actions(body: dict) -> dict:
+    """Project the latest received plans, including actions that have left the waiting list."""
+    versions = {row["plan_id"]: row["plan_version"] for row in body.get("ledger", [])
+                if row["kind"] == "plan"}
+    plans = {plan_id: {} for plan_id in versions}
+    for work in body.get("waiting", []):
+        plan_id = work["plan_id"]
+        if versions.get(plan_id) == work["plan_version"]:
+            plans[plan_id][work["task_id"]] = list(work["actions"])
+
+    for story in body.get("task_stories", []):
+        plan_id, task_id, steps = story["plan_id"], story["task_id"], story["steps"]
+        if plan_id not in plans or not any(
+            step["kind"] == "admitted" and step["plan_version"] == versions[plan_id]
+            for step in steps
+        ):
+            continue
+        actions = plans[plan_id].setdefault(task_id, [])
+        known = {(action["device"], action["cmd"]) for action in actions}
+        for step in reversed(steps):
+            if step.get("phase") != "run":
+                continue
+            device, cmd = step["device"], step["cmd"]
+            if (device, cmd) in known:
+                continue
+            desired = step.get("desired") or {}
+            value = desired.get(COMMAND_PROPERTIES.get(cmd))
+            actions.append(Action(device=device, cmd=cmd, value=value).model_dump(exclude_none=True))
+            known.add((device, cmd))
+    return plans
 
 
 def mount_demo(application: FastAPI, apply_home_event):
@@ -132,10 +166,18 @@ def mount_demo(application: FastAPI, apply_home_event):
         cfg = demo_config()
         if not cfg["hub"]:
             raise HTTPException(503, "DEMO_HUB_URL is not set")
-        async with httpx.AsyncClient(timeout=5) as client:
-            upstream = await client.get(f"{cfg['hub']}/state")
-        body = upstream.json()
-        return {"ledger": body.get("ledger", []), "waiting": body.get("waiting", [])}
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                upstream = await client.get(f"{cfg['hub']}/state")
+            if not upstream.is_success:
+                raise HTTPException(502, "Hub state is unavailable")
+            body = upstream.json()
+        except (httpx.HTTPError, ValueError) as error:
+            raise HTTPException(502, "Hub state is unavailable") from error
+        return {
+            "ledger": body.get("ledger", []), "waiting": body.get("waiting", []),
+            "plan_actions": received_actions(body),
+        }
 
     @application.post("/demo/api/home/{action}")
     def home_event(action: str, request: Request):

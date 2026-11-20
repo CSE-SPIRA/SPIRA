@@ -10,6 +10,8 @@ export const DEVICES = {
   plug_kettle: { name: "전기포트 플러그", room: "kitchen" },
 };
 
+export const TV_SCENES = { kids_party: "어린이 파티", party: "파티", calm: "차분한 분위기", cinema: "영화" };
+
 export function hsvColor({ hue, saturation, brightness } = {}) {
   if (![hue, saturation, brightness].every(Number.isFinite)) return null;
   const value = brightness / 100;
@@ -353,7 +355,6 @@ export function createHouse(stage, overlay, view) {
   };
   castle.src = "/demo/assets/castle.jpg";
 
-  const moods = { kids_party: "어린이 파티", party: "파티", calm: "차분한 분위기", cinema: "영화" };
   const tvColors = {
     kids_party: ["#dec2de", "#795184"], party: ["#e7a4ad", "#ad496e"],
     calm: ["#c6e0c7", "#587c78"], cinema: ["#b0add6", "#444076"],
@@ -375,26 +376,26 @@ export function createHouse(stage, overlay, view) {
         ctx.fillStyle = "#fff9ed";
         ctx.font = '600 80px "IBM Plex Sans KR", sans-serif';
         ctx.textAlign = "center";
-        ctx.fillText(moods[tvScene] || tvScene, w / 2, h / 2, w - 80);
+        ctx.fillText(TV_SCENES[tvScene] || tvScene, w / 2, h / 2, w - 80);
       }
     });
   }
 
   function paintOven({ preset, in_use, job_status }) {
-    const standby = Boolean(preset && !in_use && job_status === "idle");
     ovenWindow.emissiveIntensity = in_use ? .65 : 0;
     ovenTexture.paint((ctx, w, h) => {
       ctx.fillStyle = "#282632";
       ctx.fillRect(0, 0, w, h);
-      if (!preset || (!standby && !in_use)) return;
+      if (!preset) return;
       ctx.fillStyle = "#ffdfaa";
       ctx.font = "600 75px monospace";
       ctx.textAlign = "center";
       ctx.fillText(`${preset.temp_c}°  ${preset.minutes}m`, w / 2, 101);
     });
-    if (in_use) return "사용 중";
-    if (standby) return `${preset.temp_c}℃ · ${preset.minutes}분 대기`;
-    return job_status === "completed" ? "사용 완료" : "대기 설정 없음";
+    const status = in_use ? "사용 중" : job_status === "completed" ? "사용 완료" : "";
+    const settings = preset && `${preset.temp_c}℃ · ${preset.minutes}분`;
+    if (status) return [status, settings].filter(Boolean).join(" · ");
+    return settings ? `${settings} 대기` : "대기 설정 없음";
   }
 
   function paintFridge(notice) {
@@ -440,7 +441,7 @@ export function createHouse(stage, overlay, view) {
       tvScene = play_mood?.scene ?? null;
       paintTv();
       tvReflect.intensity = tvScene === "kids_party" ? 12 : 0;
-      return moods[tvScene] || tvScene || "꺼짐";
+      return TV_SCENES[tvScene] || tvScene || "꺼짐";
     },
     oven_01: paintOven,
     fridge_01({ show_notice }) {
@@ -518,6 +519,36 @@ export function createHouse(stage, overlay, view) {
     else projected.fromArray(anchors[id]);
     projected.project(camera);
     return { x: (projected.x + 1) / 2, y: (1 - projected.y) / 2 };
+  }
+
+  function placeLabels() {
+    const gap = 8;
+    const placed = [];
+    // Measure in stage pixels, before the outer frame scales to the screen.
+    const markers = Array.from(labels, ([id, label]) => {
+      const { x, y } = project(id);
+      return { label, x: x * viewWidth, y: y * viewHeight, width: label.offsetWidth, height: label.offsetHeight };
+    });
+    for (const { label, x, y, width, height } of markers) {
+      const left = Math.max(gap, Math.min(x - width / 2, viewWidth - width - gap));
+      const lastTop = viewHeight - height - 44;
+      const clamp = (top) => Math.max(gap, Math.min(top, lastTop));
+      const preferred = clamp(y - height - 12);
+      const neighbors = placed.filter((box) => left < box.right + gap && left + width + gap > box.left);
+      const candidates = [preferred, clamp(y + 12), ...neighbors.flatMap(({ top, bottom }) => [
+        clamp(top - height - gap), clamp(bottom + gap),
+      ])];
+      candidates.sort((a, b) => Math.abs(a - preferred) - Math.abs(b - preferred));
+      const top = candidates.find((value) => neighbors.every((box) =>
+        value + height + gap <= box.top || value >= box.bottom + gap)) ?? preferred;
+      const bottom = top + height;
+      placed.push({ left, right: left + width, top, bottom });
+      label.style.left = `${left}px`;
+      label.style.top = `${top}px`;
+      label.style.setProperty("--leader-x", `${x - left}px`);
+      label.style.setProperty("--leader-top", `${Math.min(y - top, height)}px`);
+      label.style.setProperty("--leader-height", `${Math.max(top - y, y - bottom, 0)}px`);
+    }
   }
 
   function projection() {
@@ -612,11 +643,7 @@ export function createHouse(stage, overlay, view) {
       renderer.shadowMap.needsUpdate = true;
     }
     renderer.render(scene, camera);
-    for (const [id, label] of labels) {
-      const { x, y } = project(id);
-      label.style.left = `${x * 100}%`;
-      label.style.top = `${y * 100}%`;
-    }
+    placeLabels();
     if (!motion.matches && (now < readyAt || jobRunning)) request = requestAnimationFrame(frame);
   }
 

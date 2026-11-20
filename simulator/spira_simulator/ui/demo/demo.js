@@ -1,6 +1,7 @@
 // Reasoning uses the Server's app contract. House surfaces use World observations.
 import { createFlow } from "/demo/assets/flow.js";
-import { createHouse, DEVICES, hsvColor } from "/demo/assets/house.js";
+import { createHouse, DEVICES, hsvColor, TV_SCENES } from "/demo/assets/house.js";
+import { displayTime, storyTimeOffset } from "/demo/assets/story-time.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -9,13 +10,6 @@ const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
 const rows = (items, render) => items.map(render).join("");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const motion = matchMedia("(prefers-reduced-motion: reduce)");
-const clock = new Intl.DateTimeFormat("ko-KR", {
-  timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
-});
-const dayClock = new Intl.DateTimeFormat("ko-KR", {
-  timeZone: "Asia/Seoul", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
-});
-const weekday = (stamp) => stamp ? dayClock.format(new Date(stamp)) : "";
 const WAYS = { run: "실행", standby: "설정 대기", notice: "안내" };
 const EVENTS = { guest_arrived: "손님이 오면", event_end: "행사가 끝나면", "package.brought_in": "택배를 들여오면" };
 const FIELDS = { event: "행사", guests: "손님", activity: "활동", theme: "테마" };
@@ -54,9 +48,25 @@ function notice(text = "") {
   $("notice").textContent = text;
 }
 
-function whenText(when) {
+function storyOffset(cardId) {
+  if (!state.rationale) return null;
+  const cards = cardId ? state.cards.filter((card) => card.card_id === cardId) : state.cards;
+  for (const card of cards) {
+    const id = state.rationale.intents.find((intent) => intent.card_id === card.card_id)?.calendar_event_id;
+    const event = state.rationale.evidence.calendar.find((entry) => entry.id === id);
+    const offset = storyTimeOffset(event, card.starts_at);
+    if (offset !== null) return offset;
+  }
+  return null;
+}
+
+function demoTime(at, cardId) {
+  return displayTime(at, storyOffset(cardId));
+}
+
+function whenText(when, cardId) {
   if (!when) return "시간을 기다리는 중";
-  return when.time ? weekday(when.time) : EVENTS[when.event] || when.event;
+  return when.time ? demoTime(when.time, cardId) : EVENTS[when.event] || when.event;
 }
 
 function paintTheme(text, theme) {
@@ -71,6 +81,40 @@ function notices() {
 
 function cardReady() {
   return state.rationale && state.episode && state.episode.card_ids.every((id) => state.cards.some((card) => card.card_id === id));
+}
+
+function hubPlan() {
+  return state.hub?.plan_actions?.[state.episodeId];
+}
+
+function plannedLight() {
+  return Object.values(hubPlan() ?? {}).flat()
+    .find(({ device, cmd }) => device === "light_01" && cmd === "color")?.value;
+}
+
+function similarOrders(counts) {
+  return (counts ?? []).reduce((sum, { n }) => sum + n, 0);
+}
+
+function flowCounts() {
+  const { episode, rationale, cards } = state;
+  const items = episode?.items;
+  const excluded = rationale?.unbundled.length;
+  const plan = hubPlan();
+  return [
+    episode && "주문 1건",
+    episode && `물건 ${episode.item_count}`,
+    rationale && (rationale.evidence.kb_counts
+      ? `비슷한 주문 ${similarOrders(rationale.evidence.kb_counts)}`
+      : `일정 ${rationale.evidence.calendar.length}`),
+    rationale && [
+      items && `묶음 ${items.length - excluded} · 제외 ${excluded}`,
+      `의도 ${rationale.intents.length}`,
+    ].filter(Boolean).join("\n"),
+    rationale && `할 일 ${rationale.tasks.length}`,
+    cardReady() && `카드 ${cards.reduce((total, card) => total + card.lines.length, 0)}줄`,
+    plan && `기기 ${new Set(Object.values(plan).flat().map(({ device }) => device)).size}`,
+  ].map((count) => count || "");
 }
 
 function sampleOrder() {
@@ -121,7 +165,7 @@ function phoneCard(card) {
   const theme = state.rationale?.intents.find((intent) => intent.card_id === card.card_id)?.situation.theme;
   return `<div class="app-card"><h3>${paintTheme(card.text, theme)}</h3><ul>${rows(card.lines, (line) =>
     `<li><span class="app-check" aria-label="${line.checked ? "선택됨" : "꺼짐"}">${line.checked ? "✓" : "○"}</span>
-      <span>${esc(line.text)}<small>${esc(whenText(line.when))}</small></span></li>`)}</ul></div>`;
+      <span>${esc(line.text)}<small>${esc(whenText(line.when, card.card_id))}</small></span></li>`)}</ul></div>`;
 }
 
 function noticeCards() {
@@ -133,7 +177,7 @@ function renderPhone(scene) {
   const order = scene.id === "share";
   const items = state.episode?.items;
   const timestamp = plan && state.cards[0]?.updated_at || state.episode?.shared_at;
-  $("phone-time").textContent = timestamp ? clock.format(new Date(timestamp)) : "";
+  $("phone-time").textContent = displayTime(timestamp, plan ? storyOffset() : null, false);
   $("phone-order").textContent = plan ? "준비" : "주문";
   $("phone-order").setAttribute("aria-pressed", String(!state.mapOpen));
   $("phone-map").setAttribute("aria-pressed", String(state.mapOpen));
@@ -149,7 +193,7 @@ function renderPhone(scene) {
         <label>스크린샷 공유<input type="file" id="files" accept="image/png,image/jpeg" multiple${state.sharing ? " disabled" : ""}></label>
       </div>`;
   } else if (plan && state.cards.length) {
-    screen = `<div class="phone-head"><h2>준비 카드</h2><p>${esc(weekday(state.cards[0].updated_at))}</p></div>
+    screen = `<div class="phone-head"><h2>준비 카드</h2><p>${esc(demoTime(state.cards[0].updated_at, state.cards[0].card_id))}</p></div>
       ${rows(state.cards, phoneCard)}`;
   } else if (plan && cardReady()) {
     screen = `<div class="phone-head"><h2>${notices().length ? "냉장고 안내" : "준비 카드 없음"}</h2></div>${noticeCards()}`;
@@ -186,7 +230,7 @@ function calendarLabel(event) {
 
 function contextStage({ calendar, unusual_items: unusual, kb_counts, kb_examples, kb_note }) {
   const counts = kb_counts ?? [];
-  const total = counts.reduce((sum, entry) => sum + entry.n, 0);
+  const total = similarOrders(counts);
   const unusualItems = unusual?.items ?? [];
   return `<div class="context-grid">
     <div class="context-left">
@@ -250,26 +294,61 @@ function itemNotices() {
     `<article><b>${esc(item)}</b>${esc(text)}</article>`)}</div>` : "";
 }
 
+function taskTiming(task) {
+  const card = state.cards.find(({ card_id }) => card_id === task.card_id);
+  const when = card?.lines.find(({ task_id }) => task_id === task.task_id)?.when;
+  if (!when) return "";
+  const end = whenText(when, card.card_id);
+  if (!when.time || storyOffset(card.card_id) === null) return end;
+  const minutes = Math.round((Date.parse(card.starts_at) - Date.parse(when.time)) / 60000);
+  const relative = minutes === 0 ? "같은 시각" : `${Math.abs(minutes)}분 ${minutes > 0 ? "전" : "후"}`;
+  return `${demoTime(card.starts_at, card.card_id)} 일정 → ${relative} → ${end}`;
+}
+
+function translation(tasks, intents) {
+  const plan = hubPlan();
+  if (!plan) return "";
+  const actions = tasks.flatMap(({ task_id }) => plan[task_id] ?? []);
+  const light = actions.find(({ cmd }) => cmd === "color")?.value;
+  const scene = actions.find(({ cmd }) => cmd === "play_mood")?.value?.scene;
+  const oven = actions.find(({ cmd }) => cmd === "set_cook_standby")?.value;
+  const color = hsvColor(light ?? undefined);
+  const values = [
+    color && `<li><strong>조명</strong><span class="swatch" style="--concept:${color}" aria-hidden="true"></span>
+      색조 ${light.hue}° · 채도 ${light.saturation} · 밝기 ${light.brightness}</li>`,
+    scene && `<li><strong>TV</strong>${esc(TV_SCENES[scene] || scene)} 화면</li>`,
+    Number.isFinite(oven?.temp_c) && Number.isFinite(oven?.minutes) &&
+      `<li><strong>오븐</strong>${oven.temp_c}℃ · ${oven.minutes}분</li>`,
+  ].filter(Boolean);
+  if (!values.length) return "";
+  const moodTask = tasks.find(({ task_id }) => plan[task_id]?.some(({ cmd }) => cmd === "color" || cmd === "play_mood"));
+  const theme = intents.find(({ card_id }) => card_id === moodTask?.card_id)?.situation.theme;
+  return `<aside class="palette">${theme ? `<small>고른 분위기</small><h2>${esc(theme)}</h2>
+    <span class="palette-arrow" aria-hidden="true">↓</span>` : ""}<ul>${values.join("")}</ul></aside>`;
+}
+
 function tasksStage({ tasks, intents }) {
   if (!tasks.length) return `<div class="panel"><h2>집 준비 0개 · 냉장고 안내 ${notices().length}개</h2></div>${itemNotices()}`;
-  const lightTask = tasks.find((task) => task.devices.some(({ type }) => type === "light"));
-  const theme = lightTask && intents.find((intent) => intent.card_id === lightTask.card_id)?.situation.theme;
-  return `<div class="task-layout${theme ? "" : " without-palette"}"><div class="task-table" role="table" aria-label="준비할 일">
+  const palette = translation(tasks, intents);
+  return `<div class="task-layout${palette ? "" : " without-palette"}"><div class="task-table" role="table" aria-label="준비할 일">
     <div class="task-row" role="row"><span role="columnheader">필요한 준비</span><span aria-hidden="true"></span>
       <span role="columnheader">할 일</span><span role="columnheader">기기</span><span role="columnheader">방식</span></div>
-    ${rows(tasks, (task) => `<div class="task-row" role="row">
-      <span class="task-need" role="cell">${esc(task.need)}</span><span class="task-arrow" aria-hidden="true">→</span>
-      <span class="task-line" role="cell">${esc(task.line)}</span>
-      <span class="task-device" role="cell">${esc(task.devices.map(({ id, type }) =>
-        DEVICES[id]?.name || DEVICE_TYPES[type] || type).join(" · "))}</span>
-      <span class="task-way" role="cell">${esc(WAYS[task.way] || task.way)}</span>
-    </div>`)}
-  </div>${theme ? `<aside class="palette"><small>고른 분위기</small><h2>${esc(theme)}</h2></aside>` : ""}</div>${itemNotices()}`;
+    ${rows(tasks, (task) => {
+      const timing = taskTiming(task);
+      return `<div class="task-row" role="row">
+        <span class="task-need" role="cell">${esc(task.need)}</span><span class="task-arrow" aria-hidden="true">→</span>
+        <span class="task-line" role="cell">${esc(task.line)}${timing ? `<small>${esc(timing)}</small>` : ""}</span>
+        <span class="task-device" role="cell">${esc(task.devices.map(({ id, type }) =>
+          DEVICES[id]?.name || DEVICE_TYPES[type] || type).join(" · "))}</span>
+        <span class="task-way" role="cell">${esc(WAYS[task.way] || task.way)}</span>
+      </div>`;
+    })}
+  </div>${palette}</div>${itemNotices()}`;
 }
 
 function planStage() {
   if (state.cards.length) return rows(state.cards, (card) => `<section class="plan-card">
-    <ul class="plan-list">${rows(card.lines, (line) => `<li><time>${esc(whenText(line.when))}</time>
+    <ul class="plan-list">${rows(card.lines, (line) => `<li><time>${esc(whenText(line.when, card.card_id))}</time>
       <span>${esc(line.text)}${line.note ? `<small>${esc(line.note)}</small>` : ""}</span></li>`)}</ul>
   </section>`);
   return cardReady() ? (itemNotices() || '<p class="lead">이번 주문에는 준비 카드가 없어요.</p>')
@@ -289,7 +368,9 @@ function stageBody(scene) {
   if (scene.id === "tasks") return tasksStage(rationale);
   if (scene.id === "plan") return planStage();
   const label = rationale.intents.find((intent) => intent.situation.theme)?.situation.theme;
-  return `<div class="handoff-card"><span class="palette-dot" id="source-dot" aria-hidden="true"></span>
+  const color = hsvColor(plannedLight() ?? undefined);
+  return `<div class="handoff-card">${color ? `<span class="palette-dot" id="source-dot"
+    style="--concept:${color}" aria-hidden="true"></span>` : ""}
     <div>${esc(label || (notices().length ? "냉장고 안내" : "집 허브"))}</div></div>`;
 }
 
@@ -338,6 +419,7 @@ function renderReason() {
   const copy = $("stage-copy");
   const stepChanged = layout.dataset.stage !== scene.id;
   layout.dataset.stage = scene.id;
+  state.flow.setCounts(flowCounts());
   state.flow.setStage(scene.node);
   renderPhone(scene);
   const headline = ["share", "plan", "hub"].includes(scene.id);
@@ -453,7 +535,10 @@ async function readEpisode(id) {
     if (fingerprint !== previous) {
       previous = fingerprint;
       if (state.page === "reason" && !state.transitioning) renderReason();
-      if (state.page === "house") renderTimeline();
+      if (state.page === "house") {
+        renderLedger();
+        renderTimeline();
+      }
     }
     if (cardReady()) return;
     await sleep(1000);
@@ -507,7 +592,7 @@ function renderTimeline() {
   const current = scenes[state.homeStep];
   const at = houseTime(current);
   const arrived = current.id !== "plan" || at;
-  $("home-time").textContent = weekday(at);
+  $("home-time").textContent = demoTime(at);
   $("home-title").textContent = arrived ? current.heading : "집에서 이어지는 준비";
   $("home-caption").textContent = current.lead;
   $("home").setAttribute("aria-busy", String(state.homeBusy));
@@ -516,7 +601,7 @@ function renderTimeline() {
     ${index === state.homeStep ? 'aria-current="step"' : ""}
     ${index < state.homeStep ? 'class="past"' : ""}
     ${state.homeBusy || index > state.homeStep + 1 ? "disabled" : ""}>
-    <time>${esc(weekday(houseTime(scene)))}</time><span>${esc(scene.title)}</span></button></li>`);
+    <time>${esc(demoTime(houseTime(scene)))}</time><span>${esc(scene.title)}</span></button></li>`);
   if (steps.dataset.content !== markup) {
     const focused = steps.contains(document.activeElement);
     steps.dataset.content = markup;
@@ -555,17 +640,37 @@ async function goHouse(index) {
   renderTimeline();
 }
 
-const BY = { spira: "SPIRA", user: "사람", hub: "허브", unknown: "모름" };
+const BY = { spira: "SPIRA", user: "사람", hub: "허브", unknown: "주체 미확인" };
+
+function reportKey(row, report) {
+  return JSON.stringify([row.device, Date.parse(row.at), report.kind, report.id]);
+}
+
+function ledgerRows(ledger) {
+  const completions = new Set();
+  for (const row of ledger) {
+    if (row.kind !== "run" || row.status !== "completed" || !row.device) continue;
+    for (const report of row.reports ?? []) {
+      if (report.kind === "event") completions.add(reportKey(row, report));
+    }
+  }
+  return ledger.filter((row) => {
+    if (row.kind !== "event" || !row.event_type?.endsWith(".completed")) return true;
+    return !row.reports?.length || !row.reports.every((report) => completions.has(reportKey(row, report)));
+  });
+}
 
 function renderLedger() {
   $("ledger-label").textContent = state.config.hub ? "이 집이 본 일" : "허브 연결 없음";
   const ledger = $("ledger");
-  const markup = rows([...state.ledger].reverse(), (row) => {
+  const offset = storyOffset();
+  const markup = rows(ledgerRows(state.ledger).reverse(), (row) => {
     const reports = row.reports || [];
     const sent = reports.length ? (reports.every(({ delivered }) => delivered) ? "서버에 보냄" : "보내는 중") : "";
-    return `<li class="ledger-row"><div><time datetime="${esc(row.at)}">${esc(clock.format(new Date(row.at)))}</time>
+    const source = row.kind === "event" && row.device && row.by === "unknown" ? "기기 보고" : BY[row.by] || row.by;
+    return `<li class="ledger-row"><div><time datetime="${esc(row.at)}">${esc(displayTime(row.at, offset, offset !== null))}</time>
       <strong>${row.label === "—" ? "" : esc(row.label) + " · "}${esc(row.what)}</strong>
-      <span class="pill actor">${esc(BY[row.by] || row.by)}</span></div>
+      <span class="pill actor">${esc(source)}</span></div>
       ${sent ? `<p><span class="sent">${sent}</span></p>` : ""}</li>`;
   }) || '<li class="subtext">기록을 기다리고 있어요.</li>';
   if (ledger.dataset.content !== markup) {
@@ -577,6 +682,10 @@ function renderLedger() {
 function acceptHub(hub) {
   state.hub = hub;
   state.ledger = hub.ledger;
+  if (state.page === "reason") {
+    if (!state.transitioning) renderReason();
+    return;
+  }
   renderLedger();
   renderTimeline();
   const scene = timeline()[state.homeStep];
@@ -603,8 +712,14 @@ async function refreshHub() {
 
 async function pollHouse() {
   for (;;) {
-    if (state.page === "house" && !state.transitioning) {
-      await Promise.allSettled([refreshSnapshot(), ...(state.config.hub ? [refreshHub()] : [])]);
+    if (!state.transitioning) {
+      const inHouse = state.page === "house";
+      const stage = state.scenes.reason[state.step].id;
+      const reads = inHouse ? [refreshSnapshot()] : [];
+      if (state.config.hub && (inHouse || (state.episodeId && ["tasks", "plan", "hub"].includes(stage)))) {
+        reads.push(refreshHub());
+      }
+      await Promise.allSettled(reads);
     }
     await sleep(800);
   }
@@ -661,16 +776,14 @@ async function enterHouse() {
   renderControls();
   try {
     await waitForHandoff().catch(() => {});
+    renderReason();
     $("home").classList.add("introducing");
     $("home").inert = true;
     openHouseView();
     await refreshSnapshot().catch(() => {});
     const source = $("source-dot");
     const anchor = state.house?.anchor("light_01");
-    // The handoff uses the matching plan's live light action. The orb never paints the lamp.
-    const lightAction = state.hub?.waiting.filter((entry) => entry.plan_id === state.episodeId)
-      .flatMap((entry) => entry.actions).find(({ device, cmd }) => device === "light_01" && cmd === "color");
-    const color = lightAction ? hsvColor(lightAction.value) : null;
+    const color = hsvColor(plannedLight() ?? undefined);
     if (color && source && anchor && !motion.matches && Element.prototype.animate) {
       const frame = $("frame").getBoundingClientRect();
       const center = (box, x, y) => [
