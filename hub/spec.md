@@ -43,6 +43,9 @@ previously unseen device type MUST remain usable as data when its declared
 capabilities satisfy the contract; virtual success MUST NOT be presented as
 physical-device qualification. (PC-3, PC-4)
 
+**H2-R3.** `GET /home/onboarding/devices` MUST require the household Hub key
+in `X-API-Key` and return the full installed device list as a C-2 `Devices` body.
+
 ### H3. Plans, admission, and versions
 
 **H3-R1.** The Hub MUST pull and validate current C-1 plans without using current

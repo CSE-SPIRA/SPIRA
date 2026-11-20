@@ -43,6 +43,7 @@ def main():
 
 def run(args):
     household = os.environ["SPIRA_HOUSEHOLD"]
+    hub_key = os.environ["SPIRA_HUB_KEY"]
     store = Store(args.db, household)
     with store.db:
         hub_id = store.get("hub_id") or identity("hub")
@@ -57,7 +58,7 @@ def run(args):
     )
     http = httpx.AsyncClient(
         base_url=os.environ["SPIRA_SERVER_URL"], timeout=5,
-        headers={"X-API-Key": os.environ["SPIRA_HUB_KEY"], "Content-Type": "application/json"},
+        headers={"X-API-Key": hub_key, "Content-Type": "application/json"},
     )
     runtime = Runtime(store, Server(http, household), device, args.installation)
 
@@ -78,8 +79,8 @@ def run(args):
                     task.cancel()
 
     try:
-        uvicorn.run(create_app(runtime, lifespan=lifespan), host="127.0.0.1",
-                    port=args.port, access_log=False)
+        uvicorn.run(create_app(runtime, lifespan=lifespan, hub_key=hub_key),
+                    host="127.0.0.1", port=args.port, access_log=False)
     finally:
         store.db.close()
 

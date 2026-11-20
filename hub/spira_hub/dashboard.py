@@ -2,13 +2,16 @@
 
 from html import escape
 from pathlib import Path
+from secrets import compare_digest
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from spira_contracts.devices import Devices
+from spira_contracts.error import Error
 
-from .contracts import offset_time
+from .contracts import offset_time, wire
 from .dashboard_state import state_view
 from .store import encode
 
@@ -16,7 +19,7 @@ HOUSEHOLD_TIME = ZoneInfo("Asia/Seoul")
 BY_LABEL = {"spira": "SPIRA", "user": "사람", "unknown": "기기 보고", "hub": "집"}
 
 
-def create_app(runtime, *, lifespan=None):
+def create_app(runtime, *, lifespan=None, hub_key=None):
     app = FastAPI(title="SPIRA Home Hub", lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
     app.mount("/assets", StaticFiles(directory=Path(__file__).with_name("dashboard_assets")), name="dashboard-assets")
@@ -30,6 +33,18 @@ def create_app(runtime, *, lifespan=None):
     @app.get("/api/state")
     async def state():
         return state_view(runtime)
+
+    @app.get("/home/onboarding/devices", response_model=Devices, response_model_exclude_unset=True)
+    async def home_devices(request: Request, response: Response):
+        supplied = request.headers.get("X-API-Key", "")
+        if not hub_key or not compare_digest(supplied.encode(), hub_key.encode()):
+            error = Error(code="unauthorized", message="Household Hub key required")
+            return JSONResponse(wire(error), status_code=401)
+        if runtime.config_error:
+            error = Error(code="internal", message="Hub installation is unavailable")
+            return JSONResponse(wire(error), status_code=503)
+        response.headers["Cache-Control"] = "no-store"
+        return runtime.installation.devices
 
     @app.get("/", response_class=HTMLResponse)
     async def dashboard():
