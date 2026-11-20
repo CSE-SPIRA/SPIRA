@@ -28,10 +28,12 @@ PC-3, PC-5, PC-6)
 from the Server and MUST distinguish observed results from acknowledgements,
 unknown facts from success, and virtual, physical, fixture, and real-Server
 qualification. The Hub's home-key authenticated `GET /home/onboarding/devices`
-supplies the read-only inventory for 우리 집. The App MUST mark devices by the
-card's rationale tasks and show those devices alone with a note when the Hub
-list is unavailable. The App MUST NOT use the Hub or Simulator to control
-devices directly.
+supplies the read-only inventory for 우리 집. The App MUST mark the devices
+from the card's rationale tasks and the order's item tasks. Item-task
+executions identify their devices. For a fridge notice without an execution,
+the App uses the home's fridge by type when there is exactly one match. If the
+Hub list is unavailable, the App shows the identified devices with a note.
+The App MUST NOT use the Hub or Simulator to control devices directly.
 (PC-4, PC-5)
 
 **P-R3.** Until the real Server implements the App contract, the local App peer

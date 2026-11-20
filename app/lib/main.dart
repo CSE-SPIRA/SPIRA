@@ -39,6 +39,15 @@ void main() {
   const calendarClientId = String.fromEnvironment('SPIRA_GOOGLE_CLIENT_ID');
   const household = String.fromEnvironment('SPIRA_HOUSEHOLD_ID');
   const hubUrl = String.fromEnvironment('SPIRA_HUB_URL');
+  const peer = String.fromEnvironment('SPIRA_PEER', defaultValue: 'fixture');
+  final api = AppApi(baseUrl);
+  final homeHub = hubUrl.isEmpty ? null : HttpHomeHubOnboarding(hubUrl);
+  if (kIsWeb && peer == 'fixture') {
+    const demoToken = String.fromEnvironment('SPIRA_FIXTURE_APP_TOKEN');
+    const demoHomeKey = String.fromEnvironment('SPIRA_FIXTURE_HOME_KEY');
+    if (demoToken.isNotEmpty) api.token = demoToken;
+    if (demoHomeKey.isNotEmpty) homeHub?.useApiKey(demoHomeKey);
+  }
   wire.Devices? discovered;
   if (discovery.isNotEmpty) {
     try {
@@ -54,17 +63,12 @@ void main() {
   runApp(
     SpiraApp(
       app: AppController(
-        api: AppApi(baseUrl),
+        api: api,
         platform: android ? AndroidBridge() : null,
         store: PreferencesAppStore(),
-        homeHub: hubUrl.isEmpty ? null : HttpHomeHubOnboarding(hubUrl),
+        homeHub: homeHub,
         browserPreview: kIsWeb,
-        fixture:
-            const String.fromEnvironment(
-              'SPIRA_PEER',
-              defaultValue: 'fixture',
-            ) !=
-            'server',
+        fixture: peer != 'server',
         discovered: discovered,
         configuredHousehold: household.isEmpty ? null : household,
         readCalendar: reader,

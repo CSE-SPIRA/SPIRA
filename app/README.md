@@ -36,9 +36,9 @@ Optional Dart defines:
 - `SPIRA_HUB_URL` supplies the Hub's HTTP(S) origin. Enter the home key from
   **우리 집 접속 키 입력** in the toolbar. The App also uses the key returned
   when it creates a new home in the current session. The key stays in memory.
-  **우리 집** reads the Hub's devices by room and marks which ones the card's
-  rationale selected. If the Hub list is unavailable, it shows the selected
-  devices with a note.
+  **우리 집** reads the Hub's devices by room and marks those used by the card
+  and the order's item tasks. If the Hub list is unavailable, it shows the
+  identified devices with a note.
 - `SPIRA_GOOGLE_CLIENT_ID` enables Google Calendar setup. Register
   `org.cse_spira.spira_app` and the build's signing SHA-1 as an Android OAuth
   client, enable Calendar API, and set the Web client ID used by the Android
@@ -52,9 +52,32 @@ Optional Dart defines:
 
 ## Run in the browser
 
-In the `hub/seen-view-ui` checkout, or a checkout containing the demo shell and
-the Hub's read-only devices route, start the fixture stack from the repository
-root. It needs `uv` and `mosquitto`.
+From `app/`, point the launcher at a checkout containing `demo-up` and the Hub's
+read-only devices route, such as `hub/seen-view-ui`. It needs Python 3.9+, `uv`,
+`mosquitto`, Flutter, and Chrome for hot reload.
+
+```sh
+scripts/browser-demo --checkout /path/to/hub-seen-view-ui-checkout
+```
+
+Add `--build-serve` to build the app and serve it at `http://127.0.0.1:8732/`
+without opening Chrome. Omit `--checkout` if this worktree has both stack
+changes. The launcher starts the local fixture stack and proxy and supplies
+the committed fixture placeholders, so you can skip both token dialogs.
+Press Ctrl-C to stop the processes the launcher started.
+
+The launcher reuses a running stack on the demo port if it has its URL output.
+For a manually started stack, save its printed output and pass `--stack-log`
+with that file. Use `--demo-port`, `--proxy-port`, and `--web-port` to change
+the defaults of 8730, 8731, and 8732.
+
+Click **예시 주문으로 공유** and wait for fixture processing and the next card
+poll. Open **왜?** or **우리 집** on the preparation card. This preview uses the
+demo shell's sample order and skips Android sharing and Google Calendar.
+
+### Manual fallback
+
+Start the fixture stack from the stack checkout's repository root.
 
 ```sh
 simulator/scripts/demo-up --episode ep_9031
@@ -84,9 +107,7 @@ flutter run -d chrome --web-hostname 127.0.0.1 --web-port 8732 \
 Enter the fixture placeholder `demo` under **서버 접속 토큰 입력**. Under
 **우리 집 접속 키 입력**, enter the fixture home's `hub_api_key` from
 `contracts/fixtures/ep_9031/household.created.json`. Keep both tokens out of Dart
-defines. Click **예시 주문으로 공유** and wait for fixture processing and the next
-card poll. Open **왜?** or **우리 집** on the preparation card. This preview
-uses the demo shell's sample order and skips Android sharing and Google Calendar.
+defines for manual and real-server runs.
 
 ### Where to change what
 

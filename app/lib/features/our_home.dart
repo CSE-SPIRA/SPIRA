@@ -46,6 +46,34 @@ class _OurHome extends StatelessWidget {
               if (task.cardId == card.cardId)
                 for (final device in task.devices) device.id: device,
           };
+          final itemDeviceIds = <String>{};
+          final executions = result?.executions ?? const <wire.Execution>[];
+          for (final task
+              in result?.itemTasks ?? const <wire.ItemTaskElement>[]) {
+            final itemExecutions = executions.where(
+              (execution) => execution.taskId == task.taskId,
+            );
+            // The current item notice kinds (prep and storage) use the fridge.
+            if (itemExecutions.isEmpty && task.kind != null) {
+              final fridge = inventory?.devices
+                  .where((device) => device.type == 'fridge')
+                  .singleOrNull;
+              if (fridge != null) itemDeviceIds.add(fridge.id);
+            }
+            for (final execution in itemExecutions) {
+              itemDeviceIds.add(execution.device);
+              if (inventory == null && task.kind != null) {
+                selected.putIfAbsent(
+                  execution.device,
+                  () => wire.Device(
+                    id: execution.device,
+                    type: 'fridge',
+                    room: null,
+                  ),
+                );
+              }
+            }
+          }
           final devices = [
             if (inventory == null)
               for (final device in selected.values)
@@ -80,7 +108,10 @@ class _OurHome extends StatelessWidget {
                         ? _homeDeviceLabel(type)
                         : name,
                     type: type,
-                    selected: result == null ? null : selected.containsKey(id),
+                    selected: result == null
+                        ? null
+                        : selected.containsKey(id) ||
+                              itemDeviceIds.contains(id),
                   ),
                 );
           }

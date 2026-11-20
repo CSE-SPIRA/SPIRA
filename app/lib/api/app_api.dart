@@ -29,7 +29,7 @@ class AppApi {
   final Uri baseUrl;
   final http.Client _client;
 
-  /// Entered at runtime when the peer requires a bearer token.
+  /// In-memory bearer token for the active peer.
   String? token;
 
   String _household(String id) => '/v1/households/${Uri.encodeComponent(id)}';

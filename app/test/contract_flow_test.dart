@@ -1150,7 +1150,7 @@ void main() {
     },
   );
 
-  testWidgets('browser sample opens WHY and marks nine Hub devices by card', (
+  testWidgets('browser sample marks card devices and the order fridge', (
     tester,
   ) async {
     final peer = Peer();
@@ -1175,15 +1175,17 @@ void main() {
         'status': 'received',
       }, 202);
     };
-    (peer.rationales['ep_9031']!['tasks'] as List).add({
-      'task_id': 't_notice#7',
+    final rationale = peer.rationales['ep_9031']!;
+    rationale['executions'] = [];
+    (rationale['tasks'] as List).add({
+      'task_id': 't_oven#7',
       'card_id': 'nc_340',
-      'line': '냉장고 준비',
+      'line': '오븐 준비',
       'need': '별도 준비',
-      'way': 'notice',
+      'way': 'standby',
       'state': 'scheduled',
       'devices': [
-        {'id': 'fridge_01', 'type': 'fridge', 'room': '주방'},
+        {'id': 'oven_01', 'type': 'oven', 'room': '주방'},
       ],
     });
     final homeHub = HttpHomeHubOnboarding(
@@ -1247,10 +1249,10 @@ void main() {
     expect(find.text('현관'), findsOneWidget);
     expect(find.text('확인한 기기 9대'), findsOneWidget);
     expect(statusFor('로봇청소기', '준비에 선택됨'), findsOneWidget);
-    expect(statusFor('냉장고', '쉬는 중'), findsOneWidget);
+    expect(statusFor('냉장고', '준비에 선택됨'), findsOneWidget);
     expect(statusFor('공기청정기', '쉬는 중'), findsOneWidget);
     expect(statusFor('스타일러', '쉬는 중'), findsOneWidget);
-    expect(find.text('준비에 선택됨'), findsNWidgets(6));
+    expect(find.text('준비에 선택됨'), findsNWidgets(7));
 
     await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
@@ -1287,10 +1289,10 @@ void main() {
 
     expect(find.text('거실'), findsOneWidget);
     expect(find.text('주방'), findsOneWidget);
-    expect(find.text('확인한 기기 6대'), findsOneWidget);
-    expect(find.text('준비에 선택됨'), findsNWidgets(6));
+    expect(find.text('확인한 기기 7대'), findsOneWidget);
+    expect(find.text('준비에 선택됨'), findsNWidgets(7));
     expect(find.text('쉬는 중'), findsNothing);
-    expect(find.text('냉장고'), findsNothing);
+    expect(find.text('냉장고'), findsOneWidget);
     expect(find.textContaining('집 기기 목록을 받지 못해'), findsOneWidget);
   });
 
