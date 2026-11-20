@@ -1,37 +1,52 @@
 // ignore: deprecated_member_use
 import 'package:flutter/material.dart';
 
-import '../contracts.dart' as wire;
 import '../platform/home_hub_onboarding.dart';
 import 'labels.dart';
 
 const homeHubPending = '이 휴대폰에만 저장돼요. 아직 집에 있는 허브에 전달되지 않았어요.';
+
+String homeSaveLabel(HomeSaveResult result) => switch (result) {
+  HomeSaveResult.local => homeHubPending,
+  HomeSaveResult.sent => '집 허브에 보냈어요.',
+  HomeSaveResult.uploadPending => '집 허브에 저장했어요. 전송을 기다리고 있어요.',
+};
+
+String homeDeviceDescription(HomeDevice device) =>
+    '${deviceLabel(device.type)} · ${deviceKindLabel(device.substrate)}';
 
 class DeviceDraft {
   DeviceDraft(this.device, {HomeDeviceSettings? saved, Set<String>? delegated})
     : room = TextEditingController(
         text: saved == null ? device.room : saved.room,
       ),
-      name = TextEditingController(text: saved?.name ?? defaultName(device)),
-      delegated = {...(delegated ?? HomeDeviceSettings.selectable(device))};
+      name = TextEditingController(
+        text: saved == null ? defaultName(device) : saved.name,
+      ),
+      delegated = {...(delegated ?? device.selectableCommands)};
 
-  final wire.DeviceElement device;
+  final HomeDevice device;
   final TextEditingController room;
   final TextEditingController name;
   final Set<String> delegated;
 
-  static String defaultName(wire.DeviceElement device) {
+  static String defaultName(HomeDevice device) {
     final label = device.label?.trim();
     return label == null || label.isEmpty ? deviceLabel(device.type) : label;
   }
 
+  static String savedName(HomeDevice device, HomeDeviceSettings? saved) =>
+      saved == null
+      ? defaultName(device)
+      : saved.name ?? deviceLabel(device.type);
+
   String get roomName => room.text.trim();
   String get displayName =>
-      name.text.trim().isEmpty ? defaultName(device) : name.text.trim();
+      name.text.trim().isEmpty ? deviceLabel(device.type) : name.text.trim();
 
   HomeDeviceSettings get settings => HomeDeviceSettings(
     room: roomName.isEmpty ? null : roomName,
-    name: displayName,
+    name: name.text.trim().isEmpty ? null : name.text.trim(),
     delegated: delegated,
   );
 
@@ -62,9 +77,7 @@ class DeviceFields extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          '${deviceLabel(device.type)} · ${deviceKindLabel(device.substrate)}',
-        ),
+        Text(homeDeviceDescription(device)),
         const SizedBox(height: 12),
         TextField(
           key: ValueKey('${device.id}/room'),
@@ -111,7 +124,7 @@ class _DelegationChoicesState extends State<DelegationChoices> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final command in HomeDeviceSettings.selectable(device))
+        for (final command in device.selectableCommands)
           CheckboxListTile(
             key: ValueKey('${device.id}/$command'),
             contentPadding: EdgeInsets.zero,

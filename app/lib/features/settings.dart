@@ -31,6 +31,18 @@ class SettingsScreen extends StatelessWidget {
               if (token != null && context.mounted) app.useToken(token);
             },
           ),
+          if (app.hasHomeHub)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('집 허브 연결 코드'),
+              onTap: () async {
+                final key = await showDialog<String>(
+                  context: context,
+                  builder: (_) => const _TokenDialog(title: '집 허브 연결 코드'),
+                );
+                if (key != null && context.mounted) app.useHomeHubKey(key);
+              },
+            ),
           if (!app.starting && app.step == SetupStep.ready) ...[
             const SizedBox(height: 16),
             Text('자동 준비', style: Theme.of(context).textTheme.titleLarge),
@@ -270,7 +282,9 @@ class _MemoryScreenState extends State<_MemoryScreen> {
 }
 
 class _TokenDialog extends StatefulWidget {
-  const _TokenDialog();
+  const _TokenDialog({this.title = '연결 코드 입력'});
+
+  final String title;
 
   @override
   State<_TokenDialog> createState() => _TokenDialogState();
@@ -287,7 +301,7 @@ class _TokenDialogState extends State<_TokenDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('연결 코드 입력'),
+    title: Text(widget.title),
     content: TextField(
       controller: _text,
       obscureText: true,

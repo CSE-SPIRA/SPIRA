@@ -163,8 +163,9 @@ class _SetupScreenState extends State<SetupScreen> {
 
   Widget _devices(BuildContext context) {
     final app = widget.app;
+    final discoveryAvailable = !app.homeLoading && app.homeReadError == null;
     final drafts = [
-      for (final device in app.home.devices)
+      for (final device in discoveryAvailable ? app.home.devices : [])
         _drafts.putIfAbsent(
           device.id,
           () => DeviceDraft(
@@ -181,15 +182,16 @@ class _SetupScreenState extends State<SetupScreen> {
           _choosingActions ? 'SPIRA에게 맡길 일' : '기기가 있는 방과 이름',
           style: Theme.of(context).textTheme.headlineMedium,
         ),
-        const StatusMessage(homeHubPending),
-        if (drafts.isEmpty)
-          const Text('찾은 기기가 없어요.')
-        else
-          Text(
-            _choosingActions
-                ? '맡기고 싶지 않은 일만 선택을 풀어 주세요.'
-                : '찾은 방과 기기 이름이 맞으면 그대로 두고, 다르면 바꿔 주세요.',
-          ),
+        HomeDiscoveryStatus(app),
+        if (discoveryAvailable)
+          if (drafts.isEmpty)
+            const Text('찾은 기기가 없어요.')
+          else
+            Text(
+              _choosingActions
+                  ? '맡기고 싶지 않은 일만 선택을 풀어 주세요.'
+                  : '찾은 방과 기기 이름이 맞으면 그대로 두고, 다르면 바꿔 주세요.',
+            ),
         for (final draft in drafts)
           Card(
             child: Padding(
@@ -210,7 +212,9 @@ class _SetupScreenState extends State<SetupScreen> {
                     )
                   : DeviceFields(
                       draft,
-                      reviewed: app.home.settings.containsKey(draft.device.id),
+                      reviewed:
+                          app.home.settings[draft.device.id]?.roomConfirmed ??
+                          false,
                       enabled: !app.busy,
                       onChanged: () => setState(() {}),
                     ),
@@ -219,7 +223,9 @@ class _SetupScreenState extends State<SetupScreen> {
         const SizedBox(height: 18),
         if (_choosingActions) ...[
           FilledButton(
-            onPressed: app.busy ? null : () => _finishDevices(drafts),
+            onPressed: app.busy || !discoveryAvailable
+                ? null
+                : () => _finishDevices(drafts),
             child: Text(app.busy ? '저장 중…' : '설정 완료'),
           ),
           TextButton(
@@ -230,7 +236,9 @@ class _SetupScreenState extends State<SetupScreen> {
           ),
         ] else
           FilledButton(
-            onPressed: () => setState(() => _choosingActions = true),
+            onPressed: app.busy || !discoveryAvailable
+                ? null
+                : () => setState(() => _choosingActions = true),
             child: const Text('맡길 일 고르기'),
           ),
       ],
@@ -240,12 +248,12 @@ class _SetupScreenState extends State<SetupScreen> {
   Future<void> _finishDevices(List<DeviceDraft> drafts) async {
     final app = widget.app;
     final messenger = ScaffoldMessenger.of(context);
-    await app.finishDevices({
+    final result = await app.finishDevices({
       for (final draft in drafts) draft.device.id: draft.settings,
     });
-    if (app.step == SetupStep.ready && messenger.mounted) {
+    if (result != null && messenger.mounted) {
       messenger.showSnackBar(
-        const SnackBar(content: Text('설정을 마쳤어요. $homeHubPending')),
+        SnackBar(content: Text('설정을 마쳤어요. ${homeSaveLabel(result)}')),
       );
     }
   }
@@ -266,5 +274,29 @@ class StatusMessage extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Text(text),
     ),
+  );
+}
+
+class HomeDiscoveryStatus extends StatelessWidget {
+  const HomeDiscoveryStatus(this.app, {super.key});
+
+  final AppController app;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      if (!app.hasHomeHub) const StatusMessage(homeHubPending),
+      if (app.homeLoading)
+        const LinearProgressIndicator(semanticsLabel: '기기 설정을 확인하는 중'),
+      if (app.homeReadError case final error? when !app.homeLoading) ...[
+        StatusMessage(error),
+        if (app.home.devices.isNotEmpty) const Text('마지막으로 확인한 기기 설정이에요.'),
+        OutlinedButton(
+          onPressed: app.busy ? null : app.refreshHome,
+          child: const Text('기기 다시 찾기'),
+        ),
+      ],
+    ],
   );
 }

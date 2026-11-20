@@ -23,6 +23,7 @@ class DevicePreparation {
 
 const _pollInterval = Duration(seconds: 30);
 const _connectionCodeHint = '설정에서 연결 코드를 입력해 주세요.';
+const _homeCodeHint = '설정에서 집 허브 연결 코드를 입력해 주세요.';
 
 class AppController extends ChangeNotifier {
   AppController({
@@ -67,6 +68,8 @@ class AppController extends ChangeNotifier {
 
   final householdTypes = <String>{};
   HomeDiscovery home = const HomeDiscovery();
+  bool homeLoading = false;
+  String? homeReadError;
   final _legacyDelegation = <String, Set<String>>{};
   final episodes = <String, wire.Episode>{};
   final cards = <String, wire.Card>{};
@@ -85,6 +88,7 @@ class AppController extends ChangeNotifier {
   Timer? _timer;
   StreamSubscription<void>? _shareSubscription;
   Future<void> _queue = Future<void>.value();
+  Future<void> _homeQueue = Future<void>.value();
   Future<void> _calendarQueue = Future<void>.value();
   Future<void>? _sync;
   String? _calendarFingerprint;
@@ -105,10 +109,13 @@ class AppController extends ChangeNotifier {
         card,
   ];
 
-  Set<String>? savedDelegation(wire.DeviceElement device) {
+  bool get hasHomeHub => homeHub is HttpHomeHubOnboarding;
+
+  Set<String>? savedDelegation(HomeDevice device) {
     final saved =
-        home.settings[device.id]?.delegated ?? _legacyDelegation[device.id];
-    return saved?.intersection(HomeDeviceSettings.selectable(device));
+        home.settings[device.id]?.delegated ??
+        (hasHomeHub ? null : _legacyDelegation[device.id]);
+    return saved?.intersection(device.selectableCommands);
   }
 
   Map<String, List<DevicePreparation>> get devicePreparations {
@@ -147,6 +154,7 @@ class AppController extends ChangeNotifier {
 
   void openHome() {
     _homeOpen = true;
+    if (hasHomeHub) unawaited(refreshHome());
     unawaited(_loadHomeRationales(refresh: true));
   }
 
@@ -225,8 +233,8 @@ class AppController extends ChangeNotifier {
       step = SetupStep.ready;
     }
     if (household == null) return;
-    if (step == SetupStep.devices || step == SetupStep.ready) {
-      home = await homeHub.discover(_scope);
+    if (step == SetupStep.devices || (step == SetupStep.ready && !hasHomeHub)) {
+      await refreshHome();
     }
     final cached = await store.read(_snapshotKey);
     if (cached == null) return;
@@ -313,7 +321,9 @@ class AppController extends ChangeNotifier {
           wire.HouseholdCreate(householdTypes: []),
         );
         household = created.householdId;
-        // The App API has no route to hand off the Hub key.
+        if (homeHub case final HttpHomeHubOnboarding hub) {
+          hub.useApiKey(created.hubApiKey);
+        }
         await _saveSetup();
       }
       await api.profile(
@@ -338,10 +348,10 @@ class AppController extends ChangeNotifier {
         if (reader == null) throw StateError('Calendar unavailable');
         await _sendCalendar(household!, await reader(interactive: true));
       }
-      home = await homeHub.discover(_scope);
       _calendarConnected = connect;
       await _saveSetup(nextStep: SetupStep.devices);
       step = SetupStep.devices;
+      await refreshHome();
     });
   }
 
@@ -390,31 +400,93 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> finishDevices(Map<String, HomeDeviceSettings> settings) async {
-    if (busy || step != SetupStep.devices) return;
+  Future<HomeSaveResult?> finishDevices(
+    Map<String, HomeDeviceSettings> settings,
+  ) async {
+    if (busy || step != SetupStep.devices) return null;
+    HomeSaveResult? result;
     await _setup(() async {
-      await _saveHome(settings);
+      result = await _saveHome(settings);
       await _saveSetup(nextStep: SetupStep.ready);
       step = SetupStep.ready;
     });
     if (step == SetupStep.ready) {
       _requestNotificationPermission();
       await sync();
+      return result;
+    }
+    return null;
+  }
+
+  Future<HomeSaveResult> editHomeDevice(
+    String id,
+    HomeDeviceSettings settings,
+  ) => _saveHome({id: settings});
+
+  Future<T> _serializeHome<T>(Future<T> Function() work) {
+    final next = _homeQueue.then((_) => work());
+    _homeQueue = next.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    return next;
+  }
+
+  Future<void> refreshHome() => _serializeHome(() async {
+    if (!_disposed) await _readHome();
+  });
+
+  Future<bool> _readHome() async {
+    homeLoading = true;
+    _change();
+    try {
+      home = await homeHub.discover(_scope);
+      homeReadError = null;
+      return true;
+    } catch (error) {
+      homeReadError = _error(error, '기기 설정을 불러오지 못했어요.');
+      return false;
+    } finally {
+      homeLoading = false;
+      _change();
     }
   }
 
-  Future<void> editHomeDevice(String id, HomeDeviceSettings settings) =>
-      _saveHome({id: settings});
+  Future<HomeSaveResult> _saveHome(Map<String, HomeDeviceSettings> settings) =>
+      _serializeHome(() async {
+        final result = await homeHub.saveRoomsNamesDelegation(
+          _scope,
+          home,
+          settings,
+        );
+        if (result == HomeSaveResult.uploadPending) {
+          // A peer failure can happen after the Hub has saved the settings.
+          if (!await _readHome() ||
+              !settings.entries.every((entry) {
+                final stored = home.settings[entry.key];
+                return stored != null &&
+                    stored.room == entry.value.room &&
+                    stored.name == entry.value.name &&
+                    setEquals(stored.delegated, entry.value.delegated);
+              })) {
+            throw const HomeHubException(502);
+          }
+        } else {
+          home = home.withSettings(settings);
+          _change();
+        }
+        return result;
+      });
 
-  Future<void> _saveHome(Map<String, HomeDeviceSettings> settings) async {
-    final updated = Map<String, HomeDeviceSettings>.unmodifiable({
-      ...home.settings,
-      ...settings,
-    });
-    await homeHub.saveRoomsNamesDelegation(_scope, home, updated);
-    home = HomeDiscovery(manifest: home.manifest, settings: updated);
-    _change();
+  void useHomeHubKey(String key) {
+    if (homeHub case final HttpHomeHubOnboarding hub) {
+      hub.useApiKey(key);
+      if (setupError == _homeCodeHint) setupError = null;
+      if (step == SetupStep.devices || step == SetupStep.ready) {
+        unawaited(refreshHome());
+      }
+    }
   }
+
+  String homeSettingsError(Object error) =>
+      _error(error, '설정을 저장하지 못했어요. 다시 시도해 주세요.');
 
   void _requestNotificationPermission() {
     unawaited(
@@ -842,6 +914,18 @@ class AppController extends ChangeNotifier {
   Future<void> deleteCase(String caseId) => api.deleteCase(household!, caseId);
 
   String _error(Object error, String fallback) {
+    if (error is HomeHubException) {
+      return switch (error.status) {
+        401 => _homeCodeHint,
+        422 =>
+          error.message == null || error.message!.trim().isEmpty
+              ? '집 허브가 이 설정을 받아들이지 않았어요.'
+              : '집 허브가 이 설정을 받아들이지 않았어요. ${error.message}',
+        502 => '전송이 아직 끝나지 않았어요. 집 허브에 저장됐는지 확인하지 못했어요.',
+        503 => '집 허브에 연결할 수 없어요. 다시 시도해 주세요.',
+        _ => fallback,
+      };
+    }
     if (error is AppApiException) {
       if (error.status == 401) {
         needsToken = true;
@@ -865,6 +949,7 @@ class AppController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _timer?.cancel();
+    if (homeHub case final HttpHomeHubOnboarding hub) hub.close();
     unawaited(_shareSubscription?.cancel());
     super.dispose();
   }

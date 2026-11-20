@@ -258,6 +258,7 @@ AppController controller(
   TestPlatform? platform,
   TestStore? store,
   Map<String, dynamic>? manifest,
+  HomeHubOnboardingPort? homeHub,
   CalendarReader? calendar,
   bool setup = false,
   bool fixture = true,
@@ -269,10 +270,12 @@ AppController controller(
     store: local,
     fixture: fixture,
     configuredHousehold: setup ? null : 'h_042',
-    homeHub: LocalHomeHubOnboarding(
-      local,
-      discoveryJson: manifest == null ? '' : jsonEncode(manifest),
-    ),
+    homeHub:
+        homeHub ??
+        LocalHomeHubOnboarding(
+          local,
+          discoveryJson: manifest == null ? '' : jsonEncode(manifest),
+        ),
     readCalendar: calendar,
   );
 }
@@ -340,6 +343,107 @@ Future<void> resumeApp(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+class OnboardingPeer {
+  final requests = <http.Request>[];
+  final devices = <Map<String, dynamic>>[
+    {
+      'id': 'fridge_01',
+      'type': 'fridge',
+      'label': '찾은 냉장고',
+      'room': '거실',
+      'source': 'lg_account',
+      'commands': [
+        {'cmd': 'show_notice', 'value_schema': 'text', 'basis': 'lg_assumed'},
+        {'cmd': 'clear_notice', 'value_schema': null, 'basis': null},
+      ],
+      'never': ['start'],
+      'stored': {
+        'room': '주방',
+        'label': '우리 집 냉장고',
+        'delegated_commands': ['show_notice'],
+      },
+    },
+    {
+      'id': 'oven_01',
+      'type': 'oven',
+      'label': '오븐',
+      'room': null,
+      'source': 'installation',
+      'commands': [
+        {'cmd': 'set_cook_standby', 'value_schema': {}, 'basis': null},
+      ],
+      'never': [],
+    },
+  ];
+  int readStatus = 200;
+  int writeStatus = 200;
+  bool saveBeforePeerFailure = false;
+  bool networkFailure = false;
+
+  HttpHomeHubOnboarding port() => HttpHomeHubOnboarding(
+    'http://hub.invalid:8080',
+    client: MockClient((request) async {
+      requests.add(request);
+      expect(
+        request.url.toString(),
+        'http://hub.invalid:8080/home/onboarding/devices',
+      );
+      expect(request.headers['authorization'], isNull);
+      expect(request.followRedirects, isFalse);
+      if (networkFailure) throw http.ClientException('disconnected');
+      if (request.method == 'GET') {
+        switch (readStatus) {
+          case 200:
+            return Peer.response({'devices': devices});
+          case 401:
+            return Peer.response({
+              'code': 'unauthorized',
+              'message': '코드를 확인해 주세요.',
+            }, 401);
+          case 503:
+            return Peer.response({
+              'code': 'unavailable',
+              'message': '지금은 연결할 수 없어요.',
+            }, 503);
+        }
+      }
+      expect(request.method, 'PUT');
+      expect(request.headers['content-type'], contains('application/json'));
+      if (writeStatus == 200 || (writeStatus == 502 && saveBeforePeerFailure)) {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        for (final entry
+            in (body['devices'] as List<dynamic>)
+                .cast<Map<String, dynamic>>()) {
+          final device = devices.singleWhere(
+            (device) => device['id'] == entry['id'],
+          );
+          device['stored'] = {...entry}..remove('id');
+        }
+      }
+      return switch (writeStatus) {
+        200 => Peer.response({'revision': 4}),
+        401 => Peer.response({
+          'code': 'unauthorized',
+          'message': '코드를 확인해 주세요.',
+        }, 401),
+        422 => Peer.response({
+          'code': 'invalid_settings',
+          'message': '기기 이름을 확인해 주세요.',
+        }, 422),
+        502 => Peer.response({
+          'code': 'peer_failure',
+          'message': '전송을 기다리고 있어요.',
+        }, 502),
+        503 => Peer.response({
+          'code': 'unavailable',
+          'message': '지금은 연결할 수 없어요.',
+        }, 503),
+        _ => throw StateError('Unexpected onboarding status'),
+      };
+    }),
+  );
+}
+
 void main() {
   test(
     'local discovery retains settings only in the saved household scope',
@@ -372,6 +476,241 @@ void main() {
       }
     },
   );
+
+  testWidgets(
+    'onboarding sends the created Hub key and edits stored settings',
+    (tester) async {
+      final hub = OnboardingPeer();
+      final peer = Peer();
+      final store = TestStore();
+      final app = controller(
+        peer,
+        setup: true,
+        store: store,
+        homeHub: hub.port(),
+      );
+      await openApp(tester, app);
+      await skipToDevices(tester);
+
+      final room = deviceField('fridge_01', 'room');
+      final name = deviceField('fridge_01', 'name');
+      expect(tester.widget<TextField>(room).controller!.text, '주방');
+      expect(tester.widget<TextField>(name).controller!.text, '우리 집 냉장고');
+      expect(find.text('방을 골라 주세요'), findsOneWidget);
+      expect(find.textContaining('실물 기기인지 확인하지 못했어요'), findsNWidgets(2));
+      expect(find.textContaining('이 휴대폰에만 저장돼요'), findsNothing);
+      await tapText(tester, '맡길 일 고르기');
+      expect(commandTile(tester, 'fridge_01', 'show_notice').value, isTrue);
+      expect(commandTile(tester, 'fridge_01', 'clear_notice').value, isFalse);
+      expect(commandTile(tester, 'oven_01', 'set_cook_standby').value, isTrue);
+      expect(find.text('굽기 시작하기 · 하지 않아요'), findsOneWidget);
+      expect(deviceField('fridge_01', 'start'), findsNothing);
+      await tapText(tester, '설정 완료');
+      expect(find.text('설정을 마쳤어요. 집 허브에 보냈어요.'), findsOneWidget);
+      expect(jsonDecode(hub.requests.last.body), {
+        'devices': [
+          {
+            'id': 'fridge_01',
+            'room': '주방',
+            'label': '우리 집 냉장고',
+            'delegated_commands': ['show_notice'],
+          },
+          {
+            'id': 'oven_01',
+            'room': null,
+            'label': '오븐',
+            'delegated_commands': ['set_cook_standby'],
+          },
+        ],
+      });
+
+      hub.devices.first['stored'] = {
+        'room': '다용도실',
+        'label': '바뀐 냉장고',
+        'delegated_commands': ['clear_notice'],
+      };
+      await tapText(tester, '우리 집');
+      expect(find.text('다용도실'), findsOneWidget);
+      expect(find.text('맡긴 일 · 화면에서 안내 지우기'), findsOneWidget);
+      expect(find.text('맡기지 않은 일 · 화면에 안내 띄우기'), findsOneWidget);
+      await tapText(tester, '바뀐 냉장고');
+      await tester.enterText(room, '');
+      await tester.enterText(name, '');
+      await tapDeviceAction(tester, 'fridge_01/clear_notice');
+      await tapText(tester, '변경사항 저장');
+      expect(find.text('집 허브에 보냈어요.'), findsOneWidget);
+      expect(find.text('맡긴 일 · 없어요'), findsOneWidget);
+      expect(jsonDecode(hub.requests.last.body), {
+        'devices': [
+          {
+            'id': 'fridge_01',
+            'room': null,
+            'label': null,
+            'delegated_commands': [],
+          },
+        ],
+      });
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      await tapText(tester, '우리 집');
+      expect(find.text('거실'), findsNothing);
+      expect(find.text('찾은 냉장고'), findsNothing);
+      expect(find.text('맡긴 일 · 없어요'), findsOneWidget);
+      expect(hub.requests.map((request) => request.method), [
+        'GET',
+        'PUT',
+        'GET',
+        'PUT',
+        'GET',
+      ]);
+      final key = fixture('household.created.json')['hub_api_key'] as String;
+      expect(
+        hub.requests.map((request) => request.headers['x-api-key']),
+        everyElement(key),
+      );
+      expect(
+        peer.requests.map((request) => request.headers['x-api-key']),
+        everyElement(isNull),
+      );
+      expect(store.values.values.any((value) => value.contains(key)), isFalse);
+    },
+  );
+
+  testWidgets('Our Home recovers from Hub auth failure with a session code', (
+    tester,
+  ) async {
+    final hub = OnboardingPeer()..readStatus = 401;
+    final peer = Peer();
+    final store = TestStore();
+    final app = controller(peer, store: store, homeHub: hub.port());
+    app.api.token = 'server-code';
+    await openApp(tester, app);
+    await tapText(tester, '우리 집');
+    const authHint = '설정에서 집 허브 연결 코드를 입력해 주세요.';
+    expect(find.text(authHint), findsOneWidget);
+    expect(hub.requests, isEmpty);
+
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    await settings(tester);
+    await tapText(tester, '집 허브 연결 코드');
+    await tester.enterText(find.byType(TextField), 'old-code');
+    await tapText(tester, '연결');
+    expect(hub.requests.single.headers['x-api-key'], 'old-code');
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    await tapText(tester, '우리 집');
+    expect(find.text(authHint), findsOneWidget);
+    expect(find.textContaining('이 휴대폰에만 저장돼요'), findsNothing);
+
+    hub.readStatus = 200;
+    hub.devices.last['room'] = '다용도실';
+    hub.devices.last['label'] = '찾은 오븐';
+    hub.devices.last['stored'] = {
+      'room': null,
+      'label': null,
+      'delegated_commands': null,
+    };
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    await settings(tester);
+    await tapText(tester, '집 허브 연결 코드');
+    await tester.enterText(find.byType(TextField), 'household-code');
+    await tapText(tester, '연결');
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    await tapText(tester, '우리 집');
+    expect(hub.requests.last.headers['x-api-key'], 'household-code');
+    expect(find.text('맡긴 일 · 화면에 안내 띄우기'), findsOneWidget);
+    expect(find.text('아직 맡길 일을 고르지 않았어요.'), findsOneWidget);
+    expect(find.text('찾은 오븐'), findsOneWidget);
+    expect(find.text('다용도실'), findsOneWidget);
+    expect(find.text('찾은 방이에요. 맞는지 확인해 주세요.'), findsOneWidget);
+    expect(app.api.token, 'server-code');
+    expect(
+      store.values.values.any((value) => value.contains('household-code')),
+      isFalse,
+    );
+  });
+
+  testWidgets(
+    'onboarding distinguishes unavailable discovery and rejected saves',
+    (tester) async {
+      final hub = OnboardingPeer()..readStatus = 503;
+      await openApp(
+        tester,
+        controller(Peer(), setup: true, homeHub: hub.port()),
+      );
+      await skipToDevices(tester);
+      const unavailable = '집 허브에 연결할 수 없어요. 다시 시도해 주세요.';
+      expect(find.text(unavailable), findsOneWidget);
+      expect(find.text('찾은 기기가 없어요.'), findsNothing);
+      expect(find.textContaining('이 휴대폰에만 저장돼요'), findsNothing);
+      hub.readStatus = 200;
+      await tapText(tester, '기기 다시 찾기');
+      await tester.enterText(deviceField('fridge_01', 'name'), '작은 냉장고');
+      await tapText(tester, '맡길 일 고르기');
+
+      hub.writeStatus = 401;
+      await tapText(tester, '설정 완료');
+      expect(find.text('설정에서 집 허브 연결 코드를 입력해 주세요.'), findsOneWidget);
+      hub.writeStatus = 422;
+      await tapText(tester, '설정 완료');
+      expect(
+        find.text('집 허브가 이 설정을 받아들이지 않았어요. 기기 이름을 확인해 주세요.'),
+        findsOneWidget,
+      );
+      expect(find.text('작은 냉장고'), findsOneWidget);
+      hub.writeStatus = 503;
+      await tapText(tester, '설정 완료');
+      expect(find.text(unavailable), findsOneWidget);
+      hub.networkFailure = true;
+      await tapText(tester, '설정 완료');
+      expect(find.text(unavailable), findsOneWidget);
+      expect(find.text('작은 냉장고'), findsOneWidget);
+      expect(find.text('우리 집'), findsNothing);
+      expect(find.textContaining('집 허브에 보냈어요'), findsNothing);
+    },
+  );
+
+  for (final saved in [true, false]) {
+    testWidgets(
+      'onboarding checks for stored settings after 502 (saved: $saved)',
+      (tester) async {
+        final hub = OnboardingPeer()
+          ..writeStatus = 502
+          ..saveBeforePeerFailure = saved;
+        await openApp(
+          tester,
+          controller(Peer(), setup: true, homeHub: hub.port()),
+        );
+        await skipToDevices(tester);
+        await tester.enterText(deviceField('fridge_01', 'name'), '작은 냉장고');
+        await tapText(tester, '맡길 일 고르기');
+        await tapText(tester, '설정 완료');
+        expect(hub.requests.map((request) => request.method), [
+          'GET',
+          'PUT',
+          'GET',
+        ]);
+        expect(find.textContaining('집 허브에 보냈어요'), findsNothing);
+        if (saved) {
+          expect(
+            find.text('설정을 마쳤어요. 집 허브에 저장했어요. 전송을 기다리고 있어요.'),
+            findsOneWidget,
+          );
+          expect(find.text('우리 집'), findsOneWidget);
+        } else {
+          expect(
+            find.text('전송이 아직 끝나지 않았어요. 집 허브에 저장됐는지 확인하지 못했어요.'),
+            findsOneWidget,
+          );
+          expect(find.text('작은 냉장고'), findsOneWidget);
+          expect(find.text('설정 완료'), findsOneWidget);
+        }
+      },
+    );
+  }
 
   testWidgets('APP-AT-16 explains what SPIRA does before creating a home', (
     tester,

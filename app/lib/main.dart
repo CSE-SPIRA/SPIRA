@@ -38,6 +38,7 @@ void main() {
   }
   const calendarClientId = String.fromEnvironment('SPIRA_GOOGLE_CLIENT_ID');
   const household = String.fromEnvironment('SPIRA_HOUSEHOLD_ID');
+  const hubUrl = String.fromEnvironment('SPIRA_HUB_URL');
   final store = PreferencesAppStore();
   final reader = calendarClientId.isEmpty
       ? null
@@ -48,7 +49,9 @@ void main() {
         api: AppApi(baseUrl),
         platform: AndroidBridge(),
         store: store,
-        homeHub: LocalHomeHubOnboarding(store),
+        homeHub: hubUrl.isEmpty
+            ? LocalHomeHubOnboarding(store)
+            : HttpHomeHubOnboarding(hubUrl),
         fixture:
             const String.fromEnvironment(
               'SPIRA_PEER',

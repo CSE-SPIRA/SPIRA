@@ -45,8 +45,11 @@ String deviceLabel(String type) => switch (type) {
   _ => '기기',
 };
 
-String deviceKindLabel(wire.Substrate substrate) =>
-    substrate == wire.Substrate.VIRTUAL ? '가상 기기' : '실물 기기';
+String deviceKindLabel(wire.Substrate? substrate) => switch (substrate) {
+  wire.Substrate.VIRTUAL => '가상 기기',
+  wire.Substrate.PHYSICAL => '실물 기기',
+  null => '실물 기기인지 확인하지 못했어요',
+};
 
 String commandLabel(String command) => switch (command) {
   'clean' => '청소',
@@ -57,6 +60,7 @@ String commandLabel(String command) => switch (command) {
   'child_lock' => '어린이 잠금',
   'set_cook_standby' => '오븐 온도와 시간 맞춰 두기',
   'show_notice' => '화면에 안내 띄우기',
+  'clear_notice' => '화면에서 안내 지우기',
   'play' => '음악 틀기',
   'stop' => '음악 끄기',
   'purchase' => '물건 사기',

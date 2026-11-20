@@ -33,8 +33,13 @@ Optional Dart defines:
 
 - `SPIRA_HOUSEHOLD_ID` opens an already created household, useful for a scripted
   fixture demo. Omit it to exercise initial setup.
-- `SPIRA_DISCOVERY_JSON` takes the contents of a C-2 device manifest. To try
-  onboarding with the birthday example from `app/`, omit `SPIRA_HOUSEHOLD_ID`
+- `SPIRA_HUB_URL` is the Hub's home-network origin as reachable from Android.
+  The App uses the Hub's onboarding API for device discovery and delegation.
+  The key returned when creating the household works for that App session.
+  For an existing household or after restarting the App, enter the household
+  Hub key from **설정 → 집 허브 연결 코드**. Keep it out of Dart defines.
+- With no `SPIRA_HUB_URL`, `SPIRA_DISCOVERY_JSON` takes a C-2 device manifest.
+  To try onboarding with the birthday example from `app/`, omit `SPIRA_HOUSEHOLD_ID`
   and add
   `--dart-define="SPIRA_DISCOVERY_JSON=$(cat ../contracts/fixtures/ep_9031/devices.json)"`
   to the run command. After reviewing rooms and names, keep the suggested
@@ -81,7 +86,7 @@ delivery, process recreation, and TalkBack still require an Android runtime.
   Server projects that outcome.
 - App API has no pause status read route. Settings uses the last successful
   pause/resume response and shows an unknown state before one is available.
-- Creating a household returns a one-time Hub key. The App uses a local
-  onboarding port until the Hub API specifies discovery, provisioning and the
-  handoff for publishing delegation. Preparation status still comes from the
-  App API.
+- The Hub onboarding API owns rooms, names and delegation when configured.
+  A peer failure during upload can leave settings saved on the Hub. The App
+  reads them back before confirming that they were saved. Preparation status
+  still comes from the App API.
