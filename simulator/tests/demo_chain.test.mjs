@@ -219,6 +219,82 @@ test("rebased card, timeline and Hub records share story-time labels", () => {
   assert.equal(chain.reports[1].deviceId, null);
 });
 
+test("birthday and grocery receipts use the order day while delivery has no clock", () => {
+  const birthdayOrder = birthday();
+  const groceries = {
+    episode: fixture("ep_9150", "episode"),
+    rationale: fixture("ep_9150", "rationale"),
+    hubPlan: fixture("ep_9150", "plan.v1"),
+  };
+  const storyTime = {
+    timing: {
+      quiet_s: { normal: 600, demo: 30 },
+      before_start_default_min: { normal: 90, demo: 3 },
+      guest_window_before_min: { normal: 30, demo: 1 },
+      end_fallback_min: { normal: 180, demo: 10 },
+    },
+    fixtureShares: Object.fromEntries([birthdayOrder, groceries].map(({ episode }) =>
+      [episode.episode_id, episode.shared_at])),
+  };
+  const shared = "2026-11-20T11:41:00+09:00";
+  const received = "2026-11-20T11:41:31+09:00";
+  const delivered = "2026-11-20T11:41:41+09:00";
+  const packageEvent = "package.brought_in";
+  for (const [input, episodeId, expectedPlan, expectedLedger] of [
+    [birthdayOrder, "ep_9031", "목 21:00 공유 → 21:11 계획 받음", "목 21:11"],
+    [groceries, "ep_91502", "수 19:30 공유 → 19:41 계획 받음", "수 19:41"],
+  ]) {
+    const episode = { ...input.episode, episode_id: episodeId, shared_at: shared };
+    const card = input.card && {
+      ...input.card, starts_at: "2026-11-20T11:42:11+09:00",
+      lines: input.card.lines.map((line, index) => index < 2 ? {
+        ...line, when: { ...line.when, time: index === 0 ? "2026-11-20T11:39:11+09:00" : "2026-11-20T11:41:11+09:00" },
+      } : line),
+    };
+    const hubLedger = [
+      { kind: "plan", plan_id: episodeId, plan_version: 1, at: received },
+      ...(card ? [{ kind: "plan", plan_id: episodeId, plan_version: 2, at: received }] : []),
+      { kind: "event", event_type: packageEvent, at: delivered },
+      { kind: "plan", plan_id: episodeId, plan_version: card ? 3 : 2, at: delivered, timing: { event: packageEvent } },
+      { kind: "run", device: "fridge_01", at: delivered, timing: { plan_id: episodeId, event: packageEvent } },
+    ];
+    const chain = buildChain({ ...input, episode, card, hubLedger, storyTime });
+    assert.deepEqual(chain.timeline.plan, { at: received, story: expectedPlan });
+    assert.deepEqual(chain.timeline.events[packageEvent], { at: delivered, story: "파티 전 · 택배 들여옴" });
+    assert.deepEqual(chain.reports.map(({ story }) => story),
+      [expectedLedger, ...(card ? [expectedLedger] : []), "파티 전", "파티 전", "파티 전"]);
+    if (card) {
+      assert.deepEqual(scenes.slice(0, 3).map(({ id }) => id), ["plan", "delivery", "clean"]);
+      assert.equal(chain.timeline.clean.story, "토 12:30");
+    } else {
+      assert.equal(chain.timeline.clean.story, "");
+    }
+
+    const unknownOrderTime = buildChain({ ...input, episode: { ...episode, shared_at: undefined }, card, hubLedger, storyTime });
+    assert.equal(unknownOrderTime.timeline.plan.story, "주문 직후 · 계획 받음");
+    assert.equal(unknownOrderTime.reports[0].story, "주문 직후");
+    assert.equal(unknownOrderTime.timeline.events[packageEvent].story, "파티 전 · 택배 들여옴");
+  }
+});
+
+test("plan receipt uses the contract capture and the configured quiet window", () => {
+  const input = birthday();
+  const hubLedger = [{ kind: "plan", plan_id: input.episode.episode_id, at: input.hubPlan.sent_at }];
+  const storyTime = { timing: {
+    quiet_s: { normal: 900, demo: 30 },
+    before_start_default_min: { normal: 90, demo: 3 },
+    guest_window_before_min: { normal: 30, demo: 1 },
+    end_fallback_min: { normal: 180, demo: 10 },
+  } };
+  const chain = buildChain({ ...input, hubLedger, storyTime });
+  assert.equal(chain.timeline.plan.story, "목 21:00 공유 → 21:16 계획 받음");
+  assert.equal(chain.reports[0].story, "목 21:16");
+  for (const shared_at of ["2026-10-15", "invalid", "2026-10-16T12:00:00+09:00"]) {
+    const missing = buildChain({ ...input, episode: { ...input.episode, shared_at }, hubLedger, storyTime });
+    assert.equal(missing.timeline.plan.story, "주문 직후 · 계획 받음");
+  }
+});
+
 test("pending judgment, cardless intents and missing Hub plans preserve distinct evidence", () => {
   const { episode, rationale } = birthday();
   const pending = buildChain({ episode });

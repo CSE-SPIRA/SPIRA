@@ -1,8 +1,10 @@
-import { displayTime, storyClock, storyLedgerTime, storyObservedTime, storyPlanTime } from "./story-time.js";
+import { displayTime, planReceiptTime, storyClock, storyLedgerTime, storyObservedTime, storyPlanTime } from "./story-time.js";
 
+const PACKAGE_EVENT = "package.brought_in";
+const PACKAGE_STORY = "파티 전";
 const SLOT_LABELS = { event: "행사", guests: "손님", activity: "활동", theme: "테마" };
-const TRIGGERS = { guest_arrived: "손님이 오면", event_end: "행사가 끝나면", "package.brought_in": "택배를 들여오면" };
-const OCCURRENCES = { guest_arrived: "손님 도착", event_end: "행사 종료", "package.brought_in": "택배 들여옴" };
+const TRIGGERS = { guest_arrived: "손님이 오면", event_end: "행사가 끝나면", [PACKAGE_EVENT]: "택배를 들여오면" };
+const OCCURRENCES = { guest_arrived: "손님 도착", event_end: "행사 종료", [PACKAGE_EVENT]: "택배 들여옴" };
 const DEVICE_TYPES = {
   light: "조명", display: "TV", cleaner: "로봇청소기", cooktop: "인덕션",
   oven: "오븐", fridge: "냉장고", smart_plug: "스마트 플러그", speaker: "스피커",
@@ -65,7 +67,7 @@ function reportKey(row, report) {
   return JSON.stringify([row.device, Date.parse(row.at), report.kind, report.id]);
 }
 
-function ledgerReports(ledger, episodeId, cards, clocks, firstClock, timing) {
+function ledgerReports(ledger, episodeId, cards, clocks, firstClock, timing, receiptTime) {
   const completions = new Set();
   for (const row of ledger) {
     if (row.kind !== "run" || row.status !== "completed" || !row.device) continue;
@@ -83,27 +85,31 @@ function ledgerReports(ledger, episodeId, cards, clocks, firstClock, timing) {
       const card = cards.find(({ lines }) => lines.some((line) => line.task_id === taskId));
       const clock = !timing ? firstClock : planId && planId !== episodeId ? null
         : card ? clocks.get(card.card_id) : firstClock;
-      const label = OCCURRENCES[row.event_type ?? row.timing?.event];
+      const event = row.event_type ?? row.timing?.event;
+      const story = event === PACKAGE_EVENT ? PACKAGE_STORY
+        : row.kind === "plan" ? (planId === episodeId ? receiptTime.ledger : "주문 직후")
+        : storyLedgerTime(row, clock, OCCURRENCES[event]);
       return {
         ...row, planId, taskId, deviceId,
         deviceIds: deviceId ? [deviceId] : (row.items ?? []).map(({ device }) => device),
-        story: storyLedgerTime(row, clock, label),
+        story,
       };
     });
 }
 
-function houseTimeline(episode, episodeId, ledger, cards, clocks, firstClock, tasks) {
-  const receipt = ledger.findLast((row) => row.kind === "plan" && row.plan_id === episodeId);
+function houseTimeline(sharedAt, ledger, cards, clocks, firstClock, tasks, plan) {
   const cleaning = tasks.find((task) => task.devices.includes("cleaner_01"));
   const safety = tasks.find((task) => task.devices.includes("cooktop_01"));
   const party = cards.find((card) => card.starts_at);
+  const since = Number.isFinite(sharedAt) ? sharedAt : Date.parse(plan.at);
   const events = Object.fromEntries(Object.entries(OCCURRENCES).map(([event, label]) => {
     const at = ledger.findLast((row) => row.event_type === event &&
-      (!episode?.shared_at || Date.parse(row.at) >= Date.parse(episode.shared_at)))?.at;
-    return [event, { at, story: storyObservedTime(at, firstClock, label) }];
+      (!Number.isFinite(since) || Date.parse(row.at) >= since))?.at;
+    const story = event === PACKAGE_EVENT ? `${PACKAGE_STORY} · ${label}` : storyObservedTime(at, firstClock, label);
+    return [event, { at, story }];
   }));
   return {
-    plan: { at: receipt?.at, story: storyObservedTime(receipt?.at, firstClock) },
+    plan,
     clean: { at: cleaning?.time.at, story: cleaning?.time.at ? cleaning.time.story : "" },
     before: { at: safety?.time.at, story: safety?.time.at ? safety.time.story : "" },
     party: { at: party?.starts_at, story: displayTime(party?.starts_at, clocks.get(party?.card_id)?.offset) },
@@ -179,6 +185,20 @@ export function buildChain({ episode, rationale, card, hubPlan, hubLedger = [], 
     return { id, line, need, way, devices, time, values, intentId: intentsByCard.get(card_id)?.id ?? null };
   });
 
+  const receipt = hubLedger.find((row) => row.kind === "plan" && row.plan_id === episodeId);
+  const sharedAt = Date.parse(episode?.shared_at);
+  const fixtureShares = storyTime?.fixtureShares;
+  // Live fixture replays append a sequence number to the recorded episode ID.
+  const fixtureId = Object.keys(fixtureShares ?? {}).find((id) => episodeId === id ||
+    (episodeId?.startsWith(id) && /^\d+$/.test(episodeId.slice(id.length))));
+  const storyShare = sharedAt <= Date.parse(receipt?.at)
+    ? (fixtureShares ? fixtureShares[fixtureId] : episode.shared_at) : null;
+  const firstLead = fixtureId ? Infinity : Math.min(firstClock?.storyStart ?? Infinity,
+    ...cards.flatMap((entry) => entry.lines.map(({ when }) =>
+      storyPlanTime(when?.time, clocks.get(entry.card_id)))).filter(Number.isFinite));
+  const receiptTime = planReceiptTime(storyShare, storyTime?.timing?.quiet_s?.normal, firstLead);
+  const plan = { at: receipt?.at, story: receipt ? receiptTime.story : "" };
+
   return {
     episodeId, items, slots, intents, intent: intents[0] ?? null,
     ...(rationale && !intents.length ? { none: { reason: rationale.none_reason } } : {}),
@@ -187,7 +207,7 @@ export function buildChain({ episode, rationale, card, hubPlan, hubLedger = [], 
     tasks,
     item_tasks: rationale?.item_tasks ?? episode?.item_tasks ?? [],
     devices: chainDevices(tasks, deviceDetails, snapshot),
-    reports: ledgerReports(hubLedger, episodeId, cards, clocks, firstClock, storyTime?.timing),
+    reports: ledgerReports(hubLedger, episodeId, cards, clocks, firstClock, storyTime?.timing, receiptTime),
     funnel: {
       items: episode?.item_count ?? 0,
       similar: (evidence.kbCounts ?? []).reduce((sum, { n }) => sum + n, 0),
@@ -203,6 +223,6 @@ export function buildChain({ episode, rationale, card, hubPlan, hubLedger = [], 
     cardReady: Boolean(rationale && episode?.card_ids?.every((id) => cards.some((entry) => entry.card_id === id))),
     orderClock: displayTime(episode?.shared_at, null, false),
     cardClock: displayTime(cards[0]?.updated_at || episode?.shared_at, firstClock?.offset, false),
-    timeline: houseTimeline(episode, episodeId, hubLedger, cards, clocks, firstClock, tasks),
+    timeline: houseTimeline(sharedAt, hubLedger, cards, clocks, firstClock, tasks, plan),
   };
 }

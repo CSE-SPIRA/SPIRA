@@ -37,6 +37,14 @@ def test_page_assets_and_config(client):
     }
 
 
+def test_fixture_config_exposes_recorded_capture_times(client, monkeypatch):
+    monkeypatch.setenv("DEMO_FIXTURE_EPISODE", "ep_9031")
+    assert client.get("/demo/api/config").json()["fixture_shares"] == {
+        "ep_9031": "2026-10-15T21:00:08+09:00",
+        "ep_9150": "2026-11-04T19:30:41+09:00",
+    }
+
+
 def test_evidence_chain():
     node = shutil.which("node")
     if not node:
@@ -57,14 +65,23 @@ def test_story_time_uses_server_numbers_and_hub_schedule(client, monkeypatch):
     safety = "2026-11-20T11:41:11+09:00"
     fallback = "2026-11-20T11:52:41+09:00"
     dispatched = "2026-11-20T11:40:45+09:00"
+    package = "package.brought_in"
+    released = {"event": package, "released": True, "at": safety}
     ledger = [
         {"kind": "run", "at": dispatched, "operation_id": "op_clean"},
         {"kind": "event", "at": safety, "event_type": "guest_arrived"},
         {"kind": "restore", "at": "2026-11-20T11:52:42+09:00", "reports": [{"kind": "restore", "id": "rs_end"}]},
+        {"kind": "event", "at": safety, "event_type": package},
+        {"kind": "plan", "plan_id": "ep_9031", "plan_version": 2, "at": safety},
+        {"kind": "run", "device": "fridge_01", "at": safety, "operation_id": "op_notice"},
     ]
 
     async def fake_get(self, url):
-        return httpx.Response(200, json={"ledger": ledger, "task_stories": [
+        return httpx.Response(200, json={"ledger": ledger, "plan_history": [
+            {"plan_id": "ep_9031", "plan_version": 2, "changes": {"triggers_changed": [
+                {"from": {"event": package, "released": False}, "to": released},
+            ]}},
+        ], "task_stories": [
             {"plan_id": "ep_9031", "task_id": "t_clean#1", "steps": [
                 {"kind": "waiting", "trigger": {"time": cleaning}},
                 {"kind": "triggered", "how": "time", "at": cleaning},
@@ -75,12 +92,20 @@ def test_story_time_uses_server_numbers_and_hub_schedule(client, monkeypatch):
                 {"kind": "end", "how": "fallback", "rule": "or_time", "at": fallback},
                 {"kind": "restore_result", "result_id": "rs_end", "at": ledger[2]["at"]},
             ]},
+            {"plan_id": "ep_9031", "task_id": "t_fridge#5", "steps": [
+                {"kind": "waiting", "trigger": released},
+                {"kind": "triggered", "how": "server_release", "event_type": package, "at": safety},
+                {"kind": "command", "phase": "run", "at": safety, "operation_id": "op_notice"},
+            ]},
         ]})
 
     monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
     timing = client.get("/demo/api/config").json()["story_timing"]
     hub = client.get("/demo/api/hub").json()
+    assert timing["quiet_s"] == {"normal": 600, "demo": 30}
     assert [row["at"] for row in hub["ledger"]] == [row["at"] for row in ledger]
+    assert hub["ledger"][4]["timing"]["event"] == package
+    assert hub["ledger"][5]["timing"]["event"] == package
 
     # Run the same formatter as the card, timeline and ledger without a browser.
     script = """

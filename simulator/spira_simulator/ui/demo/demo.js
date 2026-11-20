@@ -48,7 +48,9 @@ function refreshChain() {
   state.chain = buildChain({
     episode: episode ?? (episodeId ? { episode_id: episodeId } : null), rationale, card: cards,
     hubPlan: hub?.plan_actions?.[episodeId], hubLedger: hub?.ledger, snapshot,
-    storyTime: { timing: config.story_timing, guestWindows: hub?.guest_windows?.[episodeId] },
+    storyTime: {
+      timing: config.story_timing, guestWindows: hub?.guest_windows?.[episodeId], fixtureShares: config.fixture_shares,
+    },
   });
   state.house?.setChain(state.chain, timeline()[state.homeStep]?.focusDevices);
 }
@@ -561,7 +563,10 @@ function renderTimeline() {
     ${index === state.homeStep ? 'aria-current="step"' : ""}
     ${index < state.homeStep ? 'class="past"' : ""}
     ${state.homeBusy || index > state.homeStep + 1 ? "disabled" : ""}>
-    <time>${esc(houseMoment(scene).story)}</time><span>${esc(scene.title)}</span></button></li>`);
+    ${["plan", "delivery"].includes(scene.id)
+      ? `<span>${esc(houseMoment(scene).story || scene.title)}</span>`
+      : `<time>${esc(houseMoment(scene).story)}</time><span>${esc(scene.title)}</span>`}
+    </button></li>`);
   if (steps.dataset.content !== markup) {
     const focused = steps.contains(document.activeElement);
     steps.dataset.content = markup;

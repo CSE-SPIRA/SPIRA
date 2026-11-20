@@ -61,7 +61,8 @@ Add `owners=1` to the query string to show the owner tags. They are hidden by de
 `buildChain({ episode, rationale, card, hubPlan, hubLedger, snapshot, storyTime })`
 is the one place that defines the evidence-chain shape on the web. It takes one
 card or the episode's card list, the Hub's received actions by task ID, the Hub
-ledger, the World snapshot, and `{ timing, guestWindows }` for the story clock.
+ledger, the World snapshot, and `{ timing, guestWindows, fixtureShares }` for the
+story clock. Fixture shares come from the recorded episode contracts.
 
 - `items` are keyed by item type and carry name, quantity and the unbundled flag.
   `slots` carry a field key, label, value and basis IDs for items or calendar
@@ -87,8 +88,8 @@ and grocery fixture checks. Pytest runs them when Node.js is available.
 Rules the demo keeps:
 
 - Device looks come from World values. A timeline step moves the camera and, for
-  delivery, arrival and end, sends the corresponding World event. Ledger times
-  and delivery status come from the Hub.
+  delivery, arrival and end, sends the corresponding World event. The Hub
+  supplies ledger order and delivery status.
 - Once the Hub has received the plan, devices outside preparation rest without
   labels in the 3D house and phone map. The living-room air purifier and
   entrance styler rest for the birthday, and every device rests for groceries.
@@ -106,6 +107,9 @@ Rules the demo keeps:
   display. In `DEMO_MODE`, scheduled leads and fallback times show the normal
   Server values. Live events keep their offset from the start where it fits the
   restored schedule, and otherwise use an event or relative-time label.
+- Plan receipts use the order's first capture plus the normal Server quiet
+  window, rounded up to the next display minute if needed. The delivery step,
+  package release and fridge notice rows use `파티 전`.
 - Three.js 0.160.0 is vendored (`three.module.min.js`, `orbit-controls.js`), so the
   demo runs without network.
 

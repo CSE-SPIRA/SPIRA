@@ -29,6 +29,21 @@ export function displayTime(stamp, offset = null, withDay = true) {
   return withDay ? `${weekday.format(at)} ${time}` : time;
 }
 
+export function planReceiptTime(sharedAt, quietSeconds, before = Infinity) {
+  const shared = Date.parse(sharedAt);
+  const fallback = { story: "주문 직후 · 계획 받음", ledger: "주문 직후" };
+  if (!Number.isFinite(shared) || !/T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(sharedAt) ||
+      !Number.isInteger(quietSeconds) || quietSeconds < 0) return fallback;
+  // The timeline has minute precision. Round up so the label never falls inside the quiet window.
+  const received = Math.ceil((shared + quietSeconds * 1000) / MINUTE) * MINUTE;
+  if (!Number.isFinite(received) || received >= before) return fallback;
+  const sameDay = seoulDate.format(shared) === seoulDate.format(received);
+  return {
+    story: `${displayTime(shared)} 공유 → ${displayTime(received, null, !sameDay)} 계획 받음`,
+    ledger: displayTime(received),
+  };
+}
+
 export function storyClock(event, startsAt, endsAt, timing) {
   const offset = storyTimeOffset(event, startsAt);
   if (offset === null) return null;

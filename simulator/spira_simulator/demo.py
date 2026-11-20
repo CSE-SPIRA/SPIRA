@@ -15,9 +15,11 @@ import httpx
 import yaml
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
+from spira_contracts.episode import Episode
 from spira_contracts.plan import Action
 
 DEMO_UI = Path(__file__).with_name("ui") / "demo"
+FIXTURES = Path(__file__).resolve().parents[2] / "contracts" / "fixtures"
 ASSET = re.compile(r"^[a-z0-9_.\-]+\.(?:html|css|js|json|svg|png|jpg|woff2)$")
 MEDIA = {
     ".html": "text/html", ".css": "text/css", ".js": "text/javascript",
@@ -33,6 +35,7 @@ SERVER_READS = (
 SAMPLE_EPISODES = {"birthday": "ep_9031", "groceries": "ep_9150"}
 COMMAND_PROPERTIES = {"color": "color", "play_mood": "play_mood", "set_cook_standby": "preset"}
 STORY_TIMING_KEYS = ("before_start_default_min", "guest_window_before_min", "end_fallback_min")
+PACKAGE_EVENT = "package.brought_in"
 
 
 def demo_config():
@@ -51,11 +54,26 @@ def story_timing():
     try:
         numbers = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
         timing = {key: {"normal": numbers[key], "demo": numbers["demo"][key]} for key in STORY_TIMING_KEYS}
+        quiet = {"normal": numbers.get("quiet_s"), "demo": numbers["demo"].get("quiet_s")}
     except (OSError, ValueError, yaml.YAMLError, KeyError, TypeError):
         return None
     if any(type(value) is not int or value < 0 for pair in timing.values() for value in pair.values()):
         return None
+    if all(type(value) is int and value >= 0 for value in quiet.values()):
+        timing["quiet_s"] = quiet
     return timing
+
+
+def fixture_shares():
+    """The live fixture rewrites shared_at when replaying a recorded order."""
+    shares = {}
+    for episode_id in SAMPLE_EPISODES.values():
+        try:
+            episode = Episode.model_validate_json((FIXTURES / episode_id / "episode.json").read_bytes())
+        except (OSError, ValueError):
+            continue
+        shares[episode.episode_id] = episode.shared_at
+    return shares
 
 
 def same_origin(request: Request):
@@ -99,6 +117,16 @@ def received_actions(body: dict) -> dict:
 def story_ledger(body: dict) -> tuple[list, dict]:
     """Join ledger rows to the Hub's recorded schedule and trigger evidence for display."""
     operations, restores, guest_windows = {}, {}, {}
+    package_releases = {
+        (version["plan_id"], version["plan_version"])
+        for version in body.get("plan_history", [])
+        if any(
+            change["from"].get("released") is False
+            and change["to"].get("event") == PACKAGE_EVENT
+            and change["to"].get("released") is True
+            for change in (version.get("changes") or {}).get("triggers_changed", [])
+        )
+    }
     for story in body.get("task_stories", []):
         plan_id, task_id = story["plan_id"], story["task_id"]
         context = {"plan_id": plan_id, "task_id": task_id}
@@ -131,7 +159,9 @@ def story_ledger(body: dict) -> tuple[list, dict]:
     ledger = []
     for row in body.get("ledger", []):
         timing = operations.get(row.get("operation_id"))
-        if row["kind"] == "restore" and not timing:
+        if row["kind"] == "plan" and (row["plan_id"], row.get("plan_version")) in package_releases:
+            timing = {"event": PACKAGE_EVENT}
+        elif row["kind"] == "restore" and not timing:
             timing = next((restores[report["id"]] for report in row.get("reports", [])
                            if report["kind"] == "restore" and report["id"] in restores), None)
         ledger.append(dict(row, timing=timing) if timing else row)
@@ -167,6 +197,7 @@ def mount_demo(application: FastAPI, apply_home_event):
             "hub": bool(cfg["hub"]),
             "fixture": bool(cfg["fixture_episode"]),
             "story_timing": story_timing(),
+            **({"fixture_shares": fixture_shares()} if cfg["fixture_episode"] else {}),
         }
 
     @application.get("/demo/api/server/{path:path}")
