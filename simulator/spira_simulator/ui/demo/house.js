@@ -1,4 +1,5 @@
-import * as THREE from "three";
+import * as THREE from "./three.module.min.js";
+import { HOUSE_DEVICES } from "./chain.js";
 
 export const TV_SCENES = { kids_party: "어린이 파티", party: "파티", calm: "차분한 분위기", cinema: "영화" };
 
@@ -13,6 +14,53 @@ export function hsvColor({ hue, saturation, brightness } = {}) {
   return "#" + colors[Math.floor(segment)]
     .map((channel) => Math.round((channel + value - chroma) * 255).toString(16).padStart(2, "0"))
     .join("");
+}
+
+function traceLabel(chain, device) {
+  const task = chain.tasks.find(({ id }) => id === device.traces[0]);
+  if (!task?.line) return "";
+  const intent = chain.intents.find(({ id }) => id === task.intentId);
+  const taskText = `${task.line} ${task.need}`;
+  const slots = (intent?.slotIds ?? []).flatMap((id) => {
+    const slot = chain.slots.find((entry) => entry.id === id);
+    if (!slot?.value) return [];
+    const item = slot.basis.find((id) => chain.items.some((entry) => entry.id === id));
+    const words = new Set(`${slot.label} ${slot.value}`.match(/[\p{L}\p{N}]+/gu));
+    const matches = [...words].filter((word) => word.length > 1 && taskText.includes(word)).length;
+    return [{ slot, item, matches }];
+  });
+  // The task links to an intent. Prefer item-backed slots that share its wording.
+  const [link] = slots.sort((a, b) => Number(Boolean(b.item)) - Number(Boolean(a.item)) || b.matches - a.matches);
+  return [task.line, link && `${link.slot.label}: ${link.slot.value}`, link?.item].filter(Boolean).join(" ← ");
+}
+
+export function houseDevicePresentation(chain) {
+  return new Map(chain.devices.map((device) => [device.logicalId, {
+    resting: chain.hasHubPlan && !device.chosen,
+    evidence: chain.hasHubPlan && device.chosen ? traceLabel(chain, device) : "",
+  }]));
+}
+
+export function layoutHouseLabels(markers, viewWidth, viewHeight) {
+  const gap = 8;
+  const boxes = markers.map(({ x, y, width, height, ...marker }) => {
+    const left = Math.max(gap, Math.min(x - width / 2, viewWidth - width - gap));
+    return { ...marker, x, y, left, right: left + width, height };
+  }).sort((a, b) => a.y - b.y);
+  const shareColumn = (a, b) => a.left < b.right + gap && a.right + gap > b.left;
+
+  // Reserve space for lower labels before placing each label near its anchor.
+  for (let index = boxes.length - 1; index >= 0; index--) {
+    const box = boxes[index];
+    const lower = boxes.slice(index + 1).filter((other) => shareColumn(box, other));
+    box.latestTop = Math.min(viewHeight - 44, ...lower.map((other) => other.latestTop - gap)) - box.height;
+  }
+  for (const [index, box] of boxes.entries()) {
+    const upper = boxes.slice(0, index).filter((other) => shareColumn(box, other));
+    const earliestTop = Math.max(46, ...upper.map((other) => other.top + other.height + gap));
+    box.top = Math.max(earliestTop, Math.min(box.y - box.height - 12, box.latestTop));
+  }
+  return boxes;
 }
 
 // The fixed I1 cutaway. View direction and entrance cues are separate from device values.
@@ -31,6 +79,7 @@ export function createHouse(stage, overlay, view) {
   const camera = new THREE.OrthographicCamera();
   const floorGlow = new THREE.Color();
   const reflectedWhite = new THREE.Color("#fff4ea");
+  const restingGlow = new THREE.Color("#e6e2df");
   const mainLight = new THREE.DirectionalLight("#fff0d8", 2.4);
   mainLight.position.set(-5,12,7); mainLight.castShadow = true;
   Object.assign(mainLight.shadow.camera,{left:-11,right:11,top:9,bottom:-9,near:.5,far:35});
@@ -199,9 +248,11 @@ export function createHouse(stage, overlay, view) {
   for(const x of [-1.52,.13]) box(.16,.11,.40,wood,x,.12,-3.14,.03);
   const tvTexture=canvasTexture(1024,576);
   const tvMaterial=new THREE.MeshBasicMaterial({map:tvTexture.texture,color:"#ffffff",toneMapped:false});
-  box(2.25,1.28,.10,dark,-.70,1.52,-3.48,.057);
-  plane(2.12,1.16,tvMaterial,-.70,1.52,-3.419);
+  const display=group(0,0,0);
+  box(2.25,1.28,.10,dark,-.70,1.52,-3.48,.057,display);
+  plane(2.12,1.16,tvMaterial,-.70,1.52,-3.419,display);
   const tvReflect = new THREE.PointLight("#df83bd",0,4,2);
+  const tvTint = tvReflect.color.clone();
   tvReflect.position.set(-.72,1.53,-3.17);scene.add(tvReflect);
 
   const pendant = group(-1.42,2.73,-.23);
@@ -232,8 +283,10 @@ export function createHouse(stage, overlay, view) {
   const floorSpill=lightPatch(6.0,5.8,-1.55,.145,-.17,true);
   const wallSpill=lightPatch(4.8,3.1,-1.28,1.45,-3.726,false);
 
-  box(.53,.19,.30,dark,.82,.16,-2.82,.055);
+  const cleanerModel=group(0,0,0);
+  box(.53,.19,.30,dark,.82,.16,-2.82,.055,cleanerModel);
   const cleaner=group(.82,.064,-2.59);
+  cleanerModel.add(cleaner);
   disk(.275,.098,dark,0,.062,0,cleaner);disk(.264,.064,ivory,0,.125,0,cleaner);
   disk(.082,.052,steel,-.07,.171,-.053,cleaner);disk(.058,.014,dark,-.07,.200,-.053,cleaner);
   const vacuumLed=material("#778875",{emissive:"#85bfb6",emissiveIntensity:.3});
@@ -245,7 +298,7 @@ export function createHouse(stage, overlay, view) {
   const routeCurve=new THREE.CatmullRomCurve3(route.map(([x,z])=>new THREE.Vector3(x,.078,z)));
   for(let i=0;i<=22;i++){
     const point=routeCurve.getPoint(i/22);
-    const dot=disk(.020,.009,trailMaterial,point.x,point.y,point.z);dot.castShadow=false;cleaningTrail.push(dot);
+    const dot=disk(.020,.009,trailMaterial,point.x,point.y,point.z,cleanerModel);dot.castShadow=false;cleaningTrail.push(dot);
   }
 
   const cabinet=material("#aba68b");
@@ -260,46 +313,51 @@ export function createHouse(stage, overlay, view) {
     box(.17,.022,.049,brass,x,.795,-2.505,.008);
   }
 
-  box(1.18,.063,.65,glass,2.24,1.088,-3.03,.034);
-  function ring(radius,stroke,s,x,y,z) {
-    const object=mesh(new THREE.TorusGeometry(radius,stroke,8,42),s,x,y,z);
+  const cooktop=group(0,0,0);
+  box(1.18,.063,.65,glass,2.24,1.088,-3.03,.034,cooktop);
+  function ring(radius,stroke,s,x,y,z,parent) {
+    const object=mesh(new THREE.TorusGeometry(radius,stroke,8,42),s,x,y,z,parent);
     object.rotation.x=-Math.PI/2;return object;
   }
   const burner=material("#60576a");
-  ring(.157,.009,burner,2.00,1.124,-3.00);
-  ring(.107,.008,burner,2.43,1.124,-3.13);
-  ring(.079,.008,burner,2.50,1.124,-2.88);
+  ring(.157,.009,burner,2.00,1.124,-3.00,cooktop);
+  ring(.107,.008,burner,2.43,1.124,-3.13,cooktop);
+  ring(.079,.008,burner,2.50,1.124,-2.88,cooktop);
   const lockMaterial=material("#9c5c54",{emissive:"#ef7852",emissiveIntensity:0});
-  const lockIcon=box(.12,.012,.096,lockMaterial,2.25,1.128,-2.755,.010);
-  const lockShackle=ring(.039,.011,lockMaterial,2.25,1.13,-2.807);
+  const lockIcon=box(.12,.012,.096,lockMaterial,2.25,1.128,-2.755,.010,cooktop);
+  const lockShackle=ring(.039,.011,lockMaterial,2.25,1.13,-2.807,cooktop);
 
-  box(1.05,.73,.14,dark,3.73,.59,-2.569,.052);
-  box(.93,.47,.053,glass,3.73,.49,-2.477,.036);
+  const oven=group(0,0,0);
+  box(1.05,.73,.14,dark,3.73,.59,-2.569,.052,oven);
+  box(.93,.47,.053,glass,3.73,.49,-2.477,.036,oven);
   const ovenWindow=material("#392f42",{roughness:.29,emissive:"#f3bd69",emissiveIntensity:0});
-  box(.82,.35,.015,ovenWindow,3.73,.49,-2.447,.048);
-  box(.76,.039,.064,steel,3.73,.711,-2.42,.012);
+  box(.82,.35,.015,ovenWindow,3.73,.49,-2.447,.048,oven);
+  box(.76,.039,.064,steel,3.73,.711,-2.42,.012,oven);
   const ovenTexture=canvasTexture(600,150);
   const ovenScreen=new THREE.MeshBasicMaterial({map:ovenTexture.texture,toneMapped:false});
-  plane(.65,.14,ovenScreen,3.73,.846,-2.488);
+  plane(.65,.14,ovenScreen,3.73,.846,-2.488,oven);
 
-  box(.21,.27,.12,ivory,5.14,1.27,-3.53,.027);
+  const kettle=group(0,0,0);
+  box(.21,.27,.12,ivory,5.14,1.27,-3.53,.027,kettle);
   const plugLed=material("#778875",{emissive:"#78d6ae",emissiveIntensity:0});
-  disk(.025,.012,plugLed,5.14,1.29,-3.452).rotation.x=Math.PI/2;
-  tube([[5.14,1.17,-3.45],[5.23,1.08,-3.40],[5.38,1.11,-3.28]],.022,dark);
-  disk(.203,.059,dark,5.43,1.10,-3.16);
-  disk(.154,.39,material("#d1a37c"),5.43,1.32,-3.16,scene,.176);
-  disk(.154,.035,brass,5.43,1.522,-3.16);disk(.046,.05,wood,5.43,1.558,-3.16);
-  tube([[5.55,1.44,-3.16],[5.67,1.43,-3.16],[5.67,1.22,-3.16],[5.55,1.22,-3.16]],.033,dark);
-  tube([[5.30,1.31,-3.13],[5.22,1.39,-3.12],[5.20,1.47,-3.11]],.041,brass);
+  disk(.025,.012,plugLed,5.14,1.29,-3.452,kettle).rotation.x=Math.PI/2;
+  tube([[5.14,1.17,-3.45],[5.23,1.08,-3.40],[5.38,1.11,-3.28]],.022,dark,kettle);
+  disk(.203,.059,dark,5.43,1.10,-3.16,kettle);
+  disk(.154,.39,material("#d1a37c"),5.43,1.32,-3.16,kettle,.176);
+  disk(.154,.035,brass,5.43,1.522,-3.16,kettle);disk(.046,.05,wood,5.43,1.558,-3.16,kettle);
+  tube([[5.55,1.44,-3.16],[5.67,1.43,-3.16],[5.67,1.22,-3.16],[5.55,1.22,-3.16]],.033,dark,kettle);
+  tube([[5.30,1.31,-3.13],[5.22,1.39,-3.12],[5.20,1.47,-3.11]],.041,brass,kettle);
 
-  box(.95,2.20,1.04,steel,6.12,1.17,-3.23,.08);
-  box(.91,1.57,.075,ivory,6.12,1.48,-2.665,.046);
-  box(.91,.55,.075,ivory,6.12,.382,-2.665,.046);
-  box(.034,.44,.069,steel,5.79,1.39,-2.603,.014);
-  box(.38,.034,.070,steel,6.09,.56,-2.603,.013);
+  const fridge=group(0,0,0);
+  box(.95,2.20,1.04,steel,6.12,1.17,-3.23,.08,fridge);
+  box(.91,1.57,.075,ivory,6.12,1.48,-2.665,.046,fridge);
+  box(.91,.55,.075,ivory,6.12,.382,-2.665,.046,fridge);
+  box(.034,.44,.069,steel,5.79,1.39,-2.603,.014,fridge);
+  box(.38,.034,.070,steel,6.09,.56,-2.603,.013,fridge);
   const fridgeTexture=canvasTexture(360,420);
   const fridgeScreen=new THREE.MeshBasicMaterial({map:fridgeTexture.texture,toneMapped:false});
-  box(.37,.47,.034,dark,6.18,1.64,-2.616,.025);
+  box(.37,.47,.034,dark,6.18,1.64,-2.616,.025,fridge);
+  // The notice stays legible while the appliance rests.
   plane(.329,.426,fridgeScreen,6.18,1.64,-2.595);
 
   const tableTop=disk(.82,.094,oak,4.15,.86,1.50);tableTop.scale.x=1.23;
@@ -325,8 +383,15 @@ export function createHouse(stage, overlay, view) {
   const currentTarget = new THREE.Vector3();
   const targetLamp = new THREE.Color("#ffd29a");
   const currentLamp = targetLamp.clone();
-  const previous = new Map();
+  const models = {
+    cleaner_01: cleanerModel, light_01: pendant, display_01: display, cooktop_01: cooktop,
+    oven_01: oven, fridge_01: fridge, plug_kettle: kettle,
+  };
+  const normalMaterials = new Map();
+  const restingMaterials = new Map();
+  const readings = new Map();
   const labels = new Map();
+  let presentation = new Map();
   let spill = 0, targetSpill = 0, targetIntensity = 0;
   let jobRunning = false, cleanSince = 0, tvScene;
   let entrance = "";
@@ -430,7 +495,6 @@ export function createHouse(stage, overlay, view) {
     display_01({ play_mood }) {
       tvScene = play_mood?.scene ?? null;
       paintTv();
-      tvReflect.intensity = tvScene === "kids_party" ? 12 : 0;
       return TV_SCENES[tvScene] || tvScene || "꺼짐";
     },
     oven_01: paintOven,
@@ -465,38 +529,102 @@ export function createHouse(stage, overlay, view) {
   paintOven({});
   paintFridge(null);
 
-  function update(devices) {
+  function restingMaterial(normal) {
+    if (!restingMaterials.has(normal)) {
+      const muted = normal.clone();
+      muted.onBeforeCompile = (shader) => {
+        // Apply after lighting so textures and emissive surfaces also rest.
+        shader.fragmentShader = shader.fragmentShader.replace("#include <opaque_fragment>", `
+          float luma = dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722));
+          outgoingLight = mix(vec3(luma), outgoingLight, 0.12) * 0.46;
+          #include <opaque_fragment>
+        `);
+      };
+      restingMaterials.set(normal, muted);
+    }
+    return restingMaterials.get(normal);
+  }
+
+  function setChain(chain) {
+    const next = houseDevicePresentation(chain);
     let changed = false;
-    const byId = new Map(devices.map((device) => [device.logicalId, device]));
+    for (const [id, model] of Object.entries(models)) {
+      const { resting = false, evidence = "" } = next.get(id) ?? {};
+      const previous = presentation.get(id);
+      if (resting !== (previous?.resting ?? false)) {
+        model.traverse((object) => {
+          if (!object.isMesh) return;
+          if (!normalMaterials.has(object)) normalMaterials.set(object, object.material);
+          const normal = normalMaterials.get(object);
+          object.material = resting ? restingMaterial(normal) : normal;
+        });
+        changed = true;
+      }
+      if (resting !== (previous?.resting ?? false) || evidence !== (previous?.evidence ?? "")) {
+        renderLabel(id, resting, evidence);
+        changed = true;
+      }
+    }
+    presentation = next;
+    view.classList.toggle("resting-light", presentation.get("light_01")?.resting === true);
+    if (changed) queue();
+  }
+
+  function renderLabel(id, resting, evidence) {
+    const reading = readings.get(id);
+    let label = labels.get(id);
+    const visible = reading && (id === "fridge_01" ? reading.notice : !resting && reading.show);
+    if (!visible) {
+      if (label) label.hidden = true;
+      return;
+    }
+    if (!label) {
+      label = document.createElement("span");
+      label.className = "marker";
+      const value = document.createElement("span");
+      value.className = "marker-value";
+      const trace = document.createElement("span");
+      trace.className = "marker-trace";
+      label.append(value, trace);
+      overlay.append(label);
+      labels.set(id, label);
+    }
+    label.hidden = false;
+    label.firstElementChild.textContent = reading.text;
+    label.lastElementChild.textContent = evidence;
+    label.lastElementChild.hidden = !evidence;
+    label.classList.toggle("theme", reading.theme);
+  }
+
+  function update(snapshot) {
+    let changed = false;
+    const byId = new Map(snapshot.devices.map((device) => [device.logical_id, device]));
     for (const [id, paint] of Object.entries(painters)) {
       const device = byId.get(id);
-      const values = device.state ?? {};
+      const values = device?.values ?? {};
       const observed = Object.keys(values).length > 0;
-      const quality = device.state === null || device.available === false ? "연결 끊김"
+      const quality = !device?.values || device.available === false ? "연결 끊김"
         : !observed ? "확인할 수 없음" : device.observation === "stale" ? "이전 관측" : "";
       const key = JSON.stringify([values, quality]);
-      const old = previous.get(id);
-      if (old === key) continue;
-      previous.set(id, key);
+      const previous = readings.get(id);
+      if (previous?.key === key) continue;
       changed = true;
 
       const detail = paint(values);
       const active = {
         light_01: Boolean(values.color?.hue != null && values.power) || values.power === false,
         display_01: Boolean(values.play_mood), oven_01: Boolean(values.preset || values.in_use),
-        fridge_01: Boolean(values.show_notice), cooktop_01: Boolean(values.child_lock || values.in_use),
-        plug_kettle: values.power === false, cleaner_01: jobRunning,
+        cooktop_01: Boolean(values.child_lock || values.in_use), plug_kettle: values.power === false,
+        cleaner_01: jobRunning || values.job_status === "completed",
       }[id];
-      const existing = labels.get(id);
-      if (!quality && !active && old === undefined && !existing) continue;
-      const label = existing || document.createElement("span");
-      label.className = "marker";
-      label.textContent = [device.label, observed && detail, quality].filter(Boolean).join(" · ");
-      label.classList.toggle("theme", Boolean(id === "light_01" && targetSpill || id === "display_01" && tvScene === "kids_party"));
-      if (!existing) {
-        labels.set(id, label);
-        overlay.append(label);
-      }
+      readings.set(id, {
+        key, show: Boolean(quality || active || previous),
+        notice: Boolean(values.show_notice),
+        text: [HOUSE_DEVICES[id].label, observed && detail, quality].filter(Boolean).join(" · "),
+        theme: Boolean(id === "light_01" && targetSpill || id === "display_01" && tvScene === "kids_party"),
+      });
+      const { resting = false, evidence = "" } = presentation.get(id) ?? {};
+      renderLabel(id, resting, evidence);
     }
     if (changed) {
       renderer.shadowMap.needsUpdate = true;
@@ -512,32 +640,18 @@ export function createHouse(stage, overlay, view) {
   }
 
   function placeLabels() {
-    const gap = 8;
-    const placed = [];
     // Measure in stage pixels, before the outer frame scales to the screen.
-    const markers = Array.from(labels, ([id, label]) => {
+    const markers = Array.from(labels).flatMap(([id, label]) => {
+      if (label.hidden) return [];
       const { x, y } = project(id);
-      return { label, x: x * viewWidth, y: y * viewHeight, width: label.offsetWidth, height: label.offsetHeight };
+      return [{ label, x: x * viewWidth, y: y * viewHeight, width: label.offsetWidth, height: label.offsetHeight }];
     });
-    for (const { label, x, y, width, height } of markers) {
-      const left = Math.max(gap, Math.min(x - width / 2, viewWidth - width - gap));
-      const lastTop = viewHeight - height - 44;
-      const clamp = (top) => Math.max(gap, Math.min(top, lastTop));
-      const preferred = clamp(y - height - 12);
-      const neighbors = placed.filter((box) => left < box.right + gap && left + width + gap > box.left);
-      const candidates = [preferred, clamp(y + 12), ...neighbors.flatMap(({ top, bottom }) => [
-        clamp(top - height - gap), clamp(bottom + gap),
-      ])];
-      candidates.sort((a, b) => Math.abs(a - preferred) - Math.abs(b - preferred));
-      const top = candidates.find((value) => neighbors.every((box) =>
-        value + height + gap <= box.top || value >= box.bottom + gap)) ?? preferred;
-      const bottom = top + height;
-      placed.push({ left, right: left + width, top, bottom });
+    for (const { label, x, y, left, top, height } of layoutHouseLabels(markers, viewWidth, viewHeight)) {
       label.style.left = `${left}px`;
       label.style.top = `${top}px`;
       label.style.setProperty("--leader-x", `${x - left}px`);
       label.style.setProperty("--leader-top", `${Math.min(y - top, height)}px`);
-      label.style.setProperty("--leader-height", `${Math.max(top - y, y - bottom, 0)}px`);
+      label.style.setProperty("--leader-height", `${Math.max(top - y, y - top - height, 0)}px`);
     }
   }
 
@@ -612,14 +726,19 @@ export function createHouse(stage, overlay, view) {
     currentTarget.lerp(goalTarget, amount);
     zoom = THREE.MathUtils.lerp(zoom, targetZoom, amount);
     orient();
+    const idleLamp = presentation.get("light_01")?.resting;
+    const idleTv = presentation.get("display_01")?.resting;
+    tvReflect.color.copy(idleTv ? restingGlow : tvTint);
+    tvReflect.intensity = tvScene === "kids_party" ? (idleTv ? 3 : 12) : 0;
     currentLamp.lerp(targetLamp, amount);
     lamp.color.copy(currentLamp);
-    lamp.intensity = THREE.MathUtils.lerp(lamp.intensity, targetIntensity, amount);
+    if (idleLamp) lamp.color.lerp(restingGlow, .85);
+    lamp.intensity = THREE.MathUtils.lerp(lamp.intensity, targetIntensity * (idleLamp ? .28 : 1), amount);
     lampSource.color.copy(currentLamp).lerp(reflectedWhite, .45);
     lampSource.emissive.copy(currentLamp);
     lampSource.emissiveIntensity = lamp.intensity / 26;
-    spill = THREE.MathUtils.lerp(spill, targetSpill, amount);
-    floorGlow.copy(currentLamp).lerp(reflectedWhite, .18);
+    spill = THREE.MathUtils.lerp(spill, targetSpill * (idleLamp ? .25 : 1), amount);
+    floorGlow.copy(lamp.color).lerp(reflectedWhite, .18);
     floorSpill.color.copy(floorGlow);
     floorSpill.opacity = spill * .46;
     wallSpill.color.copy(floorGlow);
@@ -632,11 +751,18 @@ export function createHouse(stage, overlay, view) {
       cleaningTrail.forEach((dot, index) => { dot.visible = index / 22 <= distance; });
       renderer.shadowMap.needsUpdate = true;
     }
+    for (const [normal, muted] of restingMaterials) {
+      muted.color.copy(normal.color);
+      if (normal.emissive) {
+        muted.emissive.copy(normal.emissive);
+        muted.emissiveIntensity = normal.emissiveIntensity;
+      }
+    }
     renderer.render(scene, camera);
     placeLabels();
     if (!motion.matches && (now < readyAt || jobRunning)) request = requestAnimationFrame(frame);
   }
 
   new ResizeObserver(resize).observe(stage);
-  return { resize, update, focus, setMoment, anchor: project };
+  return { resize, update, setChain, focus, setMoment, anchor: project };
 }

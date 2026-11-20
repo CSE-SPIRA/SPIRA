@@ -7,7 +7,7 @@ const DEVICE_TYPES = {
   light: "조명", display: "TV", cleaner: "로봇청소기", cooktop: "인덕션",
   oven: "오븐", fridge: "냉장고", smart_plug: "스마트 플러그", speaker: "스피커",
 };
-const HOUSE_DEVICES = {
+export const HOUSE_DEVICES = {
   cleaner_01: { label: "로봇청소기", room: "living_room" },
   light_01: { label: "거실 조명", room: "living_room" },
   display_01: { label: "TV", room: "living_room" },

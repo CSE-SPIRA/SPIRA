@@ -50,6 +50,7 @@ function refreshChain() {
     hubPlan: hub?.plan_actions?.[episodeId], hubLedger: hub?.ledger, snapshot,
     storyTime: { timing: config.story_timing, guestWindows: hub?.guest_windows?.[episodeId] },
   });
+  state.house?.setChain(state.chain);
 }
 
 function paintTheme(text, theme) {
@@ -629,7 +630,7 @@ async function refreshSnapshot() {
   state.snapshot = await api("/sim/snapshot", { signal: AbortSignal.timeout(2500) });
   refreshChain();
   const { devices } = state.chain;
-  state.house?.update(devices);
+  state.house?.update(state.snapshot);
   const observed = devices.filter((device) => device.modeled && device.state !== null);
   const key = $("device-key");
   const markup = rows(observed, ({ label, substrate, assumption }) =>
@@ -673,6 +674,8 @@ function openHouseView() {
       console.error(error);
     }
   }
+  state.house?.setChain(state.chain);
+  if (state.snapshot) state.house?.update(state.snapshot);
   state.house?.resize();
   directHouse(true);
   renderLedger();

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { buildChain } from "../spira_simulator/ui/demo/chain.js";
+import { houseDevicePresentation, layoutHouseLabels } from "../spira_simulator/ui/demo/house.js";
 
 function fixture(episode, name) {
   return JSON.parse(readFileSync(new URL(`../../contracts/fixtures/${episode}/${name}.json`, import.meta.url)));
@@ -79,6 +80,54 @@ test("groceries retain the item notices with an empty preparation chain", () => 
   assert.ok(chain.devices.every(({ chosen, traces }) => !chosen && traces.length === 0));
   assert.deepEqual(chain.funnel, { items: 6, similar: 12, bundled: 0, unbundled: 6, intents: 0, tasks: 0, cardLines: 0, devices: 1 });
   assert.equal(chain.cardReady, true);
+});
+
+test("the birthday house rests only the fridge and traces the changed light back to the topper", () => {
+  const input = birthday();
+  const beforePlan = houseDevicePresentation(buildChain({ ...input, hubPlan: undefined }));
+  assert.ok([...beforePlan.values()].every(({ resting, evidence }) => !resting && !evidence));
+
+  const house = houseDevicePresentation(buildChain(input));
+  assert.deepEqual([...house.keys()].filter((id) => !house.get(id).resting),
+    ["cleaner_01", "light_01", "display_01", "cooktop_01", "oven_01", "plug_kettle"]);
+  assert.deepEqual(house.get("fridge_01"), { resting: true, evidence: "" });
+  assert.equal(house.get("light_01").evidence,
+    "손님 오시면 공주 분위기 화면·조명 ← 테마: 디즈니 공주 ← 케이크 토퍼");
+  assert.equal(house.get("oven_01").evidence,
+    "오븐 컵케이크 설정 대기 ← 활동: 컵케이크 굽고 꾸미기 ← 컵케이크 믹스");
+});
+
+test("the grocery house rests all seven devices even with an observed item notice", () => {
+  const episode = fixture("ep_9150", "episode");
+  const rationale = fixture("ep_9150", "rationale");
+  const hubPlan = fixture("ep_9150", "plan.v1");
+  const snapshot = { devices: [{ logical_id: "fridge_01", values: { show_notice: rationale.item_tasks[0].text } }] };
+  const house = houseDevicePresentation(buildChain({ episode, rationale, hubPlan, snapshot }));
+  assert.equal(house.size, 7);
+  for (const presentation of house.values()) {
+    assert.deepEqual(presentation, { resting: true, evidence: "" });
+  }
+});
+
+test("two-line house labels pack without collisions at both demo screen sizes", () => {
+  // The house keeps these stage dimensions while the outer frame scales to fit.
+  const width = 1256, height = 653;
+  const markers = Array.from({ length: 7 }, (_, index) => ({
+    x: 650 + index * 16, y: 580 + index * 5, width: 570, height: 58,
+  }));
+  const labels = layoutHouseLabels(markers, width, height);
+  for (const [screenWidth, screenHeight] of [[1920, 1080], [1440, 900]]) {
+    const scale = Math.min(screenWidth / 1920, screenHeight / 1080);
+    const pixels = (position) => Math.round(position * scale);
+    for (const [index, label] of labels.entries()) {
+      assert.ok(label.left >= 8 && label.right <= width - 8);
+      assert.ok(label.top >= 46 && label.top + label.height <= height - 44);
+      for (const other of labels.slice(index + 1)) {
+        assert.ok(pixels(label.right) <= pixels(other.left) || pixels(other.right) <= pixels(label.left) ||
+          pixels(label.top + label.height) <= pixels(other.top) || pixels(other.top + other.height) <= pixels(label.top));
+      }
+    }
+  }
 });
 
 test("rebased card, timeline and Hub records share story-time labels", () => {

@@ -50,7 +50,7 @@ Add `owners=1` to the query string to show the owner tags. They are hidden by de
 | The active stage and flow strip | `ui/demo/flow.js` (`createFlow(root, nodes)` returns `setStage(n)` and `setCounts(counts)`, with one optional count label per node, shown when reached) | |
 | Stage titles, leads, order; timeline steps and cameras | `ui/demo/scenes.json` | code |
 | Layout and component styles | `ui/demo/index.html`, `ui/demo/demo.css` | |
-| 3D models, device faces and lamp anchor | `ui/demo/house.js` (`createHouse` exposes `resize` and `update(devices)`) | |
+| 3D models, device faces and lamp anchor | `ui/demo/house.js` (`createHouse` reads values through `update(snapshot)` and plan emphasis through `setChain(chain)`) | |
 | Web evidence chain shape and joins | `ui/demo/chain.js` | Panel renderers |
 | Data fetching, stage output, phone and handoff | `ui/demo/demo.js` | |
 | Story clock and time formatting | `ui/demo/story-time.js` | |
@@ -87,6 +87,10 @@ Rules the demo keeps:
 - Device looks come from World values. A timeline step moves the camera and, for
   delivery, arrival and end, sends the corresponding World event. Ledger times
   and delivery status come from the Hub.
+- Once the Hub has received the plan, devices outside preparation rest without
+  labels. A changed preparation device adds a task, situation slot and item
+  from the evidence chain below its observed value. The fridge can still show
+  its observed item notice.
 - `GET /demo/api/hub` reads only the Hub's `/state`. Waiting actions and recorded
   run commands from received plans supply the device count and settings. The
   handoff swatch uses the matching plan's light colour. Fixture judgments are
