@@ -1,4 +1,5 @@
 import json
+import re
 import sqlite3
 from datetime import datetime
 
@@ -37,7 +38,29 @@ def test_sim_at01_configured_household_without_peers(wire, tmp_path):
             device["capabilities"]["properties"]
         )
     with TestClient(create_app(tmp_path / "web.db", broker_enabled=False)) as client:
-        assert client.get("/sim/viewer").status_code == 200
+        page = client.get("/sim/viewer").raise_for_status().text
+        assert 'id="viewer-world" class="house-world"' in page
+        assert page.count('data-device="') == 9
+        for name in ("tokens.css", "house.css", "viewer.css"):
+            assert f'href="/sim/assets/house/{name}"' in page
+            assert client.get(f"/sim/assets/house/{name}").raise_for_status().headers[
+                "content-type"
+            ].startswith("text/css")
+        stage = client.get("/sim/stage.js").raise_for_status().text
+        assert 'import("/sim/assets/house/house.js")' in stage and "/demo/" not in stage
+        house = client.get("/sim/assets/house/house.js").raise_for_status().text
+        assert "/demo/" not in house and "marker-trace" not in house
+        for name in ("house.js", "devices.js", "three.module.min.js", "castle.jpg"):
+            assert client.get(f"/sim/assets/house/{name}").raise_for_status().content
+        tokens = client.get("/sim/assets/house/tokens.css").raise_for_status().text
+        font_paths = re.findall(r'url\("\./(fonts/[^"]+)"\)', tokens)
+        assert len(font_paths) == 4
+        for path in font_paths:
+            font = client.get(f"/sim/assets/house/{path}").raise_for_status()
+            assert font.headers["content-type"] == "font/woff2"
+            assert font.content.startswith(b"wOF2")
+        license_text = client.get("/sim/assets/house/fonts/LICENSE.txt").raise_for_status().text
+        assert "SIL OPEN FONT LICENSE" in license_text
         snapshot = client.get("/sim/snapshot").json()
         assert snapshot["household_id"] == fixture.household_id
         assert len(snapshot["devices"]) == 9

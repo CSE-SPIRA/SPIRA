@@ -71,6 +71,15 @@ ENTRANCE_EVENTS = {
     "presence.room_occupied": ("presence", "손님 있음"),
     "presence.room_empty": ("presence", "손님 나감"),
 }
+HOUSE_VISUAL_PROPERTIES = {
+    "cleaner": ("job_status", "in_use"),
+    "light": ("power", "color"),
+    "display": ("play_mood",),
+    "cooktop": ("child_lock", "in_use"),
+    "oven": ("preset", "in_use", "job_status"),
+    "fridge": ("show_notice",),
+    "smart_plug": ("power",),
+}
 
 ON = "켜짐"
 OFF = "꺼짐"
@@ -242,32 +251,57 @@ def viewer_world(world: World) -> dict:
         event = ENTRANCE_EVENTS.get(fact["event_type"])
         if fact["logical_id"] is None and event:
             sensor, label = event
-            entrance[sensor] = {"label": label, "at": display_time(fact["occurred_at"])}
+            occurred_at = fact["occurred_at"]
+            entrance.pop(sensor, None)
+            entrance[sensor] = {
+                "signal": sensor,
+                "label": label,
+                "at": display_time(occurred_at),
+                "occurred_at": occurred_at,
+            }
+    devices = tiles(world, snapshot, changes)
+    for device, report in zip(devices, snapshot["devices"], strict=True):
+        device["visual_values"] = {
+            key: report["values"][key]
+            for key in HOUSE_VISUAL_PROPERTIES.get(report["device_type"], ())
+            if key in report["values"]
+        }
     return {
         "clock": display_time(now),
         "clock_at": now.isoformat(),
-        "tiles": tiles(world, snapshot, changes),
+        "tiles": devices,
         "entrance": list(entrance.values()),
     }
 
 
 def planned_value(command: str, value) -> str | None:
     """The target of a planned action, in household words (device-level only)."""
-    if not isinstance(value, dict):
-        return None
-    match command:
-        case "play_mood":
-            return SCENES.get(value.get("scene"))
-        case "color" if all(k in value for k in ("hue", "saturation", "brightness")):
-            name = "분홍" if value["hue"] == 330 and value["saturation"] else "색상"
-            return f"{name} {number_text(value['hue'])}/{number_text(value['saturation'])}/{number_text(value['brightness'])}"
-        case "color_temp" if "kelvin" in value:
-            return f"{number_text(value['kelvin'])}K"
-        case "set_cook_standby" if "temp_c" in value:
+    match command, value:
+        case "clean", {"room": str(room)}:
+            return ROOM_NAMES.get(room, room if room in ROOM_NAMES.values() else None)
+        case "play_mood", {"scene": str(scene)}:
+            return SCENES.get(scene)
+        case "color", {
+            "hue": (int() | float()) as hue,
+            "saturation": (int() | float()) as saturation,
+            "brightness": (int() | float()) as brightness,
+        }:
+            name = "분홍" if hue == 330 and saturation else "색상"
+            return f"{name} {number_text(hue)}/{number_text(saturation)}/{number_text(brightness)}"
+        case "color_temp", {"kelvin": (int() | float()) as kelvin}:
+            return f"{number_text(kelvin)}K"
+        case "set_cook_standby", {"temp_c": (int() | float()) as degrees}:
             minutes = value.get("minutes")
-            return f"{number_text(value['temp_c'])}°" + (f" {number_text(minutes)}분" if minutes else "")
-        case "play" if value.get("playlist"):
-            return PLAYLISTS.get(value["playlist"], "음악 재생")
+            time = f" {number_text(minutes)}분" if isinstance(minutes, (int, float)) else ""
+            return f"{number_text(degrees)}°{time}"
+        case "play", {"playlist": str(playlist_code)}:
+            playlist = PLAYLISTS.get(playlist_code, "음악")
+            volume = value.get("volume")
+            return f"{playlist} · 볼륨 {number_text(volume)}" if isinstance(volume, (int, float)) else playlist
+        case "mode", {"mode": str(mode)}:
+            return PURIFIER_MODES.get(mode)
+        case "set_course_standby", {"course": str(course)}:
+            return STYLER_COURSES.get(course)
     return None
 
 

@@ -629,7 +629,17 @@ def test_sim_at10_read_only_faint_waiting_and_item_only_episode(tmp_path):
         viewer = client.get("/sim/viewer")
         assert viewer.status_code == 200 and "<button" not in viewer.text
         assert 'class="planned"' in viewer.text
-        assert "border: 1px dashed #9db3e3" in client.get("/sim/style.css").text
+        css = client.get("/sim/assets/house/viewer.css").raise_for_status().text
+        assert "border: 1px dashed var(--green-line)" in css
+        active_view = ElementTree.fromstring(
+            client.get("/sim/viewer?fragment=true").raise_for_status().text
+        )
+        assert active_view.find('.//div[@data-device="light_01"]').get("data-resting") is None
+        assert active_view.find('.//div[@data-device="styler_01"]').get("data-resting") == ""
+        assert (
+            active_view.findtext('.//div[@data-device="light_01"]/article/p[@class="device-value"]')
+            == "3000K"
+        )
         for mode, label in (
             ("stale", "오래된 관찰값"),
             ("missing", "관찰값 누락"),
@@ -670,6 +680,19 @@ def test_sim_at10_read_only_faint_waiting_and_item_only_episode(tmp_path):
         grocery_page = client.get("/sim/viewer").text
         assert "예정된 집 준비 없음" in grocery_page
         assert all(task["text"] not in grocery_page for task in grocery_episode["item_tasks"])
+        grocery_view = ElementTree.fromstring(
+            client.get("/sim/viewer?fragment=true").raise_for_status().text
+        )
+        assert {
+            marker.get("data-device")
+            for marker in grocery_view.findall(".//div[@data-device]")
+            if marker.findall('p[@class="planned"]')
+        } == {"fridge_01"}
+        assert all(
+            marker.get("data-resting") == ""
+            for marker in grocery_view.findall(".//div[@data-device]")
+            if marker.get("data-device") != "fridge_01"
+        )
         for path in ("/sim/snapshot", "/sim/viewer", "/sim/overlay"):
             assert client.post(path, json={}).status_code == 405
         after = client.get("/sim/snapshot").json()
@@ -819,7 +842,7 @@ def test_protective_fallback_overlay_preserves_observed_state(tmp_path):
             assert tile["revisions"] == before[target]["revisions"]
 
 
-def test_sim_at19_live_floor_plans_and_household_content(tmp_path, monkeypatch, clock):
+def test_sim_at19_live_3d_households_and_household_content(tmp_path, monkeypatch, clock):
     birthday_payload = fixture_json("ep_9031/plan.v3.json")
     birthday = Plan.model_validate(birthday_payload)
     mood = next(task.actions for task in birthday.tasks if task.task_id == "t_mood#3")
@@ -886,13 +909,13 @@ def test_sim_at19_live_floor_plans_and_household_content(tmp_path, monkeypatch, 
             )
         assert "가상" in page and "패널 조작 보고 가정" in page
         assert {
-            row.text.strip()
-            for row in view.findall('.//section[@class="entrance"]//li')
+            row.get("data-signal"): row.text.strip()
+            for row in view.findall('.//section[@data-room="entrance"]//li')
         } == {
-            "택배 들임",
-            "초인종 울림",
-            "문 열림 감지",
-            "손님 있음",
+            "package": "택배 들임",
+            "bell": "초인종 울림",
+            "door": "문 열림 감지",
+            "presence": "손님 있음",
         }
         post(
             client,
@@ -935,7 +958,7 @@ def test_sim_at19_live_floor_plans_and_household_content(tmp_path, monkeypatch, 
             )
             == "잔잔한 음악 · 볼륨 30"
         )
-        assert view.findtext('.//section[@class="entrance"]/h2') == "현관"
+        assert view.findtext('.//section[@data-room="entrance"]/h2') == "현관"
 
 
 def test_sim_at20_viewer_projects_world_markers_and_no_reasoning(tmp_path, monkeypatch):
@@ -990,6 +1013,13 @@ def test_sim_at20_viewer_projects_world_markers_and_no_reasoning(tmp_path, monke
         assert "오븐 · 굽기 설정 대기 170° 20분 · 10/17 토 14:00" in page
         assert "냉장고 · 안내 표시 · 택배를 들이면" in page
         view = ElementTree.fromstring(fragment)
+        visual_values = {
+            marker.get("data-device"): json.loads(marker.get("data-values"))
+            for marker in view.findall(".//div[@data-device]")
+        }
+        assert visual_values["display_01"] == {"play_mood": {"scene": "kids_party"}}
+        assert visual_values["light_01"] == {"power": True, "color": {"kelvin": 2700}}
+        assert visual_values["fridge_01"] == {"show_notice": None}
         for device, kind, expected in (
             ("light_01", "person", "아빠 · 가전 앱"),
             ("display_01", "spira", "SPIRA"),
@@ -1015,10 +1045,13 @@ def test_sim_at20_viewer_projects_world_markers_and_no_reasoning(tmp_path, monke
             '"action_path"',
             '"rationale"',
             '"card_id"',
+            "marker-trace",
+            "←",
         ]
         for surface in (
             page,
             fragment,
+            json.dumps(visual_values, ensure_ascii=False),
             json.dumps(overlay, ensure_ascii=False),
             json.dumps(public, ensure_ascii=False),
         ):

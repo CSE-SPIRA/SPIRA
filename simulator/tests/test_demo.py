@@ -25,13 +25,23 @@ def test_demo_is_off_unless_enabled(tmp_path, monkeypatch):
     monkeypatch.delenv("WORLD_DEMO", raising=False)
     with TestClient(create_app(tmp_path / "world.db", broker_enabled=False)) as off:
         assert off.get("/demo").status_code == 404
+        assert off.get("/sim/assets/demo/chain.js").status_code == 404
 
 
 def test_page_assets_and_config(client):
-    assert client.get("/demo").status_code == 200
-    for name in ("demo.js", "chain.js", "house.js", "flow.js", "story-time.js", "tokens.css", "scenes.json", "three.module.min.js"):
-        assert client.get(f"/demo/assets/{name}").status_code == 200, name
-    assert client.get("/demo/assets/..%2Fapi.py").status_code == 404
+    page = client.get("/demo").raise_for_status().text
+    for name in ("demo.js", "chain.js", "flow.js", "story-time.js", "scenes.json"):
+        assert client.get(f"/sim/assets/demo/{name}").status_code == 200, name
+    for name in ("house.css", "tokens.css"):
+        assert f'href="/sim/assets/house/{name}"' in page
+    script = client.get("/sim/assets/demo/demo.js").raise_for_status().text
+    assert 'from "../house/house.js"' in script
+    assert 'className = "marker-trace"' in script
+    assert client.get("/sim/assets/demo/house.js").status_code == 404
+    assert client.get("/demo/assets/house.js", follow_redirects=False).headers[
+        "location"
+    ] == "/sim/assets/house/house.js"
+    assert client.get("/sim/assets/demo/..%2Fapi.py").status_code == 404
     assert client.get("/demo/api/config").json() == {
         "household_id": "h_042", "server": True, "hub": False, "fixture": False, "story_timing": None,
     }

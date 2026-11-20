@@ -1,7 +1,8 @@
 import * as THREE from "./three.module.min.js";
-import { HOUSE_DEVICES } from "./chain.js";
+import { HOUSE_DEVICES } from "./devices.js";
 
 export const TV_SCENES = { kids_party: "어린이 파티", party: "파티", calm: "차분한 분위기", cinema: "영화" };
+const OVERVIEW = { eye: [8.5, 10.6, 17.4], aim: [-0.10, 0.76, 0], zoom: 1 };
 
 export function hsvColor({ hue, saturation, brightness } = {}) {
   if (![hue, saturation, brightness].every(Number.isFinite)) return null;
@@ -16,59 +17,7 @@ export function hsvColor({ hue, saturation, brightness } = {}) {
     .join("");
 }
 
-function traceLabel(chain, device) {
-  const [taskId, otherTaskId] = device.traces;
-  if (!taskId || otherTaskId) return "";
-  const task = chain.tasks.find(({ id }) => id === taskId);
-  if (!task?.line) return "";
-  const intent = chain.intents.find(({ id }) => id === task.intentId);
-  const words = (text) => text.normalize("NFC").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-  const taskText = [task.line, task.need].map(words);
-  const matchesTerm = (word, term) => word === term ||
-    (word?.startsWith(term) && /\p{Script=Hangul}$/u.test(term) &&
-      /^(?:은|는|이|가|을|를|과|와|에|에서|으로|로|의|도|만|까지|부터|에게)$/.test(word.slice(term.length)));
-  const mentions = (phrase) => {
-    const terms = words(phrase);
-    return terms.length > 0 && taskText.some((text) => text.some((_, index) =>
-      terms.every((term, offset) => matchesTerm(text[index + offset], term))));
-  };
-  const slots = (intent?.slotIds ?? []).flatMap((id) => {
-    const slot = chain.slots.find((entry) => entry.id === id);
-    if (!slot?.value) return [];
-    const items = slot.basis.map((id) => chain.items.find((item) => item.id === id)).filter(Boolean);
-    const namedItem = items.find((item) => mentions(item.id) || mentions(item.name));
-    const valueWords = words(slot.value);
-    const namesFullValue = mentions(slot.value);
-    if (!namedItem && !namesFullValue && !valueWords.some((word) => word.length > 1 && mentions(word))) return [];
-    // A field name only strengthens a value match, as in "공주 테마".
-    const namesField = !valueWords.includes(slot.label) && mentions(slot.label);
-    const strength = namedItem ? 4 : namesFullValue ? 3 : namesField ? 2 : 1;
-    return [{ slot, item: (namedItem ?? items[0])?.id, strength }];
-  });
-  const [link, next] = slots.sort((a, b) => b.strength - a.strength);
-  if (!link || link.strength === next?.strength) return task.line;
-  return [task.line, `${link.slot.label}: ${link.slot.value}`, link.item].filter(Boolean).join(" ← ");
-}
-
-export function houseDevicePresentation(chain, focusDevices = []) {
-  const focus = new Set(focusDevices);
-  return new Map(chain.devices.map((device) => {
-    const focused = focus.has(device.logicalId);
-    const resting = chain.hasHubPlan && !device.chosen;
-    let evidence = "";
-    if (chain.hasHubPlan && focused) {
-      if (device.logicalId === "fridge_01" && device.state?.show_notice) {
-        const notices = chain.item_tasks.filter(({ text }) => text === device.state.show_notice);
-        if (notices.length === 1) evidence = `${notices[0].text} ← ${notices[0].item}`;
-      } else if (device.chosen) {
-        evidence = traceLabel(chain, device);
-      }
-    }
-    return [device.logicalId, { focused, resting, evidence }];
-  }));
-}
-
-export function layoutHouseLabels(markers, viewWidth, viewHeight) {
+export function layoutHouseLabels(markers, viewWidth, viewHeight, { fitUnfocused = false } = {}) {
   const gap = 8;
   const minTop = 46;
   const bottom = viewHeight - 44;
@@ -94,16 +43,24 @@ export function layoutHouseLabels(markers, viewWidth, viewHeight) {
     if (box.top + box.height <= bottom) placed.push(box);
   }
   for (const box of boxes.filter((box) => !box.focused)) {
-    box.top = Math.max(minTop, Math.min(preferredTop(box), bottom - box.height));
-    const overlaps = placed.some((other) => shareColumn(box, other) &&
-      box.top < other.top + other.height + gap && box.top + box.height + gap > other.top);
-    if (!overlaps && box.top + box.height <= bottom) placed.push(box);
+    const preferred = Math.max(minTop, Math.min(preferredTop(box), bottom - box.height));
+    const column = placed.filter((other) => shareColumn(box, other));
+    const candidates = [preferred];
+    if (fitUnfocused) {
+      for (const other of column) {
+        candidates.push(other.top - box.height - gap, other.top + other.height + gap);
+      }
+      candidates.sort((a, b) => Math.abs(a - preferred) - Math.abs(b - preferred));
+    }
+    const top = candidates.find((y) => y >= minTop && y + box.height <= bottom &&
+      column.every((other) => y >= other.top + other.height + gap || y + box.height + gap <= other.top));
+    if (top !== undefined) placed.push({ ...box, top });
   }
   return placed;
 }
 
 // The fixed I1 cutaway. View direction and entrance cues are separate from device values.
-export function createHouse(stage, overlay, view) {
+export function createHouse(stage, overlay, view, { decorateLabel } = {}) {
   const motion = matchMedia("(prefers-reduced-motion: reduce)");
   const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
   renderer.shadowMap.enabled = true;
@@ -292,6 +249,11 @@ export function createHouse(stage, overlay, view) {
   disk(.191,.025,dark,0,.704,0,purifier);
   for(let i=-2;i<=2;i++) box(.24,.011,.015,steel,0,.721,i*.052,.004,purifier);
 
+  const speaker=group(-2.46,.08,-3.19);
+  speaker.visible = false;
+  box(.38,.72,.35,dark,0,.36,0,.06,speaker);
+  box(.32,.62,.055,textile("#514a47","#a99989"),0,.36,.18,.035,speaker);
+
   box(2.27,.48,.60,oak,-.72,.35,-3.15,.055);
   for(let i=0;i<3;i++){
     const x=-1.44+i*.72;
@@ -411,7 +373,7 @@ export function createHouse(stage, overlay, view) {
   const fridgeScreen=new THREE.MeshBasicMaterial({map:fridgeTexture.texture,toneMapped:false});
   box(.37,.47,.034,dark,6.18,1.64,-2.616,.025,fridge);
   // The notice stays legible while the appliance rests.
-  plane(.329,.426,fridgeScreen,6.18,1.64,-2.595);
+  const noticeScreen = plane(.329,.426,fridgeScreen,6.18,1.64,-2.595,fridge);
 
   const tableTop=disk(.82,.094,oak,4.15,.86,1.50);tableTop.scale.x=1.23;
   disk(.18,.74,wood,4.15,.44,1.50,scene,.25);disk(.36,.08,wood,4.15,.13,1.50);
@@ -428,6 +390,7 @@ export function createHouse(stage, overlay, view) {
     cooktop_01: [2.28, 1.43, -2.79], oven_01: [3.74, 1.00, -2.40],
     fridge_01: [6.13, 2.14, -2.55], plug_kettle: [5.25, 1.72, -3.00],
     purifier_01: [-3.95, .84, -2.16], styler_01: [-6.14, 2.14, .88],
+    speaker_01: [-2.46, .91, -2.95], entrance: [-5.45, 1.14, -2.48],
   };
   const projected = new THREE.Vector3();
   const cleanPosition = new THREE.Vector3();
@@ -440,16 +403,17 @@ export function createHouse(stage, overlay, view) {
   const models = {
     cleaner_01: cleanerModel, light_01: pendant, display_01: display, cooktop_01: cooktop,
     oven_01: oven, fridge_01: fridge, plug_kettle: kettle,
-    purifier_01: purifier, styler_01: styler,
+    purifier_01: purifier, styler_01: styler, speaker_01: speaker,
   };
   const normalMaterials = new Map();
   const restingMaterials = new Map();
   const readings = new Map();
   const labels = new Map();
   let presentation = new Map();
+  let externalLabels = null;
   let spill = 0, targetSpill = 0, targetIntensity = 0;
   let jobRunning = false, cleanSince = 0, tvScene;
-  let entrance = "";
+  let entranceSignal;
   let zoom = 1, targetZoom = 1, hasDirection = false;
   let viewport = 1, viewWidth = 0, viewHeight = 0, request = 0, readyAt = 0;
 
@@ -463,7 +427,7 @@ export function createHouse(stage, overlay, view) {
       queue();
     }
   };
-  castle.src = "/demo/assets/castle.jpg";
+  castle.src = new URL("./castle.jpg", import.meta.url).href;
 
   const tvColors = {
     kids_party: ["#dec2de", "#795184"], party: ["#e7a4ad", "#ad496e"],
@@ -498,7 +462,7 @@ export function createHouse(stage, overlay, view) {
       ctx.fillRect(0, 0, w, h);
       if (!preset) return;
       ctx.fillStyle = "#ffdfaa";
-      ctx.font = "600 75px monospace";
+      ctx.font = '600 75px "IBM Plex Sans KR", sans-serif';
       ctx.textAlign = "center";
       ctx.fillText(`${preset.temp_c}°  ${preset.minutes}m`, w / 2, 101);
     });
@@ -590,6 +554,15 @@ export function createHouse(stage, overlay, view) {
   paintTv();
   paintOven({});
   paintFridge(null);
+  Promise.all([
+    document.fonts.load('500 25px "IBM Plex Sans KR"', "냉장고 안내"),
+    document.fonts.load('600 80px "IBM Plex Sans KR"', "어린이 파티 170°"),
+  ]).then(() => {
+    paintTv();
+    paintOven(readings.get("oven_01")?.values ?? {});
+    paintFridge(readings.get("fridge_01")?.values.show_notice);
+    queue();
+  }).catch(() => {});
 
   function restingMaterial(normal) {
     if (!restingMaterials.has(normal)) {
@@ -607,23 +580,21 @@ export function createHouse(stage, overlay, view) {
     return restingMaterials.get(normal);
   }
 
-  function setChain(chain, focusDevices) {
-    const next = houseDevicePresentation(chain, focusDevices);
+  function setPresentation(next) {
     let changed = false;
     for (const [id, model] of Object.entries(models)) {
-      const current = next.get(id);
+      const current = next.get(id) ?? {};
       const previous = presentation.get(id);
-      if (current.resting !== (previous?.resting ?? false)) {
+      if (Boolean(current.resting) !== Boolean(previous?.resting)) {
         model.traverse((object) => {
-          if (!object.isMesh) return;
+          if (!object.isMesh || object === noticeScreen) return;
           if (!normalMaterials.has(object)) normalMaterials.set(object, object.material);
           const normal = normalMaterials.get(object);
           object.material = current.resting ? restingMaterial(normal) : normal;
         });
       }
-      if (current.resting !== previous?.resting || current.evidence !== previous?.evidence ||
-          current.focused !== previous?.focused) {
-        renderLabel(id, current);
+      if (JSON.stringify(current) !== JSON.stringify(previous ?? {})) {
+        if (overlay) renderLabel(id, current);
         changed = true;
       }
     }
@@ -632,7 +603,8 @@ export function createHouse(stage, overlay, view) {
     if (changed) queue();
   }
 
-  function renderLabel(id, { resting = false, evidence = "", focused = false } = {}) {
+  function renderLabel(id, appearance = {}) {
+    const { resting = false, focused = false } = appearance;
     const reading = readings.get(id);
     let label = labels.get(id);
     const visible = reading && (id === "fridge_01" ? reading.notice : !resting && reading.show);
@@ -645,16 +617,13 @@ export function createHouse(stage, overlay, view) {
       label.className = "marker";
       const value = document.createElement("span");
       value.className = "marker-value";
-      const trace = document.createElement("span");
-      trace.className = "marker-trace";
-      label.append(value, trace);
+      label.append(value);
       overlay.append(label);
       labels.set(id, label);
     }
     label.hidden = false;
     label.firstElementChild.textContent = reading.text;
-    label.lastElementChild.textContent = evidence;
-    label.lastElementChild.hidden = !evidence;
+    decorateLabel?.(label, appearance);
     label.classList.toggle("theme", reading.theme);
     label.classList.toggle("focused", focused);
   }
@@ -662,13 +631,19 @@ export function createHouse(stage, overlay, view) {
   function update(snapshot) {
     let changed = false;
     const byId = new Map(snapshot.devices.map((device) => [device.logical_id, device]));
+    for (const [id, model] of Object.entries(models)) {
+      if (model.visible !== byId.has(id)) {
+        model.visible = byId.has(id);
+        changed = true;
+      }
+    }
     for (const [id, paint] of Object.entries(painters)) {
       const device = byId.get(id);
       const values = device?.values ?? {};
       const observed = Object.keys(values).length > 0;
       const quality = !device?.values || device.available === false ? "연결 끊김"
         : !observed ? "확인할 수 없음" : device.observation === "stale" ? "이전 관측" : "";
-      const key = JSON.stringify([values, quality]);
+      const key = JSON.stringify([values, quality, Boolean(device)]);
       const previous = readings.get(id);
       if (previous?.key === key) continue;
       changed = true;
@@ -682,12 +657,12 @@ export function createHouse(stage, overlay, view) {
         purifier_01: Boolean(values.mode && values.mode !== "auto"), styler_01: Boolean(values.course_standby),
       }[id];
       readings.set(id, {
-        key, show: Boolean(quality || active || previous),
+        key, values, show: Boolean(device && (quality || active || previous?.show)),
         notice: Boolean(values.show_notice),
         text: [HOUSE_DEVICES[id].label, observed && detail, quality].filter(Boolean).join(" · "),
         theme: Boolean(id === "light_01" && targetSpill || id === "display_01" && tvScene === "kids_party"),
       });
-      renderLabel(id, presentation.get(id));
+      if (overlay) renderLabel(id, presentation.get(id));
     }
     if (changed) {
       renderer.shadowMap.needsUpdate = true;
@@ -704,15 +679,23 @@ export function createHouse(stage, overlay, view) {
 
   function placeLabels() {
     // Measure in stage pixels, before the outer frame scales to the screen.
-    const markers = Array.from(labels).flatMap(([id, label]) => {
-      if (label.hidden) return [];
+    const markers = Array.from(externalLabels ?? labels).flatMap(([id, label]) => {
+      if (label.hidden || !Object.hasOwn(anchors, id)) return [];
       const { x, y } = project(id);
-      return [{ label, focused: presentation.get(id)?.focused, x: x * viewWidth, y: y * viewHeight,
+      return [{ id, label, focused: presentation.get(id)?.focused, x: x * viewWidth, y: y * viewHeight,
         width: label.offsetWidth, height: label.offsetHeight }];
     });
-    const placements = layoutHouseLabels(markers, viewWidth, viewHeight);
+    const placements = externalLabels && viewWidth < 720 ? [] :
+      layoutHouseLabels(markers, viewWidth, viewHeight, { fitUnfocused: externalLabels !== null });
     const placed = new Set(placements.map(({ label }) => label));
-    for (const { label } of markers) label.style.visibility = placed.has(label) ? "" : "hidden";
+    for (const { id, label } of markers) {
+      if (externalLabels) {
+        label.classList.toggle("anchored", placed.has(label));
+        label.classList.toggle("theme", readings.get(id)?.theme === true);
+      } else {
+        label.style.visibility = placed.has(label) ? "" : "hidden";
+      }
+    }
     for (const { label, x, y, left, top, height } of placements) {
       label.style.left = `${left}px`;
       label.style.top = `${top}px`;
@@ -720,6 +703,11 @@ export function createHouse(stage, overlay, view) {
       label.style.setProperty("--leader-top", `${Math.min(y - top, height)}px`);
       label.style.setProperty("--leader-height", `${Math.max(top - y, y - top - height, 0)}px`);
     }
+  }
+
+  function setMarkers(markers) {
+    externalLabels = markers;
+    queue();
   }
 
   function projection() {
@@ -749,7 +737,7 @@ export function createHouse(stage, overlay, view) {
     queue();
   }
 
-  function focus(setting, { instant = false } = {}) {
+  function focus(setting = OVERVIEW, { instant = false } = {}) {
     goalCamera.fromArray(setting.eye);
     goalTarget.fromArray(setting.aim);
     targetZoom = setting.zoom;
@@ -763,11 +751,12 @@ export function createHouse(stage, overlay, view) {
     queue();
   }
 
-  function setMoment(entry) {
-    if (entry === entrance) return;
-    entrance = entry;
-    parcel.visible = entry === "package";
-    entrySignal.emissiveIntensity = entry ? .9 : 0;
+  function setEntrance({ packagePresent, signal }) {
+    if (packagePresent === parcel.visible && signal === entranceSignal) return;
+    entranceSignal = signal;
+    parcel.visible = packagePresent;
+    entrySignal.emissive.set(signal === "bell" ? "#f5d991" : "#f0bc82");
+    entrySignal.emissiveIntensity = signal ? .9 : 0;
     renderer.shadowMap.needsUpdate = true;
     queue();
   }
@@ -831,5 +820,5 @@ export function createHouse(stage, overlay, view) {
   }
 
   new ResizeObserver(resize).observe(stage);
-  return { resize, update, setChain, focus, setMoment, anchor: project };
+  return { resize, update, setPresentation, setMarkers, focus, setEntrance, anchor: project };
 }

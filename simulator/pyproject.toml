@@ -27,7 +27,7 @@ where = ["."]
 include = ["spira_simulator*"]
 
 [tool.setuptools.package-data]
-spira_simulator = ["profiles/*.json", "ui/*", "ui/demo/*"]
+spira_simulator = ["profiles/*.json", "ui/*", "ui/demo/*", "ui/house/*", "ui/house/fonts/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

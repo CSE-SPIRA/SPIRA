@@ -1,7 +1,7 @@
 // Reasoning uses the Server's app contract. House surfaces use World observations.
-import { createFlow } from "/demo/assets/flow.js";
-import { createHouse, hsvColor, TV_SCENES } from "/demo/assets/house.js";
-import { buildChain } from "/demo/assets/chain.js";
+import { createFlow } from "./flow.js";
+import { createHouse, hsvColor, TV_SCENES } from "../house/house.js";
+import { buildChain, houseDevicePresentation } from "./chain.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -52,7 +52,7 @@ function refreshChain() {
       timing: config.story_timing, guestWindows: hub?.guest_windows?.[episodeId], fixtureShares: config.fixture_shares,
     },
   });
-  state.house?.setChain(state.chain, timeline()[state.homeStep]?.focusDevices);
+  if (state.house) updateHousePresentation(timeline()[state.homeStep]);
 }
 
 function paintTheme(text, theme) {
@@ -547,11 +547,28 @@ function houseMoment(scene) {
   return (scene.event ? times.events[scene.event] : times[scene.id]) ?? { story: "" };
 }
 
+function updateHousePresentation(scene) {
+  state.house?.setPresentation(houseDevicePresentation(state.chain, scene?.focusDevices));
+}
+
+function decorateHouseLabel(label, { evidence }) {
+  let trace = label.querySelector(".marker-trace");
+  if (!trace && evidence) {
+    trace = document.createElement("span");
+    trace.className = "marker-trace";
+    label.append(trace);
+  }
+  if (trace) {
+    trace.textContent = evidence ?? "";
+    trace.hidden = !evidence;
+  }
+}
+
 function renderTimeline() {
   const scenes = timeline();
   state.homeStep = Math.min(state.homeStep, scenes.length - 1);
   const current = scenes[state.homeStep];
-  state.house?.setChain(state.chain, current.focusDevices);
+  updateHousePresentation(current);
   const { at, story } = houseMoment(current);
   const arrived = current.id !== "plan" || at;
   $("home-time").textContent = story;
@@ -576,10 +593,14 @@ function renderTimeline() {
   renderControls();
 }
 
+function showEntrance(entry) {
+  state.house?.setEntrance({ signal: entry, packagePresent: entry === "package" });
+}
+
 function directHouse(instant = false) {
   const scene = timeline()[state.homeStep];
   state.house?.focus(state.scenes.cameras[scene.camera], { instant });
-  state.house?.setMoment(scene.entry && (state.applied.has(scene.action) || houseMoment(scene).at) ? scene.entry : "");
+  showEntrance(scene.entry && (state.applied.has(scene.action) || houseMoment(scene).at) ? scene.entry : "");
 }
 
 async function goHouse(index) {
@@ -635,7 +656,7 @@ function acceptHub(hub) {
   renderLedger();
   renderTimeline();
   const scene = timeline()[state.homeStep];
-  if (scene.entry && houseMoment(scene).at) state.house?.setMoment(scene.entry);
+  if (scene.entry && houseMoment(scene).at) showEntrance(scene.entry);
 }
 
 async function refreshSnapshot() {
@@ -677,7 +698,7 @@ function openHouseView() {
   $("home").hidden = false;
   if (!state.house && !$("world").hasChildNodes()) {
     try {
-      state.house = createHouse($("world"), $("markers"), $("view"));
+      state.house = createHouse($("world"), $("markers"), $("view"), { decorateLabel: decorateHouseLabel });
     } catch (error) {
       const message = document.createElement("p");
       message.className = "error";
@@ -811,7 +832,7 @@ function fit() {
 }
 
 async function boot() {
-  [state.config, state.scenes] = await Promise.all([api("/demo/api/config"), api("/demo/assets/scenes.json")]);
+  [state.config, state.scenes] = await Promise.all([api("/demo/api/config"), api(new URL("./scenes.json", import.meta.url))]);
   state.flow = createFlow($("route-list"), state.scenes.flow);
   $("fixture").hidden = !state.config.fixture;
   $("compressed-time").hidden = !state.config.story_timing;

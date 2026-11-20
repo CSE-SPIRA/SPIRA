@@ -12,6 +12,7 @@ import httpx
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
@@ -229,6 +230,7 @@ def create_app(
             "home.html" if fragment else "viewer.html",
             {
                 **display,
+                "fragment": fragment,
                 "home": world.profile.display_name or world.profile.household_id,
                 "household_id": world.profile.household_id,
                 "peers": request.app.state.peer_viewers,
@@ -250,6 +252,8 @@ def create_app(
     @application.get("/sim/style.css")
     def style():
         return FileResponse(UI / "style.css", media_type="text/css")
+
+    application.mount("/sim/assets/house", StaticFiles(directory=UI / "house"))
 
     @application.get("/operator", dependencies=[Depends(require_operator)])
     def operator(request: Request):

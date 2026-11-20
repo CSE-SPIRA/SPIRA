@@ -110,8 +110,9 @@ Rules the demo keeps:
 - Plan receipts use the order's first capture plus the normal Server quiet
   window, rounded up to the next display minute if needed. The delivery step,
   package release and fridge notice rows use `파티 전`.
-- Three.js 0.160.0 is vendored (`three.module.min.js`, `orbit-controls.js`), so the
-  demo runs without network.
+- The demo and `/sim/viewer` use the same house, design tokens, vendored
+  Three.js 0.160.0, and IBM Plex Sans KR fonts. The shell supplies story time
+  and the chain annotations.
 
 ## Settings (set by `demo-up`)
 

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { buildChain } from "../spira_simulator/ui/demo/chain.js";
-import { houseDevicePresentation, layoutHouseLabels } from "../spira_simulator/ui/demo/house.js";
+import { buildChain, houseDevicePresentation } from "../spira_simulator/ui/demo/chain.js";
+import { layoutHouseLabels } from "../spira_simulator/ui/house/house.js";
 
 const { house: scenes } = JSON.parse(readFileSync(
   new URL("../spira_simulator/ui/demo/scenes.json", import.meta.url)));
@@ -178,6 +178,23 @@ test("focused house labels reserve space and overlapping value tags drop at both
           pixels(label.top + label.height) <= pixels(other.top) || pixels(other.top + other.height) <= pixels(label.top));
       }
     }
+  }
+});
+
+test("viewer fits resting labels around planned and changed devices", () => {
+  const markers = [
+    { id: "oven_01", focused: true, x: 635, y: 240, width: 160, height: 70 },
+    { id: "plug_kettle", x: 660, y: 245, width: 140, height: 40 },
+    { id: "fridge_01", x: 680, y: 240, width: 170, height: 40 },
+    { id: "oversized", x: 670, y: 240, width: 160, height: 420 },
+  ];
+  const labels = layoutHouseLabels(markers, 800, 430, { fitUnfocused: true });
+  assert.equal(labels[0].top, 158);
+  assert.deepEqual(labels.map(({ id }) => id), ["oven_01", "fridge_01", "plug_kettle"]);
+  const positioned = [...labels].sort((a, b) => a.top - b.top);
+  for (const [index, label] of positioned.entries()) {
+    assert.ok(label.top >= 46 && label.top + label.height <= 386);
+    if (index > 0) assert.ok(positioned[index - 1].top + positioned[index - 1].height < label.top);
   }
 });
 

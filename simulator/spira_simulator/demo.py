@@ -14,7 +14,7 @@ from typing import Literal
 import httpx
 import yaml
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from spira_contracts.episode import Episode
 from spira_contracts.plan import Action
 
@@ -181,12 +181,19 @@ def mount_demo(application: FastAPI, apply_home_event):
     def demo_page():
         return FileResponse(DEMO_UI / "index.html", media_type="text/html")
 
-    @application.get("/demo/assets/{name}")
+    @application.get("/sim/assets/demo/{name}")
     def demo_asset(name: str):
         path = DEMO_UI / name
         if not ASSET.match(name) or not path.is_file():
             raise HTTPException(404, "No such demo asset")
         return FileResponse(path, media_type=MEDIA[path.suffix])
+
+    @application.get("/demo/assets/{name}", include_in_schema=False)
+    def legacy_demo_asset(name: str):
+        if not ASSET.fullmatch(name):
+            raise HTTPException(404, "No such demo asset")
+        group = "house" if name in {"house.js", "three.module.min.js", "tokens.css", "castle.jpg"} else "demo"
+        return RedirectResponse(f"/sim/assets/{group}/{name}")
 
     @application.get("/demo/api/config")
     def config(request: Request):

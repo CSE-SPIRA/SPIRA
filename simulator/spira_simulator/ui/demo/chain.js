@@ -1,3 +1,4 @@
+import { HOUSE_DEVICES } from "../house/devices.js";
 import { displayTime, planReceiptTime, storyClock, storyLedgerTime, storyObservedTime, storyPlanTime } from "./story-time.js";
 
 const PACKAGE_EVENT = "package.brought_in";
@@ -10,18 +11,6 @@ const DEVICE_TYPES = {
   oven: "오븐", fridge: "냉장고", smart_plug: "스마트 플러그", speaker: "스피커",
   purifier: "공기청정기", styler: "스타일러",
 };
-export const HOUSE_DEVICES = {
-  cleaner_01: { label: "로봇청소기", room: "living_room" },
-  light_01: { label: "거실 조명", room: "living_room" },
-  display_01: { label: "TV", room: "living_room" },
-  cooktop_01: { label: "인덕션", room: "kitchen" },
-  oven_01: { label: "오븐", room: "kitchen" },
-  fridge_01: { label: "냉장고", room: "kitchen" },
-  plug_kettle: { label: "전기포트 플러그", room: "kitchen" },
-  purifier_01: { label: DEVICE_TYPES.purifier, room: "living_room" },
-  styler_01: { label: DEVICE_TYPES.styler, room: "entrance" },
-};
-
 function lineTime(when, clock) {
   if (!when?.time) return { story: TRIGGERS[when?.event] ?? when?.event ?? "", derivation: null };
   const at = storyPlanTime(when.time, clock);
@@ -225,4 +214,56 @@ export function buildChain({ episode, rationale, card, hubPlan, hubLedger = [], 
     cardClock: displayTime(cards[0]?.updated_at || episode?.shared_at, firstClock?.offset, false),
     timeline: houseTimeline(sharedAt, hubLedger, cards, clocks, firstClock, tasks, plan),
   };
+}
+
+function traceLabel(chain, device) {
+  const [taskId, otherTaskId] = device.traces;
+  if (!taskId || otherTaskId) return "";
+  const task = chain.tasks.find(({ id }) => id === taskId);
+  if (!task?.line) return "";
+  const intent = chain.intents.find(({ id }) => id === task.intentId);
+  const words = (text) => text.normalize("NFC").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  const taskText = [task.line, task.need].map(words);
+  const matchesTerm = (word, term) => word === term ||
+    (word?.startsWith(term) && /\p{Script=Hangul}$/u.test(term) &&
+      /^(?:은|는|이|가|을|를|과|와|에|에서|으로|로|의|도|만|까지|부터|에게)$/.test(word.slice(term.length)));
+  const mentions = (phrase) => {
+    const terms = words(phrase);
+    return terms.length > 0 && taskText.some((text) => text.some((_, index) =>
+      terms.every((term, offset) => matchesTerm(text[index + offset], term))));
+  };
+  const slots = (intent?.slotIds ?? []).flatMap((id) => {
+    const slot = chain.slots.find((entry) => entry.id === id);
+    if (!slot?.value) return [];
+    const items = slot.basis.map((id) => chain.items.find((item) => item.id === id)).filter(Boolean);
+    const namedItem = items.find((item) => mentions(item.id) || mentions(item.name));
+    const valueWords = words(slot.value);
+    const namesFullValue = mentions(slot.value);
+    if (!namedItem && !namesFullValue && !valueWords.some((word) => word.length > 1 && mentions(word))) return [];
+    // A field name only strengthens a value match, as in "공주 테마".
+    const namesField = !valueWords.includes(slot.label) && mentions(slot.label);
+    const strength = namedItem ? 4 : namesFullValue ? 3 : namesField ? 2 : 1;
+    return [{ slot, item: (namedItem ?? items[0])?.id, strength }];
+  });
+  const [link, next] = slots.sort((a, b) => b.strength - a.strength);
+  if (!link || link.strength === next?.strength) return task.line;
+  return [task.line, `${link.slot.label}: ${link.slot.value}`, link.item].filter(Boolean).join(" ← ");
+}
+
+export function houseDevicePresentation(chain, focusDevices = []) {
+  const focus = new Set(focusDevices);
+  return new Map(chain.devices.map((device) => {
+    const focused = focus.has(device.logicalId);
+    const resting = chain.hasHubPlan && !device.chosen;
+    let evidence = "";
+    if (chain.hasHubPlan && focused) {
+      if (device.logicalId === "fridge_01" && device.state?.show_notice) {
+        const notices = chain.item_tasks.filter(({ text }) => text === device.state.show_notice);
+        if (notices.length === 1) evidence = `${notices[0].text} ← ${notices[0].item}`;
+      } else if (device.chosen) {
+        evidence = traceLabel(chain, device);
+      }
+    }
+    return [device.logicalId, { focused, resting, evidence }];
+  }));
 }
