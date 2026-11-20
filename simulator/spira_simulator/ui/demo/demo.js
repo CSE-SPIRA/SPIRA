@@ -1,7 +1,7 @@
 // Reasoning uses the Server's app contract. House surfaces use World observations.
 import { createFlow } from "/demo/assets/flow.js";
-import { createHouse, DEVICES, hsvColor, TV_SCENES } from "/demo/assets/house.js";
-import { displayTime, storyClock, storyLedgerTime, storyObservedTime, storyPlanTime } from "/demo/assets/story-time.js";
+import { createHouse, hsvColor, TV_SCENES } from "/demo/assets/house.js";
+import { buildChain } from "/demo/assets/chain.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -11,19 +11,13 @@ const rows = (items, render) => items.map(render).join("");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const motion = matchMedia("(prefers-reduced-motion: reduce)");
 const WAYS = { run: "실행", standby: "설정 대기", notice: "안내" };
-const EVENTS = { guest_arrived: "손님이 오면", event_end: "행사가 끝나면", "package.brought_in": "택배를 들여오면" };
-const OCCURRENCES = { guest_arrived: "손님 도착", event_end: "행사 종료", "package.brought_in": "택배 들여옴" };
-const FIELDS = { event: "행사", guests: "손님", activity: "활동", theme: "테마" };
+const OWNERS = { share: "앱 · 공유", card: "앱 · 카드", reasoning: "앱 · 판단 근거", home: "앱 · 우리 집", hub: "Hub 기록", server: "서버 창" };
+const ownerTag = (owner) => `<span class="owner-tag">${OWNERS[owner]}</span>`;
 const ICONS = {
   딸기: "❋", "컵케이크 믹스": "▤", 휘핑크림: "▣", "세탁 세제": "▥", 로션: "◒",
   풍선: "◯", "케이크 토퍼": "✧", 고깔모자: "△", "아이싱 펜": "╱",
   우유: "▤", 계란: "◕", 바지락: "◫", 휴지: "⊙", "주방 세제": "▥",
 };
-const DEVICE_TYPES = {
-  light: "조명", display: "TV", cleaner: "로봇청소기", cooktop: "인덕션",
-  oven: "오븐", fridge: "냉장고", smart_plug: "스마트 플러그", speaker: "스피커",
-};
-
 // These are sample inputs for the share action. Judgment always comes back from the Server.
 const SAMPLE_ORDERS = {
   birthday: ["설향 딸기 500g (냉장) × 2", "OO 컵케이크 믹스", "동물성 휘핑크림 500ml × 1",
@@ -36,7 +30,7 @@ const state = {
   config: null, scenes: null, flow: null, house: null, scale: 1, page: "reason",
   order: "birthday", step: 0, mapOpen: false, sharing: false, transitioning: false,
   episodeId: null, episode: null, rationale: null, cards: [], capture: null, reader: null,
-  homeStep: 0, homeBusy: false, applied: new Set(), ledger: [], hub: null,
+  homeStep: 0, homeBusy: false, applied: new Set(), hub: null, snapshot: null, chain: buildChain(),
 };
 
 async function api(path, options) {
@@ -49,27 +43,13 @@ function notice(text = "") {
   $("notice").textContent = text;
 }
 
-function cardStory(cardId) {
-  if (!state.rationale) return null;
-  const cards = cardId ? state.cards.filter((card) => card.card_id === cardId) : state.cards;
-  for (const card of cards) {
-    const id = state.rationale.intents.find((intent) => intent.card_id === card.card_id)?.calendar_event_id;
-    const event = state.rationale.evidence.calendar.find((entry) => entry.id === id);
-    const windows = state.hub?.guest_windows?.[card.episode_id];
-    const guestLine = card.lines.find((line) => line.when?.event === "guest_arrived" && windows?.[line.task_id]);
-    const story = storyClock(event, card.starts_at, windows?.[guestLine?.task_id]?.to, state.config.story_timing);
-    if (story) return story;
-  }
-  return null;
-}
-
-function demoTime(at, cardId) {
-  return displayTime(at, cardStory(cardId)?.offset);
-}
-
-function whenText(when, cardId) {
-  if (!when) return "시간을 기다리는 중";
-  return when.time ? displayTime(storyPlanTime(when.time, cardStory(cardId))) : EVENTS[when.event] || when.event;
+function refreshChain() {
+  const { episodeId, episode, rationale, cards, hub, snapshot, config } = state;
+  state.chain = buildChain({
+    episode: episode ?? (episodeId ? { episode_id: episodeId } : null), rationale, card: cards,
+    hubPlan: hub?.plan_actions?.[episodeId], hubLedger: hub?.ledger, snapshot,
+    storyTime: { timing: config.story_timing, guestWindows: hub?.guest_windows?.[episodeId] },
+  });
 }
 
 function paintTheme(text, theme) {
@@ -78,45 +58,23 @@ function paintTheme(text, theme) {
   return esc(text.slice(0, index)) + `<span class="theme-text">${esc(theme)}</span>` + esc(text.slice(index + theme.length));
 }
 
-function notices() {
-  return state.rationale?.item_tasks ?? state.episode?.item_tasks ?? [];
-}
-
-function cardReady() {
-  return state.rationale && state.episode && state.episode.card_ids.every((id) => state.cards.some((card) => card.card_id === id));
-}
-
-function hubPlan() {
-  return state.hub?.plan_actions?.[state.episodeId];
-}
-
 function plannedLight() {
-  return Object.values(hubPlan() ?? {}).flat()
+  return state.chain.tasks.flatMap(({ values }) => values)
     .find(({ device, cmd }) => device === "light_01" && cmd === "color")?.value;
 }
 
-function similarOrders(counts) {
-  return (counts ?? []).reduce((sum, { n }) => sum + n, 0);
-}
-
-function flowCounts() {
-  const { episode, rationale, cards } = state;
-  const items = episode?.items;
-  const excluded = rationale?.unbundled.length;
-  const plan = hubPlan();
+function flowCounts({ evidence, funnel, hasEpisode, hasRationale, hasHubPlan, cardReady }) {
   return [
-    episode && "주문 1건",
-    episode && `물건 ${episode.item_count}`,
-    rationale && (rationale.evidence.kb_counts
-      ? `비슷한 주문 ${similarOrders(rationale.evidence.kb_counts)}`
-      : `일정 ${rationale.evidence.calendar.length}`),
-    rationale && [
-      items && `묶음 ${items.length - excluded} · 제외 ${excluded}`,
-      `의도 ${rationale.intents.length}`,
+    hasEpisode && "주문 1건",
+    hasEpisode && `물건 ${funnel.items}`,
+    hasRationale && (evidence.kbCounts ? `비슷한 주문 ${funnel.similar}` : `일정 ${evidence.calendar.length}`),
+    hasRationale && [
+      hasEpisode && `묶음 ${funnel.bundled} · 제외 ${funnel.unbundled}`,
+      `의도 ${funnel.intents}`,
     ].filter(Boolean).join("\n"),
-    rationale && `할 일 ${rationale.tasks.length}`,
-    cardReady() && `카드 ${cards.reduce((total, card) => total + card.lines.length, 0)}줄`,
-    plan && `기기 ${new Set(Object.values(plan).flat().map(({ device }) => device)).size}`,
+    hasRationale && `할 일 ${funnel.tasks}`,
+    cardReady && `카드 ${funnel.cardLines}줄`,
+    hasHubPlan && `기기 ${funnel.devices}`,
   ].map((count) => count || "");
 }
 
@@ -147,40 +105,49 @@ function sampleOrder() {
 }
 
 function receipt(items) {
-  return `<ul class="receipt-list">${rows(items, (item) => `<li class="receipt-row" data-item="${esc(item.item_id)}">
-    <span class="item-icon" aria-hidden="true">${ICONS[item.type] || "·"}</span>
+  return `<ul class="receipt-list">${rows(items, (item) => `<li class="receipt-row" data-item="${esc(item.sourceId)}">
+    <span class="item-icon" aria-hidden="true">${ICONS[item.id] || "·"}</span>
     <span>${esc(item.name)}</span><span class="receipt-qty">${item.qty == null ? "" : esc(item.qty) + "개"}</span>
   </li>`)}</ul>`;
 }
 
 function phoneMap() {
-  return `<div class="phone-head"><h2>우리 집</h2><p>거실과 주방에 연결된 기기 7대</p></div>
+  const devices = state.chain.devices.filter((device) => device.modeled);
+  return `<div class="phone-head"><h2>우리 집</h2><p>거실과 주방에 연결된 기기 ${devices.length}대</p></div>
     <div class="app-map" aria-label="우리 집 평면 지도">
       <div class="app-room"><strong>현관</strong><span>출입문</span></div>
       ${rows([["living_room", "거실"], ["kitchen", "주방"]], ([room, name]) => `<div class="app-room">
-        <strong>${name}</strong>${rows(Object.values(DEVICES).filter((device) => device.room === room),
-          (device) => `<span>${device.name}</span>`)}
+        <strong>${name}</strong>${rows(devices.filter((device) => device.room === room),
+          (device) => `<span>${esc(device.label)}</span>`)}
       </div>`)}
     </div>`;
 }
 
+function intentSlots(intent) {
+  return intent?.slotIds.map((id) => state.chain.slots.find((slot) => slot.id === id)) ?? [];
+}
+
+function themeFor(intent) {
+  return intentSlots(intent).find(({ key }) => key === "theme")?.value;
+}
+
 function phoneCard(card) {
-  const theme = state.rationale?.intents.find((intent) => intent.card_id === card.card_id)?.situation.theme;
+  const theme = themeFor(state.chain.intents.find((intent) => intent.cardId === card.card_id));
   return `<div class="app-card"><h3>${paintTheme(card.text, theme)}</h3><ul>${rows(card.lines, (line) =>
     `<li><span class="app-check" aria-label="${line.checked ? "선택됨" : "꺼짐"}">${line.checked ? "✓" : "○"}</span>
-      <span>${esc(line.text)}<small>${esc(whenText(line.when, card.card_id))}</small></span></li>`)}</ul></div>`;
+      <span>${esc(line.text)}<small>${esc(line.time.story || "시간을 기다리는 중")}</small></span></li>`)}</ul></div>`;
 }
 
 function noticeCards() {
-  return rows(notices(), ({ item, text }) => `<div class="app-card"><h3>${esc(item)}</h3><p>${esc(text)}</p></div>`);
+  return rows(state.chain.item_tasks, ({ item, text }) => `<div class="app-card"><h3>${esc(item)}</h3><p>${esc(text)}</p></div>`);
 }
 
 function renderPhone(scene) {
   const plan = ["plan", "hub"].includes(scene.id);
   const order = scene.id === "share";
-  const items = state.episode?.items;
-  const timestamp = plan && state.cards[0]?.updated_at || state.episode?.shared_at;
-  $("phone-time").textContent = displayTime(timestamp, plan ? cardStory()?.offset : null, false);
+  const { hasEpisode, items, cards, orderClock, cardClock, cardReady, item_tasks } = state.chain;
+  $("phone-time").textContent = plan ? cardClock : orderClock;
+  $("phone-owner").textContent = OWNERS[state.mapOpen ? "home" : plan ? "card" : "share"];
   $("phone-order").textContent = plan ? "준비" : "주문";
   $("phone-order").setAttribute("aria-pressed", String(!state.mapOpen));
   $("phone-map").setAttribute("aria-pressed", String(state.mapOpen));
@@ -188,22 +155,22 @@ function renderPhone(scene) {
   if (state.mapOpen) {
     screen = phoneMap();
   } else if (order) {
-    const capture = !state.capture && !items ? sampleOrder().toDataURL() : state.capture;
+    const capture = !state.capture && !hasEpisode ? sampleOrder().toDataURL() : state.capture;
     screen = `<div class="phone-head"><h2>주문 상세</h2></div>
       ${capture ? `<div class="scan-picture"><img src="${esc(capture)}" alt="공유할 주문 화면"></div>` : receipt(items)}
       <div class="phone-share order-actions">
         <button type="button" id="sample"${state.sharing ? " disabled" : ""}>예시 주문으로 공유 <span aria-hidden="true">↗</span></button>
         <label>스크린샷 공유<input type="file" id="files" accept="image/png,image/jpeg" multiple${state.sharing ? " disabled" : ""}></label>
       </div>`;
-  } else if (plan && state.cards.length) {
-    screen = `<div class="phone-head"><h2>준비 카드</h2><p>${esc(demoTime(state.cards[0].updated_at, state.cards[0].card_id))}</p></div>
-      ${rows(state.cards, phoneCard)}`;
-  } else if (plan && cardReady()) {
-    screen = `<div class="phone-head"><h2>${notices().length ? "냉장고 안내" : "준비 카드 없음"}</h2></div>${noticeCards()}`;
+  } else if (plan && cards.length) {
+    screen = `<div class="phone-head"><h2>준비 카드</h2><p>${esc(cards[0].updatedStory)}</p></div>
+      ${rows(cards, phoneCard)}`;
+  } else if (plan && cardReady) {
+    screen = `<div class="phone-head"><h2>${item_tasks.length ? "냉장고 안내" : "준비 카드 없음"}</h2></div>${noticeCards()}`;
   } else {
-    const title = plan ? "준비 카드를 기다려요" : items ? "주문을 읽었어요" : "주문을 읽고 있어요";
+    const title = plan ? "준비 카드를 기다려요" : hasEpisode ? "주문을 읽었어요" : "주문을 읽고 있어요";
     screen = `<div class="phone-reading"><h2>${title}</h2>
-      <div class="scan-picture">${items ? receipt(items) : state.capture
+      <div class="scan-picture">${hasEpisode ? receipt(items) : state.capture
         ? `<img src="${esc(state.capture)}" alt="공유한 주문 화면">` : ""}</div></div>`;
   }
   const content = $("phone-content");
@@ -220,9 +187,9 @@ function renderPhone(scene) {
 }
 
 function quantityCards(items) {
-  return `<div class="item-grid">${rows(items, (item) => `<div class="item-tile" data-item="${esc(item.item_id)}">
-    <span class="item-icon" aria-hidden="true">${ICONS[item.type] || "·"}</span>
-    <div><strong>${esc(item.type)}</strong><small>${esc(item.name)}</small></div>
+  return `<div class="item-grid">${rows(items, (item) => `<div class="item-tile" data-item="${esc(item.sourceId)}">
+    <span class="item-icon" aria-hidden="true">${ICONS[item.id] || "·"}</span>
+    <div><strong>${esc(item.id)}</strong><small>${esc(item.name)}</small></div>
     <span class="count">${item.qty == null ? "수량 미확인" : esc(item.qty) + "개"}</span>
   </div>`)}</div>`;
 }
@@ -231,9 +198,9 @@ function calendarLabel(event) {
   return `${event.day}요일 ${event.tags.join(" · ")} 일정`;
 }
 
-function contextStage({ calendar, unusual_items: unusual, kb_counts, kb_examples, kb_note }) {
-  const counts = kb_counts ?? [];
-  const total = similarOrders(counts);
+function contextStage({ evidence, funnel }) {
+  const { calendar, unusual, kbCounts, kbExamples, kbNote } = evidence;
+  const counts = kbCounts ?? [];
   const unusualItems = unusual?.items ?? [];
   return `<div class="context-grid">
     <div class="context-left">
@@ -247,72 +214,60 @@ function contextStage({ calendar, unusual_items: unusual, kb_counts, kb_examples
         : `<p class="subtext">${unusual?.status === "all_usual" ? "모두 평소에 사는 물건이에요." : "표시할 평소 주문 근거가 없어요."}</p>`}
       </section>
     </div>
-    <section class="panel"><h2>비슷한 다른 집 주문 ${total}건</h2>
+    <section class="panel kb-panel">${ownerTag("server")}<h2>비슷한 다른 집 주문 ${funnel.similar}건</h2>
       ${counts.length ? `<div class="retrieval-bar" aria-hidden="true">${rows(counts, ({ n }) => `<i style="flex:${Number(n)}"></i>`)}</div>
         <div class="retrieval-key">${rows(counts, ({ name, n }) => `<span>${esc(name)} <b>${esc(n)}건</b></span>`)}</div>` : ""}
-      ${rows(kb_examples, ({ intent_text, intent_id, overlap }) => `<div class="example">
+      ${rows(kbExamples, ({ intent_text, intent_id, overlap }) => `<div class="example">
         <strong>${esc(intent_text || counts.find((count) => count.intent_id === intent_id)?.name || "비슷한 주문")}</strong>
         <span class="pill">${esc(overlap.k)} / ${esc(overlap.n)} 겹침</span>
         <p>${esc(overlap.items.join(" · "))}</p>
       </div>`)}
-      ${kb_note ? `<p class="subtext">${esc(kb_note)}</p>` : ""}
+      ${kbNote ? `<p class="subtext">${esc(kbNote)}</p>` : ""}
     </section>
   </div>`;
 }
 
 function basisChip(value, theme = false) {
-  const event = state.rationale.evidence.calendar.find((entry) => entry.id === value);
-  const item = state.episode?.items.find((entry) => entry.type === value || entry.name === value);
-  const label = event ? calendarLabel(event) : (theme ? item?.name : item?.type) || value;
+  const event = state.chain.evidence.calendar.find((entry) => entry.id === value);
+  const item = state.chain.items.find((entry) => entry.id === value);
+  const label = event ? calendarLabel(event) : (theme ? item?.name : item?.id) || value;
   return `<span class="clue">${esc(label)}${item?.qty > 1 ? ` <small>${esc(item.qty)}개</small>` : ""}</span>`;
 }
 
-function intentStage({ intents, unbundled, none_reason, evidence }) {
+function intentStage({ intents, unbundled, none, evidence, items }) {
   const cards = intents.length ? rows(intents, (intent) => {
-    const { situation, basis } = intent;
-    const event = evidence.calendar.find((entry) => entry.id === intent.calendar_event_id);
+    const slots = intentSlots(intent);
+    const theme = slots.find(({ key }) => key === "theme")?.value;
+    const event = evidence.calendar.find((entry) => entry.id === intent.calendarEvent);
     return `<div class="intent-grid">
       <section><div class="proof-head"><span>주문과 일정에서 찾은 근거</span><span>짐작한 상황</span></div>
-        <div class="proof-rows">${rows(Object.entries(FIELDS), ([key, label], index) => `<div
-          class="proof-row${situation[key] ? "" : " empty"}" style="--wait:${index * 250}ms">
-          <div class="proof-source">${rows(basis[key], (value) => basisChip(value, key === "theme"))}</div>
-          <i class="thread${basis[key].length && situation[key] ? "" : " missing"}" aria-hidden="true"></i>
-          <div class="situation ${key === "theme" && situation[key] ? "theme" : ""}"><small>${label}</small>${esc(situation[key] || "—")}</div>
+        <div class="proof-rows">${rows(slots, ({ key, label, value, basis }, index) => `<div
+          class="proof-row${value ? "" : " empty"}" style="--wait:${index * 250}ms">
+          <div class="proof-source">${rows(basis, (id) => basisChip(id, key === "theme"))}</div>
+          <i class="thread${basis.length && value ? "" : " missing"}" aria-hidden="true"></i>
+          <div class="situation ${key === "theme" && value ? "theme" : ""}"><small>${label}</small>${esc(value || "—")}</div>
         </div>`)}</div>
       </section>
-      <div class="verdict"><small>주문의 의도</small><h2>${paintTheme(intent.intent_text, situation.theme)}</h2>
+      <div class="verdict"><small>주문의 의도</small><h2>${paintTheme(intent.text, theme)}</h2>
         ${event ? `<p>${esc(calendarLabel(event))} · <time>${esc(event.start)}–${esc(event.end)}</time></p>` : ""}
       </div>
-      ${basis.intent.length ? `<p class="basis-note"><b>함께 본 근거</b><span>${rows(basis.intent, (value) => basisChip(value))}</span></p>` : ""}
+      ${intent.basis.length ? `<p class="basis-note"><b>함께 본 근거</b><span>${rows(intent.basis, (value) => basisChip(value))}</span></p>` : ""}
     </div>`;
   }) : `<div class="intent-grid plain">
-    <section class="panel"><h2>이번에 읽은 물건</h2>${quantityCards(state.episode?.items ?? [])}</section>
-    <div class="verdict"><small>주문의 의도</small><h2>의도 없음</h2>${none_reason ? `<p>${esc(none_reason)}</p>` : ""}</div>
+    <section class="panel"><h2>이번에 읽은 물건</h2>${quantityCards(items)}</section>
+    <div class="verdict"><small>주문의 의도</small><h2>의도 없음</h2>${none?.reason ? `<p>${esc(none.reason)}</p>` : ""}</div>
   </div>`;
   return cards + (unbundled.length ? `<p class="basis-note"><b>준비와 따로 본 물건</b><span>${esc(unbundled.join(" · "))}</span></p>` : "");
 }
 
 function itemNotices() {
-  return notices().length ? `<div class="notices"><h2>냉장고 안내</h2>${rows(notices(), ({ item, text }) =>
+  const notices = state.chain.item_tasks;
+  return notices.length ? `<div class="notices"><h2>냉장고 안내</h2>${rows(notices, ({ item, text }) =>
     `<article><b>${esc(item)}</b>${esc(text)}</article>`)}</div>` : "";
 }
 
-function taskTiming(task) {
-  const card = state.cards.find(({ card_id }) => card_id === task.card_id);
-  const when = card?.lines.find(({ task_id }) => task_id === task.task_id)?.when;
-  if (!when) return "";
-  const story = cardStory(card.card_id);
-  if (!when.time || !story) return whenText(when, card.card_id);
-  const at = storyPlanTime(when.time, story);
-  const minutes = Math.round((story.storyStart - at) / 60000);
-  const relative = minutes === 0 ? "같은 시각" : `${Math.abs(minutes)}분 ${minutes > 0 ? "전" : "후"}`;
-  return `${displayTime(story.storyStart)} 일정 → ${relative} → ${displayTime(at)}`;
-}
-
 function translation(tasks, intents) {
-  const plan = hubPlan();
-  if (!plan) return "";
-  const actions = tasks.flatMap(({ task_id }) => plan[task_id] ?? []);
+  const actions = tasks.flatMap(({ values }) => values);
   const light = actions.find(({ cmd }) => cmd === "color")?.value;
   const scene = actions.find(({ cmd }) => cmd === "play_mood")?.value?.scene;
   const oven = actions.find(({ cmd }) => cmd === "set_cook_standby")?.value;
@@ -325,57 +280,58 @@ function translation(tasks, intents) {
       `<li><strong>오븐</strong>${oven.temp_c}℃ · ${oven.minutes}분</li>`,
   ].filter(Boolean);
   if (!values.length) return "";
-  const moodTask = tasks.find(({ task_id }) => plan[task_id]?.some(({ cmd }) => cmd === "color" || cmd === "play_mood"));
-  const theme = intents.find(({ card_id }) => card_id === moodTask?.card_id)?.situation.theme;
+  const moodTask = tasks.find(({ values }) => values.some(({ cmd }) => cmd === "color" || cmd === "play_mood"));
+  const theme = themeFor(intents.find(({ id }) => id === moodTask?.intentId));
   return `<aside class="palette">${theme ? `<small>고른 분위기</small><h2>${esc(theme)}</h2>
     <span class="palette-arrow" aria-hidden="true">↓</span>` : ""}<ul>${values.join("")}</ul></aside>`;
 }
 
-function tasksStage({ tasks, intents }) {
-  if (!tasks.length) return `<div class="panel"><h2>집 준비 0개 · 냉장고 안내 ${notices().length}개</h2></div>${itemNotices()}`;
+function tasksStage({ tasks, intents, devices, funnel, item_tasks }) {
+  if (!funnel.tasks) return `<div class="panel"><h2>집 준비 ${funnel.tasks}개 · 냉장고 안내 ${item_tasks.length}개</h2></div>${itemNotices()}`;
   const palette = translation(tasks, intents);
   return `<div class="task-layout${palette ? "" : " without-palette"}"><div class="task-table" role="table" aria-label="준비할 일">
     <div class="task-row" role="row"><span role="columnheader">필요한 준비</span><span aria-hidden="true"></span>
       <span role="columnheader">할 일</span><span role="columnheader">기기</span><span role="columnheader">방식</span></div>
     ${rows(tasks, (task) => {
-      const timing = taskTiming(task);
+      const timing = task.time.derivation || task.time.story;
       return `<div class="task-row" role="row">
         <span class="task-need" role="cell">${esc(task.need)}</span><span class="task-arrow" aria-hidden="true">→</span>
         <span class="task-line" role="cell">${esc(task.line)}${timing ? `<small>${esc(timing)}</small>` : ""}</span>
-        <span class="task-device" role="cell">${esc(task.devices.map(({ id, type }) =>
-          DEVICES[id]?.name || DEVICE_TYPES[type] || type).join(" · "))}</span>
+        <span class="task-device" role="cell">${esc(task.devices.map((id) =>
+          devices.find(({ logicalId }) => logicalId === id)?.label).join(" · "))}</span>
         <span class="task-way" role="cell">${esc(WAYS[task.way] || task.way)}</span>
       </div>`;
     })}
   </div>${palette}</div>${itemNotices()}`;
 }
 
-function planStage() {
-  if (state.cards.length) return rows(state.cards, (card) => `<section class="plan-card">
-    <ul class="plan-list">${rows(card.lines, (line) => `<li><time>${esc(whenText(line.when, card.card_id))}</time>
+function planStage({ cards, cardReady }) {
+  if (cards.length) return rows(cards, (card) => `<section class="plan-card">
+    <ul class="plan-list">${rows(card.lines, (line) => `<li><time>${esc(line.time.story || "시간을 기다리는 중")}</time>
       <span>${esc(line.text)}${line.note ? `<small>${esc(line.note)}</small>` : ""}</span></li>`)}</ul>
   </section>`);
-  return cardReady() ? (itemNotices() || '<p class="lead">이번 주문에는 준비 카드가 없어요.</p>')
+  return cardReady ? (itemNotices() || '<p class="lead">이번 주문에는 준비 카드가 없어요.</p>')
     : '<p class="lead">준비 카드를 기다리고 있어요.</p>';
 }
 
 function stageBody(scene) {
-  const { episode, rationale } = state;
-  if (scene.id === "share") return episode ? `<div class="hero-foot"><span class="pill">공유한 주문</span> ${episode.items.length}종</div>` : "";
+  const { chain } = state;
+  const { hasEpisode, hasRationale, items, intents, item_tasks } = chain;
+  if (scene.id === "share") return hasEpisode ? `<div class="hero-foot"><span class="pill">공유한 주문</span> ${items.length}종</div>` : "";
   if (scene.id === "extract") {
-    if (episode?.items.length) return quantityCards(episode.items);
-    return `<p class="lead">${rationale ? "표시할 품목이 없어요." : "주문을 읽는 중이에요."}</p>`;
+    if (items.length) return quantityCards(items);
+    return `<p class="lead">${hasRationale ? "표시할 품목이 없어요." : "주문을 읽는 중이에요."}</p>`;
   }
-  if (!rationale) return '<p class="lead">판단을 기다리고 있어요.</p>';
-  if (scene.id === "context") return contextStage(rationale.evidence);
-  if (scene.id === "intent") return intentStage(rationale);
-  if (scene.id === "tasks") return tasksStage(rationale);
-  if (scene.id === "plan") return planStage();
-  const label = rationale.intents.find((intent) => intent.situation.theme)?.situation.theme;
+  if (!hasRationale) return '<p class="lead">판단을 기다리고 있어요.</p>';
+  if (scene.id === "context") return contextStage(chain);
+  if (scene.id === "intent") return intentStage(chain);
+  if (scene.id === "tasks") return tasksStage(chain);
+  if (scene.id === "plan") return planStage(chain);
+  const label = intents.map(themeFor).find(Boolean);
   const color = hsvColor(plannedLight() ?? undefined);
   return `<div class="handoff-card">${color ? `<span class="palette-dot" id="source-dot"
     style="--concept:${color}" aria-hidden="true"></span>` : ""}
-    <div>${esc(label || (notices().length ? "냉장고 안내" : "집 허브"))}</div></div>`;
+    <div>${esc(label || (item_tasks.length ? "냉장고 안내" : "집 허브"))}</div></div>`;
 }
 
 let flightVersion = 0;
@@ -419,20 +375,22 @@ async function flyItems(version) {
 
 function renderReason() {
   const scene = state.scenes.reason[state.step];
+  const { chain } = state;
   const layout = $("reason-layout");
   const copy = $("stage-copy");
   const stepChanged = layout.dataset.stage !== scene.id;
   layout.dataset.stage = scene.id;
-  state.flow.setCounts(flowCounts());
+  state.flow.setCounts(flowCounts(chain));
   state.flow.setStage(scene.node);
   renderPhone(scene);
   const headline = ["share", "plan", "hub"].includes(scene.id);
   let title = scene.title;
-  if (scene.id === "extract" && state.episode?.items.length) {
-    title = scene.readyTitle.replace("{count}", state.episode.items.length);
+  if (scene.id === "extract" && chain.items.length) {
+    title = scene.readyTitle.replace("{count}", chain.items.length);
   }
-  if (scene.id === "plan" && cardReady()) title = state.cards.length ? scene.readyTitle : scene.noCardTitle;
-  const markup = `<div class="copy-enter"><header class="stage-head">
+  if (scene.id === "plan" && chain.cardReady) title = chain.cards.length ? scene.readyTitle : scene.noCardTitle;
+  const owner = { share: "share", plan: "card", hub: "hub" }[scene.id] ?? "reasoning";
+  const markup = `<div class="copy-enter"><header class="stage-head">${ownerTag(owner)}
     <h1${headline ? ' class="headline"' : ""}>${esc(title)}</h1><p class="lead">${esc(scene.lead)}</p>
     </header>${stageBody(scene)}</div>`;
   if (copy.dataset.content !== markup) {
@@ -510,6 +468,7 @@ async function readEpisode(id) {
   state.episodeId = id;
   state.episode = state.rationale = null;
   state.cards = [];
+  refreshChain();
   const server = "/demo/api/server/v1";
   const episodePath = `${server}/episodes/${encodeURIComponent(id)}`;
   const cardPath = `${server}/households/${encodeURIComponent(state.config.household_id)}/cards`;
@@ -530,10 +489,14 @@ async function readEpisode(id) {
       const current = cards.value.cards.filter((card) => card.episode_id === id);
       if (current.length) state.cards = current;
     }
-    if (state.episode?.status === "closed" && state.rationale && !cardReady()) {
+    refreshChain();
+    if (state.episode?.status === "closed" && state.chain.hasRationale && !state.chain.cardReady) {
       const archive = await api(`${cardPath}?since=1970-01-01T00%3A00%3A00Z`, options).catch(() => null);
       if (controller.signal.aborted) return;
-      if (archive) state.cards = archive.cards.filter((card) => card.episode_id === id);
+      if (archive) {
+        state.cards = archive.cards.filter((card) => card.episode_id === id);
+        refreshChain();
+      }
     }
     const fingerprint = JSON.stringify([state.episode, state.rationale, state.cards]);
     if (fingerprint !== previous) {
@@ -544,7 +507,7 @@ async function readEpisode(id) {
         renderTimeline();
       }
     }
-    if (cardReady()) return;
+    if (state.chain.cardReady) return;
     await sleep(1000);
   }
 }
@@ -567,47 +530,21 @@ async function chooseOrder(order) {
 
 function timeline() {
   const scene = state.scenes.house;
-  return state.rationale && !state.rationale.tasks.length ? scene.slice(0, 2) : scene;
+  return state.chain.hasRationale && !state.chain.funnel.tasks ? scene.slice(0, 2) : scene;
 }
 
-function latest(matches) {
-  return state.ledger.findLast(matches);
-}
-
-function planReceipt() {
-  return latest((row) => row.kind === "plan" && row.plan_id === state.episodeId);
-}
-
-function safetyTask() {
-  return state.rationale?.tasks.find((task) => task.devices.some((device) => device.id === "cooktop_01"));
-}
-
-function houseTime(scene) {
-  if (scene.id === "plan") return planReceipt()?.at;
-  if (scene.event) return latest((row) => row.event_type === scene.event &&
-    (!state.episode || Date.parse(row.at) >= Date.parse(state.episode.shared_at)))?.at;
-  if (scene.id === "party") return state.cards.find((card) => card.starts_at)?.starts_at;
-  if (scene.id === "before") {
-    const task = safetyTask();
-    return state.cards.find((card) => card.card_id === task?.card_id)?.lines
-      .find((line) => line.task_id === task.task_id)?.when?.time;
-  }
-  return null;
-}
-
-function houseStoryTime(scene, at = houseTime(scene)) {
-  if (scene.id === "before") return displayTime(storyPlanTime(at, cardStory(safetyTask()?.card_id)));
-  if (scene.id === "party") return demoTime(at, state.cards.find((card) => card.starts_at)?.card_id);
-  return storyObservedTime(at, cardStory(), OCCURRENCES[scene.event]);
+function houseMoment(scene) {
+  const times = state.chain.timeline;
+  return (scene.event ? times.events[scene.event] : times[scene.id]) ?? { story: "" };
 }
 
 function renderTimeline() {
   const scenes = timeline();
   state.homeStep = Math.min(state.homeStep, scenes.length - 1);
   const current = scenes[state.homeStep];
-  const at = houseTime(current);
+  const { at, story } = houseMoment(current);
   const arrived = current.id !== "plan" || at;
-  $("home-time").textContent = houseStoryTime(current, at);
+  $("home-time").textContent = story;
   $("home-title").textContent = arrived ? current.heading : "집에서 이어지는 준비";
   $("home-caption").textContent = current.lead;
   $("home").setAttribute("aria-busy", String(state.homeBusy));
@@ -616,7 +553,7 @@ function renderTimeline() {
     ${index === state.homeStep ? 'aria-current="step"' : ""}
     ${index < state.homeStep ? 'class="past"' : ""}
     ${state.homeBusy || index > state.homeStep + 1 ? "disabled" : ""}>
-    <time>${esc(houseStoryTime(scene))}</time><span>${esc(scene.title)}</span></button></li>`);
+    <time>${esc(houseMoment(scene).story)}</time><span>${esc(scene.title)}</span></button></li>`);
   if (steps.dataset.content !== markup) {
     const focused = steps.contains(document.activeElement);
     steps.dataset.content = markup;
@@ -629,14 +566,14 @@ function renderTimeline() {
 function directHouse(instant = false) {
   const scene = timeline()[state.homeStep];
   state.house?.focus(state.scenes.cameras[scene.camera], { instant });
-  state.house?.setMoment(scene.entry && (state.applied.has(scene.action) || houseTime(scene)) ? scene.entry : "");
+  state.house?.setMoment(scene.entry && (state.applied.has(scene.action) || houseMoment(scene).at) ? scene.entry : "");
 }
 
 async function goHouse(index) {
   const scene = timeline()[index];
   if (!scene || state.homeBusy || state.transitioning || index === state.homeStep || index > state.homeStep + 1) return;
   notice();
-  if (scene.action && !state.applied.has(scene.action) && !houseTime(scene)) {
+  if (scene.action && !state.applied.has(scene.action) && !houseMoment(scene).at) {
     state.homeBusy = true;
     renderTimeline();
     try {
@@ -657,40 +594,14 @@ async function goHouse(index) {
 
 const BY = { spira: "SPIRA", user: "사람", hub: "허브", unknown: "주체 미확인" };
 
-function reportKey(row, report) {
-  return JSON.stringify([row.device, Date.parse(row.at), report.kind, report.id]);
-}
-
-function ledgerRows(ledger) {
-  const completions = new Set();
-  for (const row of ledger) {
-    if (row.kind !== "run" || row.status !== "completed" || !row.device) continue;
-    for (const report of row.reports ?? []) {
-      if (report.kind === "event") completions.add(reportKey(row, report));
-    }
-  }
-  return ledger.filter((row) => {
-    if (row.kind !== "event" || !row.event_type?.endsWith(".completed")) return true;
-    return !row.reports?.length || !row.reports.every((report) => completions.has(reportKey(row, report)));
-  });
-}
-
 function renderLedger() {
   $("ledger-label").textContent = state.config.hub ? "이 집이 본 일" : "허브 연결 없음";
   const ledger = $("ledger");
-  const markup = rows(ledgerRows(state.ledger).reverse(), (row) => {
+  const markup = rows([...state.chain.reports].reverse(), (row) => {
     const reports = row.reports || [];
     const sent = reports.length ? (reports.every(({ delivered }) => delivered) ? "서버에 보냄" : "보내는 중") : "";
-    const source = row.kind === "event" && row.device && row.by === "unknown" ? "기기 보고" : BY[row.by] || row.by;
-    const planId = row.timing?.plan_id ?? row.plan_id;
-    const card = state.cards.find(({ lines }) => lines.some((line) => line.task_id === row.timing?.task_id));
-    let story = cardStory();
-    if (state.config.story_timing) {
-      story = !planId || planId === state.episodeId ? cardStory(card?.card_id) : null;
-    }
-    const label = OCCURRENCES[row.event_type ?? row.timing?.event];
-    const time = storyLedgerTime(row, story, label);
-    return `<li class="ledger-row"><div><time datetime="${esc(row.at)}">${esc(time)}</time>
+    const source = row.kind === "event" && row.deviceId && row.by === "unknown" ? "기기 보고" : BY[row.by] || row.by;
+    return `<li class="ledger-row"><div><time datetime="${esc(row.at)}">${esc(row.story)}</time>
       <strong>${row.label === "—" ? "" : esc(row.label) + " · "}${esc(row.what)}</strong>
       <span class="pill actor">${esc(source)}</span></div>
       ${sent ? `<p><span class="sent">${sent}</span></p>` : ""}</li>`;
@@ -703,7 +614,7 @@ function renderLedger() {
 
 function acceptHub(hub) {
   state.hub = hub;
-  state.ledger = hub.ledger;
+  refreshChain();
   if (state.page === "reason") {
     if (!state.transitioning) renderReason();
     return;
@@ -711,16 +622,18 @@ function acceptHub(hub) {
   renderLedger();
   renderTimeline();
   const scene = timeline()[state.homeStep];
-  if (scene.entry && houseTime(scene)) state.house?.setMoment(scene.entry);
+  if (scene.entry && houseMoment(scene).at) state.house?.setMoment(scene.entry);
 }
 
 async function refreshSnapshot() {
-  const snapshot = await api("/sim/snapshot", { signal: AbortSignal.timeout(2500) });
-  state.house?.update(snapshot);
-  const devices = snapshot.devices.filter((device) => Object.hasOwn(DEVICES, device.logical_id));
+  state.snapshot = await api("/sim/snapshot", { signal: AbortSignal.timeout(2500) });
+  refreshChain();
+  const { devices } = state.chain;
+  state.house?.update(devices);
+  const observed = devices.filter((device) => device.modeled && device.state !== null);
   const key = $("device-key");
-  const markup = rows(devices, ({ logical_id, substrate, assumption }) =>
-    `<li title="${esc(assumption || "")}">${DEVICES[logical_id].name}
+  const markup = rows(observed, ({ label, substrate, assumption }) =>
+    `<li title="${esc(assumption || "")}">${esc(label)}
       <small>${substrate === "physical" ? "실물 · 미검증" : "가상"}</small></li>`);
   if (key.dataset.content !== markup) {
     key.dataset.content = markup;
@@ -785,8 +698,9 @@ async function waitForHandoff() {
   const deadline = performance.now() + 16000;
   do {
     await refreshHub();
-    if (planReceipt()) return;
-    if (state.rationale && !state.rationale.tasks.length && !notices().length) return;
+    const { hasRationale, funnel, item_tasks, timeline } = state.chain;
+    if (timeline.plan.at) return;
+    if (hasRationale && !funnel.tasks && !item_tasks.length) return;
     await sleep(800);
   } while (performance.now() < deadline);
 }
@@ -927,6 +841,7 @@ async function boot() {
   fit();
 
   const query = new URLSearchParams(location.search);
+  $("frame").toggleAttribute("data-owners", query.get("owners") === "1");
   const id = query.get("episode");
   if (id) {
     if (id === state.scenes.samples.groceries.episode) state.order = "groceries";

@@ -1,0 +1,136 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+import { buildChain } from "../spira_simulator/ui/demo/chain.js";
+
+function fixture(episode, name) {
+  return JSON.parse(readFileSync(new URL(`../../contracts/fixtures/${episode}/${name}.json`, import.meta.url)));
+}
+
+function birthday() {
+  const episode = fixture("ep_9031", "episode");
+  const rationale = fixture("ep_9031", "rationale");
+  const card = fixture("ep_9031", "card.v1");
+  const hubPlan = fixture("ep_9031", "plan.v1");
+  return { episode, rationale, card, hubPlan };
+}
+
+test("birthday evidence can be followed from a topper to the light and back", () => {
+  const input = birthday();
+  const executions = fixture("ep_9031", "executions");
+  const events = fixture("ep_9031", "events").filter(({ source }) => source === "hub");
+  const hubLedger = [
+    { kind: "plan", plan_id: input.hubPlan.plan_id, at: input.hubPlan.sent_at },
+    ...executions,
+    ...events.map(({ at, type }) => ({ kind: "event", at, event_type: type })),
+  ];
+  const observed = { power: true, color: { kelvin: 3000 } };
+  const snapshot = { devices: [{ logical_id: "light_01", values: observed, available: true }] };
+  const chain = buildChain({ ...input, hubLedger, snapshot });
+
+  assert.deepEqual(chain.funnel, { items: 9, similar: 12, bundled: 7, unbundled: 2, intents: 1, tasks: 4, cardLines: 4, devices: 7 });
+  assert.deepEqual(chain.items.filter(({ unbundled }) => unbundled).map(({ id }) => id), input.rationale.unbundled);
+  assert.deepEqual(chain.evidence.kbCounts, input.rationale.evidence.kb_counts);
+  assert.deepEqual(chain.evidence.kbExamples, input.rationale.evidence.kb_examples);
+  assert.deepEqual(chain.evidence.unusual, input.rationale.evidence.unusual_items);
+  assert.equal(chain.evidence.calendar.find(({ id }) => id === chain.intent.calendarEvent).start, "14:00");
+  assert.deepEqual(chain.slots.find(({ key }) => key === "event").basis, ["c1", "케이크 토퍼"]);
+  assert.deepEqual(chain.slots.find(({ key }) => key === "guests").basis, ["고깔모자", "가구 유형"]);
+
+  const topper = chain.items.find(({ id }) => id === "케이크 토퍼");
+  const theme = chain.slots.find(({ key, basis }) => key === "theme" && basis.includes(topper.id));
+  assert.equal(theme.value, "디즈니 공주");
+  const intent = chain.intents.find(({ slotIds }) => slotIds.includes(theme.id));
+  assert.equal(intent.id, "kid_birthday_party");
+  const mood = chain.tasks.find(({ intentId, devices }) => intentId === intent.id && devices.includes("light_01"));
+  assert.ok(chain.needs.some(({ text, taskIds }) => text === mood.need && taskIds.includes(mood.id)));
+  assert.equal(mood.time.story, "손님이 오면");
+  assert.equal(mood.values.find(({ device }) => device === "light_01").value.hue, 330);
+
+  const light = chain.devices.find(({ logicalId }) => logicalId === "light_01");
+  assert.equal(light.chosen, true);
+  assert.deepEqual(light.state, observed);
+  assert.deepEqual(light.traces, [mood.id]);
+  assert.equal(chain.tasks.find(({ id }) => id === light.traces[0]).intentId, intent.id);
+  assert.equal(chain.items.find(({ id }) => id === theme.basis[0]), topper);
+  assert.equal(chain.devices.find(({ logicalId }) => logicalId === "fridge_01").chosen, false);
+  assert.ok(chain.reports.some(({ taskId, deviceId, kind }) => taskId === mood.id && deviceId === light.logicalId && kind === "run"));
+  assert.deepEqual(chain.reports.find(({ taskId, kind }) => taskId === mood.id && kind === "restore").deviceIds, ["light_01", "display_01"]);
+  assert.equal(chain.timeline.before.story, "토 13:30");
+  assert.equal(chain.timeline.party.story, "토 14:00");
+  assert.equal(chain.timeline.events.guest_arrived.story, "토 13:52");
+});
+
+test("groceries retain the item notices with an empty preparation chain", () => {
+  const episode = fixture("ep_9150", "episode");
+  const rationale = fixture("ep_9150", "rationale");
+  const plan = fixture("ep_9150", "plan.v1");
+  const hubPlan = Object.fromEntries(plan.tasks.map(({ task_id, actions }) => [task_id, actions]));
+  const chain = buildChain({ episode, rationale, hubPlan });
+
+  assert.equal(chain.intent, null);
+  assert.deepEqual(chain.none, { reason: rationale.none_reason });
+  assert.deepEqual(chain.slots, []);
+  assert.deepEqual(chain.needs, []);
+  assert.deepEqual(chain.tasks, []);
+  assert.deepEqual(chain.item_tasks, episode.item_tasks);
+  assert.ok(chain.items.every(({ unbundled }) => unbundled));
+  assert.equal(chain.devices.length, 7);
+  assert.ok(chain.devices.every(({ chosen, traces }) => !chosen && traces.length === 0));
+  assert.deepEqual(chain.funnel, { items: 6, similar: 12, bundled: 0, unbundled: 6, intents: 0, tasks: 0, cardLines: 0, devices: 1 });
+  assert.equal(chain.cardReady, true);
+});
+
+test("rebased card, timeline and Hub records share story-time labels", () => {
+  const input = birthday();
+  const card = structuredClone(input.card);
+  card.starts_at = "2026-11-20T11:42:11+09:00";
+  card.lines[0].when.time = "2026-11-20T11:39:11+09:00";
+  card.lines[1].when.time = "2026-11-20T11:41:11+09:00";
+  const scheduled = card.lines[0].when.time;
+  const dispatched = "2026-11-20T11:40:45+09:00";
+  const storyTime = {
+    timing: {
+      before_start_default_min: { normal: 90, demo: 3 },
+      guest_window_before_min: { normal: 30, demo: 1 },
+      end_fallback_min: { normal: 180, demo: 10 },
+    },
+    guestWindows: { "t_mood#3": { to: "2026-11-20T11:42:41+09:00" } },
+  };
+  const completion = { kind: "event", id: "ev_clean_completed", delivered: true };
+  const hubLedger = [
+    { kind: "run", status: "completed", device: "cleaner_01", at: dispatched, reports: [completion],
+      timing: { plan_id: input.episode.episode_id, task_id: "t_clean#1", scheduled_at: scheduled, observed_at: dispatched, anchor: "start" } },
+    { kind: "event", event_type: "cleaner.completed", device: "cleaner_01", at: dispatched, reports: [completion] },
+    { kind: "event", event_type: "guest_arrived", at: "2026-11-20T11:41:41+09:00" },
+  ];
+  const chain = buildChain({ ...input, card: [card], hubLedger, storyTime });
+
+  assert.equal(chain.cards[0].lines[0].time.story, "토 12:30");
+  assert.equal(chain.tasks[0].time.derivation, "토 14:00 일정 → 90분 전 → 토 12:30");
+  assert.equal(chain.timeline.before.story, "토 13:30");
+  assert.equal(chain.reports[0].taskId, "t_clean#1");
+  assert.equal(chain.reports[0].story, "토 12:30");
+  assert.equal(chain.reports.length, 2);
+  assert.equal(chain.reports[1].story, chain.timeline.events.guest_arrived.story);
+  assert.equal(chain.reports[1].story, "토 13:59");
+  assert.equal(chain.reports[1].taskId, null);
+  assert.equal(chain.reports[1].deviceId, null);
+});
+
+test("pending judgment, cardless intents and missing Hub plans preserve distinct evidence", () => {
+  const { episode, rationale } = birthday();
+  const pending = buildChain({ episode });
+  assert.equal(pending.none, undefined);
+  assert.equal(pending.hasRationale, false);
+  assert.deepEqual(pending.item_tasks, episode.item_tasks);
+
+  const first = rationale.intents[0];
+  const judgment = { ...rationale, intents: [first, { ...first, card_id: null }] };
+  const chain = buildChain({ episode, rationale: judgment });
+  assert.equal(chain.intents.length, 2);
+  assert.equal(new Set(chain.slots.map(({ id }) => id)).size, 8);
+  assert.ok(chain.tasks.every(({ intentId, values }) => intentId === chain.intent.id && values.length === 0));
+  assert.equal(chain.funnel.devices, 0);
+  assert.equal(chain.cardReady, false);
+});

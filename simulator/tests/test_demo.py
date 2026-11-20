@@ -29,12 +29,19 @@ def test_demo_is_off_unless_enabled(tmp_path, monkeypatch):
 
 def test_page_assets_and_config(client):
     assert client.get("/demo").status_code == 200
-    for name in ("demo.js", "house.js", "flow.js", "story-time.js", "tokens.css", "scenes.json", "three.module.min.js"):
+    for name in ("demo.js", "chain.js", "house.js", "flow.js", "story-time.js", "tokens.css", "scenes.json", "three.module.min.js"):
         assert client.get(f"/demo/assets/{name}").status_code == 200, name
     assert client.get("/demo/assets/..%2Fapi.py").status_code == 404
     assert client.get("/demo/api/config").json() == {
         "household_id": "h_042", "server": True, "hub": False, "fixture": False, "story_timing": None,
     }
+
+
+def test_evidence_chain():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is needed to test the demo's evidence chain")
+    subprocess.run([node, "--test", str(Path(__file__).with_name("demo_chain.test.mjs"))], check=True)
 
 
 def test_story_time_uses_server_numbers_and_hub_schedule(client, monkeypatch):

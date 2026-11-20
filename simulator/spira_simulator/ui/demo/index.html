@@ -30,9 +30,10 @@
   </header>
   <main>
     <section id="reason" aria-label="주문에서 판단까지">
-      <nav id="route" aria-label="판단 단계"><ol class="route-list" id="route-list"></ol></nav>
+      <nav id="route" aria-label="판단 단계"><span class="owner-tag">서버 창</span><ol class="route-list" id="route-list"></ol></nav>
       <div id="reason-layout">
         <div class="phone-orbit">
+          <span class="owner-tag" id="phone-owner">앱 · 공유</span>
           <section class="phone" aria-label="SPIRA 앱">
             <div class="phone-screen">
               <div class="phone-status"><time id="phone-time"></time><i class="phone-charge" aria-hidden="true"></i></div>
@@ -54,14 +55,15 @@
       </header>
       <figure id="view" aria-label="현관, 거실, 주방 일곱 기기의 입체 모형">
         <div id="world"></div><div id="markers"></div>
+        <span class="owner-tag">시뮬레이터 · 집</span>
         <div class="room-key" aria-hidden="true"><span>현관</span><span>거실</span><span>주방</span></div>
         <ul id="device-key" class="device-key" aria-label="집에 있는 기기"></ul>
       </figure>
       <aside class="ledger" aria-label="허브가 기록한 일">
-        <div class="ledger-head"><h2>허브 장부</h2><span id="ledger-label"></span></div>
+        <div class="ledger-head"><h2>허브 장부</h2><span id="ledger-label"></span><span class="owner-tag">Hub 기록</span></div>
         <ol id="ledger" aria-live="polite"></ol>
       </aside>
-      <nav aria-label="집 시간표" id="house-timeline"><ol id="timeline"></ol></nav>
+      <nav aria-label="집 시간표" id="house-timeline"><span class="owner-tag">시뮬레이터 · 집</span><ol id="timeline"></ol></nav>
     </section>
   </main>
   <div id="match-orb" aria-hidden="true" hidden></div>

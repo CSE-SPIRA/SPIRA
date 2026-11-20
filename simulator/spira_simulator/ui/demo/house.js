@@ -1,15 +1,5 @@
 import * as THREE from "three";
 
-export const DEVICES = {
-  cleaner_01: { name: "로봇청소기", room: "living_room" },
-  light_01: { name: "거실 조명", room: "living_room" },
-  display_01: { name: "TV", room: "living_room" },
-  cooktop_01: { name: "인덕션", room: "kitchen" },
-  oven_01: { name: "오븐", room: "kitchen" },
-  fridge_01: { name: "냉장고", room: "kitchen" },
-  plug_kettle: { name: "전기포트 플러그", room: "kitchen" },
-};
-
 export const TV_SCENES = { kids_party: "어린이 파티", party: "파티", calm: "차분한 분위기", cinema: "영화" };
 
 export function hsvColor({ hue, saturation, brightness } = {}) {
@@ -475,14 +465,14 @@ export function createHouse(stage, overlay, view) {
   paintOven({});
   paintFridge(null);
 
-  function update(snapshot) {
+  function update(devices) {
     let changed = false;
-    const live = new Map(snapshot.devices.map((device) => [device.logical_id, device]));
+    const byId = new Map(devices.map((device) => [device.logicalId, device]));
     for (const [id, paint] of Object.entries(painters)) {
-      const device = live.get(id);
-      const values = device?.values || {};
+      const device = byId.get(id);
+      const values = device.state ?? {};
       const observed = Object.keys(values).length > 0;
-      const quality = !device || device.available === false ? "연결 끊김"
+      const quality = device.state === null || device.available === false ? "연결 끊김"
         : !observed ? "확인할 수 없음" : device.observation === "stale" ? "이전 관측" : "";
       const key = JSON.stringify([values, quality]);
       const old = previous.get(id);
@@ -501,7 +491,7 @@ export function createHouse(stage, overlay, view) {
       if (!quality && !active && old === undefined && !existing) continue;
       const label = existing || document.createElement("span");
       label.className = "marker";
-      label.textContent = [DEVICES[id].name, observed && detail, quality].filter(Boolean).join(" · ");
+      label.textContent = [device.label, observed && detail, quality].filter(Boolean).join(" · ");
       label.classList.toggle("theme", Boolean(id === "light_01" && targetSpill || id === "display_01" && tvScene === "kids_party"));
       if (!existing) {
         labels.set(id, label);

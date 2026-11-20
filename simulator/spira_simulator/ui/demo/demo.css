@@ -261,3 +261,14 @@ h1{font-size:var(--size-heading);line-height:1.11;letter-spacing:-.065em;font-we
 .device-key li small { font-size:14px;color:var(--muted);margin-left:3px; }
 
 .room-key span{border:1px solid #ded9ce;border-radius:100px;background:#fffcf5b8;padding:4px 9px}
+
+.owner-tag{display:none}
+[data-owners] :is(#route,.stage-head,.kb-panel,.ledger-head,#house-timeline){position:relative}
+[data-owners] .owner-tag{display:block;position:absolute;top:0;right:0;z-index:2;width:max-content;
+  padding:2px 7px;border:1px solid var(--line);border-radius:6px;background:var(--paper);
+  color:var(--muted);font-size:13px;font-weight:500;line-height:1.25;pointer-events:none}
+[data-owners] #route > .owner-tag{top:8px}
+[data-owners] .phone-orbit > .owner-tag{top:-33px;right:12px;font-size:17px}
+[data-owners] :is(.kb-panel,#view) > .owner-tag{top:12px;right:12px}
+[data-owners] .ledger-head > .owner-tag{top:-15px}
+[data-owners] #house-timeline > .owner-tag{top:-7px}

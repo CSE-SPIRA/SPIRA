@@ -30,6 +30,18 @@ Continue with 다음 to send the home events in order.
 Deep links for rehearsal and screenshots: `/demo?episode=ep_9031&step=3`,
 `/demo?episode=ep_9031&page=house` (after an order was shared once).
 
+Add `owners=1` to the query string to show the owner tags. They are hidden by default.
+
+| Panel or region | Owner tag |
+| --- | --- |
+| Phone order screen and share stage | 앱 · 공유 |
+| Phone preparation screen and plan stage | 앱 · 카드 |
+| 추출, 맥락, 의도, 할 일 stages | 앱 · 판단 근거 |
+| Phone 우리 집 map | 앱 · 우리 집 |
+| 3D house, device labels and house timeline | 시뮬레이터 · 집 |
+| Hub handoff stage and ledger | Hub 기록 |
+| Flow strip, funnel counts and KB counts | 서버 창 |
+
 ## Where to change what
 
 | To change | Edit | Do not need to touch |
@@ -38,10 +50,37 @@ Deep links for rehearsal and screenshots: `/demo?episode=ep_9031&step=3`,
 | The active stage and flow strip | `ui/demo/flow.js` (`createFlow(root, nodes)` returns `setStage(n)` and `setCounts(counts)`, with one optional count label per node, shown when reached) | |
 | Stage titles, leads, order; timeline steps and cameras | `ui/demo/scenes.json` | code |
 | Layout and component styles | `ui/demo/index.html`, `ui/demo/demo.css` | |
-| 3D models, device faces and lamp anchor | `ui/demo/house.js` (`createHouse` exposes `resize` and `update(snapshot)`) | |
+| 3D models, device faces and lamp anchor | `ui/demo/house.js` (`createHouse` exposes `resize` and `update(devices)`) | |
+| Web evidence chain shape and joins | `ui/demo/chain.js` | Panel renderers |
 | Data fetching, stage output, phone and handoff | `ui/demo/demo.js` | |
-| Story-time formatting | `ui/demo/story-time.js` | |
+| Story clock and time formatting | `ui/demo/story-time.js` | |
 | Allowed assets, upstream routes and fixture sample upload selection | `spira_simulator/demo.py` | |
+
+`buildChain({ episode, rationale, card, hubPlan, hubLedger, snapshot, storyTime })`
+is the one place that defines the evidence-chain shape on the web. It takes one
+card or the episode's card list, the Hub's received actions by task ID, the Hub
+ledger, the World snapshot, and `{ timing, guestWindows }` for the story clock.
+
+- `items` are keyed by item type and carry name, quantity and the unbundled flag.
+  `slots` carry a field key, label, value and basis IDs for items or calendar
+  entries, with `가구 유형` for household evidence. `evidence` keeps the contract's
+  calendar, unusual items, KB counts and KB examples.
+- Each intent links its `slotIds` and `calendarEvent` ID. `intent` is the first
+  judgment in `intents`. When the Server finds no intent, the chain has `none.reason`
+  and empty slots, needs and preparation tasks. `item_tasks` still carry the
+  fridge notices.
+- `needs` group task IDs by the Server's need text. Each task links its
+  `intentId` and logical device IDs, with its line, need, way, story time and
+  derivation, and received Hub action values. Each device carries its observed
+  state and `traces` back to the preparation task IDs that chose it.
+- `reports` keep the ledger rows with story-time labels and any known plan,
+  task and device IDs. Task IDs are scoped to their plan. `funnel` supplies the
+  strip counts, including distinct devices in the received plan for item
+  notices as well as preparation. Card, timeline and house views use the same
+  chain.
+
+Run `node --test tests/demo_chain.test.mjs` from `simulator/` for the birthday
+and grocery fixture checks. Pytest runs them when Node.js is available.
 
 Rules the demo keeps:
 
