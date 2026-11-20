@@ -50,7 +50,7 @@ Add `owners=1` to the query string to show the owner tags. They are hidden by de
 | The active stage and flow strip | `ui/demo/flow.js` (`createFlow(root, nodes)` returns `setStage(n)` and `setCounts(counts)`, with one optional count label per node, shown when reached) | |
 | Stage titles, leads, order; timeline steps and cameras | `ui/demo/scenes.json` | code |
 | Layout and component styles | `ui/demo/index.html`, `ui/demo/demo.css` | |
-| 3D models, device faces and lamp anchor | `ui/demo/house.js` (`createHouse` reads values through `update(snapshot)` and plan emphasis through `setChain(chain)`) | |
+| 3D models, device faces and lamp anchor | `ui/demo/house.js` (`createHouse` reads values through `update(snapshot)` and label focus through `setChain(chain, focusDevices)`) | |
 | Web evidence chain shape and joins | `ui/demo/chain.js` | Panel renderers |
 | Data fetching, stage output, phone and handoff | `ui/demo/demo.js` | |
 | Story clock and time formatting | `ui/demo/story-time.js` | |
@@ -88,9 +88,12 @@ Rules the demo keeps:
   delivery, arrival and end, sends the corresponding World event. Ledger times
   and delivery status come from the Hub.
 - Once the Hub has received the plan, devices outside preparation rest without
-  labels. A changed preparation device adds a task, situation slot and item
-  from the evidence chain below its observed value. The fridge can still show
-  its observed item notice.
+  labels, with an exception for observed fridge notices. The current timeline
+  step's devices can add a task below their observed values. A slot and its basis
+  item require a clear mention of the slot's value or basis item in the task or
+  need. Other changed devices show compact value tags where they fit. On the
+  delivery step, an observed fridge notice can show its source item when the
+  notice text identifies a single item task.
 - `GET /demo/api/hub` reads only the Hub's `/state`. Waiting actions and recorded
   run commands from received plans supply the device count and settings. The
   handoff swatch uses the matching plan's light colour. Fixture judgments are

@@ -4,6 +4,9 @@ import test from "node:test";
 import { buildChain } from "../spira_simulator/ui/demo/chain.js";
 import { houseDevicePresentation, layoutHouseLabels } from "../spira_simulator/ui/demo/house.js";
 
+const { house: scenes } = JSON.parse(readFileSync(
+  new URL("../spira_simulator/ui/demo/scenes.json", import.meta.url)));
+
 function fixture(episode, name) {
   return JSON.parse(readFileSync(new URL(`../../contracts/fixtures/${episode}/${name}.json`, import.meta.url)));
 }
@@ -82,19 +85,52 @@ test("groceries retain the item notices with an empty preparation chain", () => 
   assert.equal(chain.cardReady, true);
 });
 
-test("the birthday house rests only the fridge and traces the changed light back to the topper", () => {
+test("birthday house traces follow the current timeline step", () => {
   const input = birthday();
-  const beforePlan = houseDevicePresentation(buildChain({ ...input, hubPlan: undefined }));
+  const beforePlan = houseDevicePresentation(buildChain({ ...input, hubPlan: undefined }),
+    scenes.find(({ id }) => id === "guests").focusDevices);
   assert.ok([...beforePlan.values()].every(({ resting, evidence }) => !resting && !evidence));
 
-  const house = houseDevicePresentation(buildChain(input));
-  assert.deepEqual([...house.keys()].filter((id) => !house.get(id).resting),
-    ["cleaner_01", "light_01", "display_01", "cooktop_01", "oven_01", "plug_kettle"]);
-  assert.deepEqual(house.get("fridge_01"), { resting: true, evidence: "" });
-  assert.equal(house.get("light_01").evidence,
-    "손님 오시면 공주 분위기 화면·조명 ← 테마: 디즈니 공주 ← 케이크 토퍼");
-  assert.equal(house.get("oven_01").evidence,
-    "오븐 컵케이크 설정 대기 ← 활동: 컵케이크 굽고 꾸미기 ← 컵케이크 믹스");
+  const notice = input.rationale.item_tasks[0];
+  const snapshot = { devices: [{ logical_id: "fridge_01", values: { show_notice: notice.text } }] };
+  const chain = buildChain({ ...input, snapshot });
+  const mood = "손님 오시면 공주 분위기 화면·조명 ← 테마: 디즈니 공주 ← 케이크 토퍼";
+  const safety = "아이 안전 모드 (인덕션 잠금·전기포트 차단)";
+  const expected = {
+    plan: {},
+    delivery: { fridge_01: `${notice.text} ← 딸기` },
+    clean: { cleaner_01: "손님 오기 전 거실 청소 ← 손님: 손님 여러 명 ← 고깔모자" },
+    before: { cooktop_01: safety, plug_kettle: safety },
+    guests: { light_01: mood, display_01: mood },
+    party: { oven_01: "오븐 컵케이크 설정 대기 ← 활동: 컵케이크 굽고 꾸미기 ← 컵케이크 믹스" },
+    end: {},
+  };
+  assert.deepEqual(scenes.map(({ id }) => id), Object.keys(expected));
+  for (const { id, focusDevices } of scenes) {
+    const house = houseDevicePresentation(chain, focusDevices);
+    assert.deepEqual([...house].filter(([, label]) => label.resting).map(([device]) => device), ["fridge_01"]);
+    const traces = Object.fromEntries([...house].filter(([, label]) => label.evidence)
+      .map(([device, label]) => [device, label.evidence]));
+    assert.deepEqual(traces, expected[id], id);
+  }
+  assert.equal(houseDevicePresentation(buildChain(input), ["fridge_01"]).get("fridge_01").evidence, "");
+  snapshot.devices[0].values.show_notice = "다른 주문 안내";
+  assert.equal(houseDevicePresentation(buildChain({ ...input, snapshot }), ["fridge_01"]).get("fridge_01").evidence, "");
+});
+
+test("a named basis item supports a house trace only when it identifies a slot", () => {
+  const input = birthday();
+  const safety = input.rationale.tasks.find(({ task_id }) => task_id === "t_safe#2");
+  const trace = () => houseDevicePresentation(buildChain(input), ["cooktop_01"]).get("cooktop_01").evidence;
+
+  safety.need = "휘핑크림을 쓰기 전에 주방을 안전하게 준비";
+  assert.equal(trace(), `${safety.line} ← 활동: 컵케이크 굽고 꾸미기 ← 휘핑크림`);
+  safety.need = "케이크 토퍼를 준비하는 동안 주방을 안전하게";
+  assert.equal(trace(), safety.line);
+  safety.need = "행사 동안 주방을 안전하게";
+  assert.equal(trace(), safety.line);
+  input.rationale.tasks.push({ ...safety, task_id: "t_other#8" });
+  assert.equal(trace(), "");
 });
 
 test("the grocery house rests all seven devices even with an observed item notice", () => {
@@ -105,17 +141,24 @@ test("the grocery house rests all seven devices even with an observed item notic
   const house = houseDevicePresentation(buildChain({ episode, rationale, hubPlan, snapshot }));
   assert.equal(house.size, 7);
   for (const presentation of house.values()) {
-    assert.deepEqual(presentation, { resting: true, evidence: "" });
+    assert.deepEqual(presentation, { focused: false, resting: true, evidence: "" });
   }
 });
 
-test("two-line house labels pack without collisions at both demo screen sizes", () => {
+test("focused house labels reserve space and overlapping value tags drop at both demo screen sizes", () => {
   // The house keeps these stage dimensions while the outer frame scales to fit.
   const width = 1256, height = 653;
-  const markers = Array.from({ length: 7 }, (_, index) => ({
-    x: 650 + index * 16, y: 580 + index * 5, width: 570, height: 58,
-  }));
+  const markers = [
+    { id: "display_01", focused: true, x: 410, y: 300, width: 570, height: 58 },
+    { id: "light_01", focused: true, x: 530, y: 300, width: 570, height: 58 },
+    { id: "cleaner_01", x: 290, y: 302, width: 146, height: 32 },
+    { id: "fridge_01", x: 1100, y: 600, width: 164, height: 32 },
+    { id: "cooktop_01", x: 880, y: 580, width: 124, height: 32 },
+    { id: "plug_kettle", x: 887, y: 585, width: 152, height: 32 },
+    { id: "oven_01", x: 1000, y: 374, width: 152, height: 32 },
+  ];
   const labels = layoutHouseLabels(markers, width, height);
+  assert.deepEqual(labels.map(({ id }) => id), ["display_01", "light_01", "oven_01", "cooktop_01", "fridge_01"]);
   for (const [screenWidth, screenHeight] of [[1920, 1080], [1440, 900]]) {
     const scale = Math.min(screenWidth / 1920, screenHeight / 1080);
     const pixels = (position) => Math.round(position * scale);
@@ -157,6 +200,7 @@ test("rebased card, timeline and Hub records share story-time labels", () => {
 
   assert.equal(chain.cards[0].lines[0].time.story, "토 12:30");
   assert.equal(chain.tasks[0].time.derivation, "토 14:00 일정 → 90분 전 → 토 12:30");
+  assert.deepEqual(chain.timeline.clean, { at: scheduled, story: "토 12:30" });
   assert.equal(chain.timeline.before.story, "토 13:30");
   assert.equal(chain.reports[0].taskId, "t_clean#1");
   assert.equal(chain.reports[0].story, "토 12:30");

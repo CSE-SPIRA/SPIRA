@@ -17,50 +17,89 @@ export function hsvColor({ hue, saturation, brightness } = {}) {
 }
 
 function traceLabel(chain, device) {
-  const task = chain.tasks.find(({ id }) => id === device.traces[0]);
+  const [taskId, otherTaskId] = device.traces;
+  if (!taskId || otherTaskId) return "";
+  const task = chain.tasks.find(({ id }) => id === taskId);
   if (!task?.line) return "";
   const intent = chain.intents.find(({ id }) => id === task.intentId);
-  const taskText = `${task.line} ${task.need}`;
+  const words = (text) => text.normalize("NFC").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  const taskText = [task.line, task.need].map(words);
+  const matchesTerm = (word, term) => word === term ||
+    (word?.startsWith(term) && /\p{Script=Hangul}$/u.test(term) &&
+      /^(?:은|는|이|가|을|를|과|와|에|에서|으로|로|의|도|만|까지|부터|에게)$/.test(word.slice(term.length)));
+  const mentions = (phrase) => {
+    const terms = words(phrase);
+    return terms.length > 0 && taskText.some((text) => text.some((_, index) =>
+      terms.every((term, offset) => matchesTerm(text[index + offset], term))));
+  };
   const slots = (intent?.slotIds ?? []).flatMap((id) => {
     const slot = chain.slots.find((entry) => entry.id === id);
     if (!slot?.value) return [];
-    const item = slot.basis.find((id) => chain.items.some((entry) => entry.id === id));
-    const words = new Set(`${slot.label} ${slot.value}`.match(/[\p{L}\p{N}]+/gu));
-    const matches = [...words].filter((word) => word.length > 1 && taskText.includes(word)).length;
-    return [{ slot, item, matches }];
+    const items = slot.basis.map((id) => chain.items.find((item) => item.id === id)).filter(Boolean);
+    const namedItem = items.find((item) => mentions(item.id) || mentions(item.name));
+    const valueWords = words(slot.value);
+    const namesFullValue = mentions(slot.value);
+    if (!namedItem && !namesFullValue && !valueWords.some((word) => word.length > 1 && mentions(word))) return [];
+    // A field name only strengthens a value match, as in "공주 테마".
+    const namesField = !valueWords.includes(slot.label) && mentions(slot.label);
+    const strength = namedItem ? 4 : namesFullValue ? 3 : namesField ? 2 : 1;
+    return [{ slot, item: (namedItem ?? items[0])?.id, strength }];
   });
-  // The task links to an intent. Prefer item-backed slots that share its wording.
-  const [link] = slots.sort((a, b) => Number(Boolean(b.item)) - Number(Boolean(a.item)) || b.matches - a.matches);
-  return [task.line, link && `${link.slot.label}: ${link.slot.value}`, link?.item].filter(Boolean).join(" ← ");
+  const [link, next] = slots.sort((a, b) => b.strength - a.strength);
+  if (!link || link.strength === next?.strength) return task.line;
+  return [task.line, `${link.slot.label}: ${link.slot.value}`, link.item].filter(Boolean).join(" ← ");
 }
 
-export function houseDevicePresentation(chain) {
-  return new Map(chain.devices.map((device) => [device.logicalId, {
-    resting: chain.hasHubPlan && !device.chosen,
-    evidence: chain.hasHubPlan && device.chosen ? traceLabel(chain, device) : "",
-  }]));
+export function houseDevicePresentation(chain, focusDevices = []) {
+  const focus = new Set(focusDevices);
+  return new Map(chain.devices.map((device) => {
+    const focused = focus.has(device.logicalId);
+    const resting = chain.hasHubPlan && !device.chosen;
+    let evidence = "";
+    if (chain.hasHubPlan && focused) {
+      if (device.logicalId === "fridge_01" && device.state?.show_notice) {
+        const notices = chain.item_tasks.filter(({ text }) => text === device.state.show_notice);
+        if (notices.length === 1) evidence = `${notices[0].text} ← ${notices[0].item}`;
+      } else if (device.chosen) {
+        evidence = traceLabel(chain, device);
+      }
+    }
+    return [device.logicalId, { focused, resting, evidence }];
+  }));
 }
 
 export function layoutHouseLabels(markers, viewWidth, viewHeight) {
   const gap = 8;
+  const minTop = 46;
+  const bottom = viewHeight - 44;
+  const preferredTop = (box) => box.y - box.height - 12;
   const boxes = markers.map(({ x, y, width, height, ...marker }) => {
     const left = Math.max(gap, Math.min(x - width / 2, viewWidth - width - gap));
     return { ...marker, x, y, left, right: left + width, height };
   }).sort((a, b) => a.y - b.y);
   const shareColumn = (a, b) => a.left < b.right + gap && a.right + gap > b.left;
 
-  // Reserve space for lower labels before placing each label near its anchor.
-  for (let index = boxes.length - 1; index >= 0; index--) {
-    const box = boxes[index];
-    const lower = boxes.slice(index + 1).filter((other) => shareColumn(box, other));
-    box.latestTop = Math.min(viewHeight - 44, ...lower.map((other) => other.latestTop - gap)) - box.height;
+  const focused = boxes.filter((box) => box.focused);
+  // Reserve room below each focused label for the others in its column.
+  for (let index = focused.length - 1; index >= 0; index--) {
+    const box = focused[index];
+    const lower = focused.slice(index + 1).filter((other) => shareColumn(box, other));
+    box.latestTop = Math.min(bottom, ...lower.map((other) => other.latestTop - gap)) - box.height;
   }
-  for (const [index, box] of boxes.entries()) {
-    const upper = boxes.slice(0, index).filter((other) => shareColumn(box, other));
-    const earliestTop = Math.max(46, ...upper.map((other) => other.top + other.height + gap));
-    box.top = Math.max(earliestTop, Math.min(box.y - box.height - 12, box.latestTop));
+  const placed = [];
+  for (const box of focused) {
+    const upper = placed.filter((other) => shareColumn(box, other));
+    const earliestTop = Math.max(minTop, ...upper.map((other) => other.top + other.height + gap));
+    box.top = Math.max(earliestTop, Math.min(preferredTop(box), box.latestTop));
+    if (box.top + box.height <= bottom) placed.push(box);
   }
-  return boxes;
+  for (const box of boxes.filter((box) => !box.focused)) {
+    box.top = Math.max(minTop, Math.min(preferredTop(box), bottom - box.height));
+    const overlaps = placed.some((other) => shareColumn(box, other) &&
+      box.top < other.top + other.height + gap && box.top + box.height + gap > other.top);
+    if (!overlaps && box.top + box.height <= bottom) placed.push(box);
+  }
+  return placed;
 }
 
 // The fixed I1 cutaway. View direction and entrance cues are separate from device values.
@@ -545,23 +584,23 @@ export function createHouse(stage, overlay, view) {
     return restingMaterials.get(normal);
   }
 
-  function setChain(chain) {
-    const next = houseDevicePresentation(chain);
+  function setChain(chain, focusDevices) {
+    const next = houseDevicePresentation(chain, focusDevices);
     let changed = false;
     for (const [id, model] of Object.entries(models)) {
-      const { resting = false, evidence = "" } = next.get(id) ?? {};
+      const current = next.get(id);
       const previous = presentation.get(id);
-      if (resting !== (previous?.resting ?? false)) {
+      if (current.resting !== (previous?.resting ?? false)) {
         model.traverse((object) => {
           if (!object.isMesh) return;
           if (!normalMaterials.has(object)) normalMaterials.set(object, object.material);
           const normal = normalMaterials.get(object);
-          object.material = resting ? restingMaterial(normal) : normal;
+          object.material = current.resting ? restingMaterial(normal) : normal;
         });
-        changed = true;
       }
-      if (resting !== (previous?.resting ?? false) || evidence !== (previous?.evidence ?? "")) {
-        renderLabel(id, resting, evidence);
+      if (current.resting !== previous?.resting || current.evidence !== previous?.evidence ||
+          current.focused !== previous?.focused) {
+        renderLabel(id, current);
         changed = true;
       }
     }
@@ -570,7 +609,7 @@ export function createHouse(stage, overlay, view) {
     if (changed) queue();
   }
 
-  function renderLabel(id, resting, evidence) {
+  function renderLabel(id, { resting = false, evidence = "", focused = false } = {}) {
     const reading = readings.get(id);
     let label = labels.get(id);
     const visible = reading && (id === "fridge_01" ? reading.notice : !resting && reading.show);
@@ -594,6 +633,7 @@ export function createHouse(stage, overlay, view) {
     label.lastElementChild.textContent = evidence;
     label.lastElementChild.hidden = !evidence;
     label.classList.toggle("theme", reading.theme);
+    label.classList.toggle("focused", focused);
   }
 
   function update(snapshot) {
@@ -623,8 +663,7 @@ export function createHouse(stage, overlay, view) {
         text: [HOUSE_DEVICES[id].label, observed && detail, quality].filter(Boolean).join(" · "),
         theme: Boolean(id === "light_01" && targetSpill || id === "display_01" && tvScene === "kids_party"),
       });
-      const { resting = false, evidence = "" } = presentation.get(id) ?? {};
-      renderLabel(id, resting, evidence);
+      renderLabel(id, presentation.get(id));
     }
     if (changed) {
       renderer.shadowMap.needsUpdate = true;
@@ -644,9 +683,13 @@ export function createHouse(stage, overlay, view) {
     const markers = Array.from(labels).flatMap(([id, label]) => {
       if (label.hidden) return [];
       const { x, y } = project(id);
-      return [{ label, x: x * viewWidth, y: y * viewHeight, width: label.offsetWidth, height: label.offsetHeight }];
+      return [{ label, focused: presentation.get(id)?.focused, x: x * viewWidth, y: y * viewHeight,
+        width: label.offsetWidth, height: label.offsetHeight }];
     });
-    for (const { label, x, y, left, top, height } of layoutHouseLabels(markers, viewWidth, viewHeight)) {
+    const placements = layoutHouseLabels(markers, viewWidth, viewHeight);
+    const placed = new Set(placements.map(({ label }) => label));
+    for (const { label } of markers) label.style.visibility = placed.has(label) ? "" : "hidden";
+    for (const { label, x, y, left, top, height } of placements) {
       label.style.left = `${left}px`;
       label.style.top = `${top}px`;
       label.style.setProperty("--leader-x", `${x - left}px`);

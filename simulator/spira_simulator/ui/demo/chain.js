@@ -91,6 +91,7 @@ function ledgerReports(ledger, episodeId, cards, clocks, firstClock, timing) {
 
 function houseTimeline(episode, episodeId, ledger, cards, clocks, firstClock, tasks) {
   const receipt = ledger.findLast((row) => row.kind === "plan" && row.plan_id === episodeId);
+  const cleaning = tasks.find((task) => task.devices.includes("cleaner_01"));
   const safety = tasks.find((task) => task.devices.includes("cooktop_01"));
   const party = cards.find((card) => card.starts_at);
   const events = Object.fromEntries(Object.entries(OCCURRENCES).map(([event, label]) => {
@@ -100,6 +101,7 @@ function houseTimeline(episode, episodeId, ledger, cards, clocks, firstClock, ta
   }));
   return {
     plan: { at: receipt?.at, story: storyObservedTime(receipt?.at, firstClock) },
+    clean: { at: cleaning?.time.at, story: cleaning?.time.at ? cleaning.time.story : "" },
     before: { at: safety?.time.at, story: safety?.time.at ? safety.time.story : "" },
     party: { at: party?.starts_at, story: displayTime(party?.starts_at, clocks.get(party?.card_id)?.offset) },
     events,

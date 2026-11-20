@@ -26,10 +26,11 @@
   },
   "house": [
     {"id": "plan", "title": "계획 받음", "heading": "계획을 받은 집", "lead": "집 허브가 받은 계획과 실행 결과를 장부에서 확인해요.", "camera": "overview"},
-    {"id": "delivery", "title": "택배 들여옴", "heading": "택배를 들여왔어요", "lead": "택배 신호가 들어오면 허브가 냉장고에 안내를 보낼 수 있어요.", "action": "delivery", "event": "package.brought_in", "entry": "package", "camera": "fridge"},
-    {"id": "before", "title": "손님 오기 전", "heading": "손님을 맞을 준비", "lead": "예약한 준비와 주방의 현재 상태를 살펴봐요.", "camera": "kitchen"},
-    {"id": "guests", "title": "첫 손님 도착", "heading": "첫 손님이 왔어요", "lead": "현관 신호 뒤에 거실이 어떻게 달라졌는지 살펴봐요.", "action": "guests_arrive", "event": "guest_arrived", "entry": "guest", "camera": "party"},
-    {"id": "party", "title": "파티 시간", "heading": "주방의 오븐을 살펴봐요", "lead": "오븐에 설정이 들어오면 온도와 시간이 표시돼요.", "camera": "oven"},
+    {"id": "delivery", "title": "택배 들여옴", "heading": "택배를 들여왔어요", "lead": "택배 신호가 들어오면 허브가 냉장고에 안내를 보낼 수 있어요.", "action": "delivery", "event": "package.brought_in", "entry": "package", "camera": "fridge", "focusDevices": ["fridge_01"]},
+    {"id": "clean", "title": "손님 오기 전", "heading": "거실 청소를 살펴봐요", "lead": "로봇청소기의 현재 상태를 확인해요.", "camera": "party", "focusDevices": ["cleaner_01"]},
+    {"id": "before", "title": "시작 30분 전", "heading": "주방의 아이 안전 모드", "lead": "인덕션 잠금과 전기포트 전원 상태를 살펴봐요.", "camera": "kitchen", "focusDevices": ["cooktop_01", "plug_kettle"]},
+    {"id": "guests", "title": "첫 손님 도착", "heading": "첫 손님이 왔어요", "lead": "현관 신호 뒤에 거실이 어떻게 달라졌는지 살펴봐요.", "action": "guests_arrive", "event": "guest_arrived", "entry": "guest", "camera": "party", "focusDevices": ["display_01", "light_01"]},
+    {"id": "party", "title": "파티 시간", "heading": "주방의 오븐을 살펴봐요", "lead": "오븐에 설정이 들어오면 온도와 시간이 표시돼요.", "camera": "oven", "focusDevices": ["oven_01"]},
     {"id": "end", "title": "파티 끝", "heading": "파티가 끝났어요", "lead": "행사 종료 뒤 집에 남은 상태와 허브의 결과를 살펴봐요.", "action": "event_end", "event": "event_end", "camera": "overview"}
   ]
 }

@@ -50,7 +50,7 @@ function refreshChain() {
     hubPlan: hub?.plan_actions?.[episodeId], hubLedger: hub?.ledger, snapshot,
     storyTime: { timing: config.story_timing, guestWindows: hub?.guest_windows?.[episodeId] },
   });
-  state.house?.setChain(state.chain);
+  state.house?.setChain(state.chain, timeline()[state.homeStep]?.focusDevices);
 }
 
 function paintTheme(text, theme) {
@@ -543,6 +543,7 @@ function renderTimeline() {
   const scenes = timeline();
   state.homeStep = Math.min(state.homeStep, scenes.length - 1);
   const current = scenes[state.homeStep];
+  state.house?.setChain(state.chain, current.focusDevices);
   const { at, story } = houseMoment(current);
   const arrived = current.id !== "plan" || at;
   $("home-time").textContent = story;
@@ -674,12 +675,11 @@ function openHouseView() {
       console.error(error);
     }
   }
-  state.house?.setChain(state.chain);
+  renderTimeline();
   if (state.snapshot) state.house?.update(state.snapshot);
   state.house?.resize();
   directHouse(true);
   renderLedger();
-  renderTimeline();
 }
 
 function showPage(page) {
