@@ -1,5 +1,4 @@
 import * as THREE from "./three.module.min.js";
-import { HOUSE_DEVICES } from "./devices.js";
 
 export const TV_SCENES = { kids_party: "어린이 파티", party: "파티", calm: "차분한 분위기", cinema: "영화" };
 const OVERVIEW = { eye: [8.5, 10.6, 17.4], aim: [-0.10, 0.76, 0], zoom: 1 };
@@ -17,15 +16,16 @@ export function hsvColor({ hue, saturation, brightness } = {}) {
     .join("");
 }
 
-export function layoutHouseLabels(markers, viewWidth, viewHeight, { fitUnfocused = false } = {}) {
+export function layoutHouseLabels(markers, viewWidth, viewHeight) {
   const gap = 8;
   const minTop = 46;
   const bottom = viewHeight - 44;
   const preferredTop = (box) => box.y - box.height - 12;
-  const boxes = markers.map(({ x, y, width, height, ...marker }) => {
-    const left = Math.max(gap, Math.min(x - width / 2, viewWidth - width - gap));
-    return { ...marker, x, y, left, right: left + width, height };
-  }).sort((a, b) => a.y - b.y);
+  const boxes = markers.filter(({ width, height }) => width <= viewWidth - 2 * gap && height <= bottom - minTop)
+    .map(({ x, y, width, height, ...marker }) => {
+      const left = Math.max(gap, Math.min(x - width / 2, viewWidth - width - gap));
+      return { ...marker, x, y, left, right: left + width, height };
+    }).sort((a, b) => a.y - b.y);
   const shareColumn = (a, b) => a.left < b.right + gap && a.right + gap > b.left;
 
   const focused = boxes.filter((box) => box.focused);
@@ -42,11 +42,13 @@ export function layoutHouseLabels(markers, viewWidth, viewHeight, { fitUnfocused
     box.top = Math.max(earliestTop, Math.min(preferredTop(box), box.latestTop));
     if (box.top + box.height <= bottom) placed.push(box);
   }
-  for (const box of boxes.filter((box) => !box.focused)) {
+  const unfocused = boxes.filter((box) => !box.focused)
+    .sort((a, b) => Number(Boolean(b.required)) - Number(Boolean(a.required)));
+  for (const box of unfocused) {
     const preferred = Math.max(minTop, Math.min(preferredTop(box), bottom - box.height));
     const column = placed.filter((other) => shareColumn(box, other));
     const candidates = [preferred];
-    if (fitUnfocused) {
+    if (box.required) {
       for (const other of column) {
         candidates.push(other.top - box.height - gap, other.top + other.height + gap);
       }
@@ -59,8 +61,14 @@ export function layoutHouseLabels(markers, viewWidth, viewHeight, { fitUnfocused
   return placed;
 }
 
+export function replaceHouseMarkers(current, next) {
+  const focused = current.contains(document.activeElement) ? document.activeElement.id : "";
+  current.replaceWith(next);
+  if (focused) document.getElementById(focused)?.focus({ preventScroll: true });
+}
+
 // The fixed I1 cutaway. View direction and entrance cues are separate from device values.
-export function createHouse(stage, overlay, view, { decorateLabel } = {}) {
+export function createHouse(stage, view, { decorateLabel } = {}) {
   const motion = matchMedia("(prefers-reduced-motion: reduce)");
   const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
   renderer.shadowMap.enabled = true;
@@ -408,9 +416,8 @@ export function createHouse(stage, overlay, view, { decorateLabel } = {}) {
   const normalMaterials = new Map();
   const restingMaterials = new Map();
   const readings = new Map();
-  const labels = new Map();
+  let labels = new Map();
   let presentation = new Map();
-  let externalLabels = null;
   let spill = 0, targetSpill = 0, targetIntensity = 0;
   let jobRunning = false, cleanSince = 0, tvScene;
   let entranceSignal;
@@ -455,7 +462,7 @@ export function createHouse(stage, overlay, view, { decorateLabel } = {}) {
     });
   }
 
-  function paintOven({ preset, in_use, job_status }) {
+  function paintOven({ preset, in_use }) {
     ovenWindow.emissiveIntensity = in_use ? .65 : 0;
     ovenTexture.paint((ctx, w, h) => {
       ctx.fillStyle = "#282632";
@@ -466,10 +473,6 @@ export function createHouse(stage, overlay, view, { decorateLabel } = {}) {
       ctx.textAlign = "center";
       ctx.fillText(`${preset.temp_c}°  ${preset.minutes}m`, w / 2, 101);
     });
-    const status = in_use ? "사용 중" : job_status === "completed" ? "사용 완료" : "";
-    const settings = preset && `${preset.temp_c}℃ · ${preset.minutes}분`;
-    if (status) return [status, settings].filter(Boolean).join(" · ");
-    return settings ? `${settings} 대기` : "대기 설정 없음";
   }
 
   function paintFridge(notice) {
@@ -504,9 +507,6 @@ export function createHouse(stage, overlay, view, { decorateLabel } = {}) {
     targetSpill = hsv ? color.brightness / 100 : 0;
     view.classList.toggle("has-color", targetSpill > 0);
     view.style.setProperty("--glow-tint", tint);
-    if (power === false) return "꺼짐";
-    if (hsv) return `색조 ${color.hue}° · 밝기 ${color.brightness}`;
-    return color?.kelvin ? `${color.kelvin} K` : "켜짐";
   }
 
   const painters = {
@@ -514,32 +514,21 @@ export function createHouse(stage, overlay, view, { decorateLabel } = {}) {
     display_01({ play_mood }) {
       tvScene = play_mood?.scene ?? null;
       paintTv();
-      return TV_SCENES[tvScene] || tvScene || "꺼짐";
     },
     oven_01: paintOven,
     fridge_01({ show_notice }) {
       paintFridge(show_notice);
-      return show_notice ? "보관·준비 안내" : "안내 없음";
     },
-    cooktop_01({ child_lock, in_use }) {
+    cooktop_01({ child_lock }) {
       lockIcon.visible = lockShackle.visible = child_lock === true;
       lockMaterial.emissiveIntensity = child_lock ? .82 : 0;
-      return child_lock ? "잠금" : in_use ? "사용 중" : "잠금 해제";
     },
     plug_kettle({ power }) {
       plugLed.color.set(power ? "#778875" : "#8a6c5b");
       plugLed.emissive.set(power ? "#78d6ae" : "#b9946e");
       plugLed.emissiveIntensity = power ? 1.4 : 0;
-      return power ? "전원 켜짐" : "전원 차단";
     },
-    purifier_01({ mode }) {
-      return { auto: "자동", turbo: "터보", sleep: "취침" }[mode];
-    },
-    styler_01({ course_standby }) {
-      const course = { standard: "표준", wool_care: "울케어" }[course_standby?.course];
-      return course ? `${course} 코스 대기` : "대기 설정 없음";
-    },
-    cleaner_01({ job_status, in_use, clean }) {
+    cleaner_01({ job_status, in_use }) {
       const running = job_status === "running" || in_use === true;
       if (running && !jobRunning) cleanSince = performance.now();
       jobRunning = running;
@@ -548,7 +537,6 @@ export function createHouse(stage, overlay, view, { decorateLabel } = {}) {
         cleaner.position.copy(dock);
         cleaningTrail.forEach((dot) => { dot.visible = false; });
       }
-      return running ? `${clean?.room || ""} 청소 중`.trim() : job_status === "completed" ? "청소 완료" : "충전 위치";
     },
   };
   paintTv();
@@ -594,7 +582,7 @@ export function createHouse(stage, overlay, view, { decorateLabel } = {}) {
         });
       }
       if (JSON.stringify(current) !== JSON.stringify(previous ?? {})) {
-        if (overlay) renderLabel(id, current);
+        decorateDeviceLabel(id, current);
         changed = true;
       }
     }
@@ -603,66 +591,33 @@ export function createHouse(stage, overlay, view, { decorateLabel } = {}) {
     if (changed) queue();
   }
 
-  function renderLabel(id, appearance = {}) {
-    const { resting = false, focused = false } = appearance;
-    const reading = readings.get(id);
-    let label = labels.get(id);
-    const visible = reading && (id === "fridge_01" ? reading.notice : !resting && reading.show);
-    if (!visible) {
-      if (label) label.hidden = true;
-      return;
-    }
-    if (!label) {
-      label = document.createElement("span");
-      label.className = "marker";
-      const value = document.createElement("span");
-      value.className = "marker-value";
-      label.append(value);
-      overlay.append(label);
-      labels.set(id, label);
-    }
-    label.hidden = false;
-    label.firstElementChild.textContent = reading.text;
-    decorateLabel?.(label, appearance);
-    label.classList.toggle("theme", reading.theme);
-    label.classList.toggle("focused", focused);
+  function decorateDeviceLabel(id, appearance = {}) {
+    const label = labels.get(id);
+    if (!label) return;
+    label.classList.toggle("focused", appearance.focused === true);
+    if (!label.hasAttribute("data-resting")) decorateLabel?.(label.firstElementChild, appearance);
   }
 
-  function update(snapshot) {
+  function update(valuesById) {
     let changed = false;
-    const byId = new Map(snapshot.devices.map((device) => [device.logical_id, device]));
     for (const [id, model] of Object.entries(models)) {
-      if (model.visible !== byId.has(id)) {
-        model.visible = byId.has(id);
+      if (model.visible !== valuesById.has(id)) {
+        model.visible = valuesById.has(id);
         changed = true;
       }
     }
     for (const [id, paint] of Object.entries(painters)) {
-      const device = byId.get(id);
-      const values = device?.values ?? {};
-      const observed = Object.keys(values).length > 0;
-      const quality = !device?.values || device.available === false ? "연결 끊김"
-        : !observed ? "확인할 수 없음" : device.observation === "stale" ? "이전 관측" : "";
-      const key = JSON.stringify([values, quality, Boolean(device)]);
+      const values = valuesById.get(id) ?? {};
+      const key = JSON.stringify(values);
       const previous = readings.get(id);
       if (previous?.key === key) continue;
       changed = true;
 
-      const detail = paint(values);
-      const active = {
-        light_01: Boolean(values.color?.hue != null && values.power) || values.power === false,
-        display_01: Boolean(values.play_mood), oven_01: Boolean(values.preset || values.in_use),
-        cooktop_01: Boolean(values.child_lock || values.in_use), plug_kettle: values.power === false,
-        cleaner_01: jobRunning || values.job_status === "completed",
-        purifier_01: Boolean(values.mode && values.mode !== "auto"), styler_01: Boolean(values.course_standby),
-      }[id];
+      paint(values);
       readings.set(id, {
-        key, values, show: Boolean(device && (quality || active || previous?.show)),
-        notice: Boolean(values.show_notice),
-        text: [HOUSE_DEVICES[id].label, observed && detail, quality].filter(Boolean).join(" · "),
+        key, values,
         theme: Boolean(id === "light_01" && targetSpill || id === "display_01" && tvScene === "kids_party"),
       });
-      if (overlay) renderLabel(id, presentation.get(id));
     }
     if (changed) {
       renderer.shadowMap.needsUpdate = true;
@@ -679,22 +634,23 @@ export function createHouse(stage, overlay, view, { decorateLabel } = {}) {
 
   function placeLabels() {
     // Measure in stage pixels, before the outer frame scales to the screen.
-    const markers = Array.from(externalLabels ?? labels).flatMap(([id, label]) => {
-      if (label.hidden || !Object.hasOwn(anchors, id)) return [];
+    const inline = viewWidth >= 720;
+    for (const [id, label] of labels) {
+      if (Object.hasOwn(anchors, id)) label.classList.toggle("anchored", inline);
+    }
+    const markers = Array.from(labels).flatMap(([id, label]) => {
+      if (!Object.hasOwn(anchors, id)) return [];
       const { x, y } = project(id);
-      return [{ id, label, focused: presentation.get(id)?.focused, x: x * viewWidth, y: y * viewHeight,
+      return [{ id, label, focused: presentation.get(id)?.focused, required: label.hasAttribute("data-required"),
+        x: x * viewWidth, y: y * viewHeight,
         width: label.offsetWidth, height: label.offsetHeight }];
     });
-    const placements = externalLabels && viewWidth < 720 ? [] :
-      layoutHouseLabels(markers, viewWidth, viewHeight, { fitUnfocused: externalLabels !== null });
+    const placements = inline ? layoutHouseLabels(markers, viewWidth, viewHeight) : [];
     const placed = new Set(placements.map(({ label }) => label));
-    for (const { id, label } of markers) {
-      if (externalLabels) {
-        label.classList.toggle("anchored", placed.has(label));
-        label.classList.toggle("theme", readings.get(id)?.theme === true);
-      } else {
-        label.style.visibility = placed.has(label) ? "" : "hidden";
-      }
+    for (const { id, label, required } of markers) {
+      label.classList.toggle("anchored", placed.has(label));
+      label.classList.toggle("unplaced", inline && !required && !placed.has(label));
+      label.classList.toggle("theme", readings.get(id)?.theme === true);
     }
     for (const { label, x, y, left, top, height } of placements) {
       label.style.left = `${left}px`;
@@ -705,8 +661,13 @@ export function createHouse(stage, overlay, view, { decorateLabel } = {}) {
     }
   }
 
-  function setMarkers(markers) {
-    externalLabels = markers;
+  function setMarkers(root) {
+    const devices = [...root.querySelectorAll("[data-device][data-values]")];
+    labels = new Map(devices.map((node) => [node.dataset.device, node]));
+    update(new Map(devices.map((node) => [node.dataset.device, JSON.parse(node.dataset.values)])));
+    for (const id of labels.keys()) decorateDeviceLabel(id, presentation.get(id));
+    const entrance = root.querySelector("#entrance-observations");
+    if (entrance) labels.set("entrance", entrance);
     queue();
   }
 
@@ -820,5 +781,5 @@ export function createHouse(stage, overlay, view, { decorateLabel } = {}) {
   }
 
   new ResizeObserver(resize).observe(stage);
-  return { resize, update, setPresentation, setMarkers, focus, setEntrance, anchor: project };
+  return { resize, setPresentation, setMarkers, focus, setEntrance, anchor: project };
 }

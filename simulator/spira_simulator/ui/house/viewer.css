@@ -62,7 +62,7 @@ body.test-home {
 }
 .house-layout { position: relative; }
 .test-home .house-view { height: auto; aspect-ratio: 1.86; }
-.house-view.ready, .viewer-marker.anchored { animation: settle-in var(--settle) var(--ease) both; }
+.house-view.ready { animation: settle-in var(--settle) var(--ease) both; }
 @keyframes settle-in { from { opacity: 0; } }
 
 .viewer-room { margin-top: var(--space-sm); }
@@ -73,28 +73,35 @@ body.test-home {
   align-items: start;
   gap: var(--space-xs);
 }
-.viewer-room:not(:has(.viewer-marker:not(.anchored))),
-.viewer-room:not(:has(.viewer-marker:not(.anchored))) .room-devices { display: contents; }
-.viewer-room:not(:has(.viewer-marker:not(.anchored))) > h2 { display: none; }
-.marker.viewer-marker {
-  position: static;
+.viewer-room:not(:has(.viewer-marker:not(.anchored, .unplaced))),
+.viewer-room:not(:has(.viewer-marker:not(.anchored, .unplaced))) .room-devices { display: contents; }
+.viewer-room:not(:has(.viewer-marker:not(.anchored, .unplaced))) > h2 { display: none; }
+.viewer-marker {
+  position: relative;
   display: grid;
   gap: 3px;
   width: max-content;
   max-width: min(100%, 13rem);
-  padding: 0;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
+  color: var(--green-deep);
   font-size: .875rem;
   line-height: 1.3;
   font-weight: 400;
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.marker.viewer-marker.anchored { position: absolute; z-index: 1; }
-.viewer-marker:not(.anchored)::after { display: none; }
-.viewer-marker::after { z-index: -1; }
+.viewer-marker:is(.anchored, .unplaced) { position: absolute; z-index: 1; }
+.viewer-marker.unplaced { clip-path: inset(50%); pointer-events: none; }
+.viewer-marker.anchored:not([data-resting])::after {
+  content: "";
+  position: absolute;
+  top: var(--leader-top);
+  left: var(--leader-x);
+  height: var(--leader-height);
+  width: 1px;
+  background: var(--green-line);
+  pointer-events: none;
+  z-index: -1;
+}
 .home-device, .planned {
   padding: 4px var(--space-xs);
   border: 1px solid var(--line);
@@ -103,11 +110,24 @@ body.test-home {
 .home-device { background: var(--surface); box-shadow: 0 3px 12px #43372420; }
 .home-device h3 { font-size: inherit; font-weight: 600; }
 .device-value { white-space: pre-wrap; }
+.device-value.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  clip-path: inset(50%);
+  overflow: hidden;
+}
 .viewer-marker[data-resting] .home-device {
-  background: var(--paper);
+  padding: 0 3px;
+  border: 0;
+  background: transparent;
   color: var(--muted);
   box-shadow: none;
+  font-size: .78rem;
+  text-shadow: 0 0 4px var(--paper), 0 0 2px var(--paper);
 }
+.viewer-marker[data-resting] .observation-warning { font-size: inherit; }
+.viewer-marker.focused .home-device { border-color: var(--green-line); }
 .home-device[data-change="spira"] { border-color: var(--green-line); background: var(--green-soft); }
 .theme .home-device {
   background: var(--pink-soft);
@@ -128,7 +148,28 @@ body.test-home {
   white-space: nowrap;
 }
 .substrate.physical { background: var(--frame); color: var(--white); }
+.device-legend { color: var(--muted); }
 .change-marker, #entrance-observations time { color: var(--muted); font-size: .75rem; }
+#entrance-observations:is(:hover, :focus-within) { z-index: 2; }
+#entrance-summary:focus-visible, .entrance-history:focus-visible { outline: 2px solid var(--green); }
+.entrance-history {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: max-content;
+  max-width: min(17rem, 84vw);
+  max-height: 12rem;
+  overflow: auto;
+  padding: var(--space-xs);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 3px 12px #43372420;
+  list-style: none;
+}
+.test-home .entrance-history { padding: var(--space-xs); }
+#entrance-observations:is(:hover, :focus-within) .entrance-history { display: block; }
 #entrance-observations time { white-space: nowrap; }
 .observation-warning { color: var(--pink-ink); font-size: .84rem; font-weight: 600; }
 .planned {
@@ -158,5 +199,5 @@ body.test-home {
   .test-home .house-view { aspect-ratio: 1.5; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .house-view.ready, .viewer-marker.anchored { animation: none; }
+  .house-view.ready { animation: none; }
 }

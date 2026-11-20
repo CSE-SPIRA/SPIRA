@@ -2,27 +2,20 @@ const world = document.getElementById("viewer-world");
 const liveRegions = new Map(Array.from(document.querySelectorAll("[data-live]"),
   (node) => [node.id, node.outerHTML]));
 let house;
+let replaceMarkers;
 
 function renderHouse() {
   if (!house) return;
-  const devices = [...document.querySelectorAll("[data-device][data-values]")];
-  const entrance = document.getElementById("entrance-observations");
-  const signals = Array.from(entrance.querySelectorAll("[data-signal]"), (node) => node.dataset.signal);
-  const markers = new Map(devices.map((node) => [node.dataset.device, node]));
-  markers.set("entrance", entrance);
+  const markers = document.getElementById("viewer-markers");
+  const devices = [...markers.querySelectorAll("[data-device]")];
+  const signals = Array.from(markers.querySelectorAll("[data-signal]"), (node) => node.dataset.signal);
   const presentation = new Map(devices.map((node) => [node.dataset.device, {
     resting: node.hasAttribute("data-resting"),
-    focused: !node.hasAttribute("data-resting") || node.firstElementChild.dataset.observation !== "current",
   }]));
-  presentation.set("entrance", { focused: signals.length > 0 });
 
-  house.update({ devices: devices.map((node) => ({
-    logical_id: node.dataset.device,
-    values: JSON.parse(node.dataset.values),
-  })) });
   house.setEntrance({
     packagePresent: signals.includes("package"),
-    signal: signals.filter((kind) => kind !== "presence").at(-1),
+    signal: signals.find((kind) => kind !== "presence"),
   });
   house.setPresentation(presentation);
   house.setMarkers(markers);
@@ -31,8 +24,9 @@ function renderHouse() {
 async function openHouse() {
   const view = document.getElementById("viewer-house");
   try {
-    const { createHouse } = await import("/sim/assets/house/house.js");
-    house = createHouse(world, null, view);
+    const { createHouse, replaceHouseMarkers } = await import("/sim/assets/house/house.js");
+    replaceMarkers = replaceHouseMarkers;
+    house = createHouse(world, view);
     house.focus();
     renderHouse();
     view.classList.add("ready");
@@ -57,8 +51,13 @@ async function refresh() {
       if (!next) throw new Error("Missing observations");
       if (next.outerHTML === previous) continue;
       liveRegions.set(id, next.outerHTML);
-      document.getElementById(id).replaceWith(next);
-      if (id === "viewer-markers") renderHouse();
+      const current = document.getElementById(id);
+      if (id === "viewer-markers" && replaceMarkers) {
+        replaceMarkers(current, next);
+        renderHouse();
+      } else {
+        current.replaceWith(next);
+      }
     }
     document.body.classList.remove("disconnected");
     warning.hidden = true;

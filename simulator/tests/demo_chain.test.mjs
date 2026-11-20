@@ -153,48 +153,64 @@ test("the grocery house rests all nine devices even with an observed item notice
   }
 });
 
-test("focused house labels reserve space and overlapping value tags drop at both demo screen sizes", () => {
+const HOUSE_SCREENS = [[1920, 1080], [1600, 1000], [1440, 900]];
+
+function assertNoLabelOverlap(labels, width, height, scale = 1) {
+  const pixels = (position) => Math.round(position * scale);
+  for (const [index, label] of labels.entries()) {
+    assert.ok(label.left >= 8 && label.right <= width - 8, label.id);
+    assert.ok(label.top >= 46 && label.top + label.height <= height - 44, label.id);
+    for (const other of labels.slice(index + 1)) {
+      assert.ok(pixels(label.right) <= pixels(other.left) || pixels(other.right) <= pixels(label.left) ||
+        pixels(label.top + label.height) <= pixels(other.top) || pixels(other.top + other.height) <= pixels(label.top),
+      `${label.id} overlaps ${other.id}`);
+    }
+  }
+}
+
+test("focused demo labels reserve space and colliding resting tags drop at all three screen sizes", () => {
   // The house keeps these stage dimensions while the outer frame scales to fit.
   const width = 1256, height = 653;
   const markers = [
     { id: "display_01", focused: true, x: 410, y: 300, width: 570, height: 58 },
     { id: "light_01", focused: true, x: 530, y: 300, width: 570, height: 58 },
-    { id: "cleaner_01", x: 290, y: 302, width: 146, height: 32 },
-    { id: "fridge_01", x: 1100, y: 600, width: 164, height: 32 },
-    { id: "cooktop_01", x: 880, y: 580, width: 124, height: 32 },
-    { id: "plug_kettle", x: 887, y: 585, width: 152, height: 32 },
-    { id: "oven_01", x: 1000, y: 374, width: 152, height: 32 },
+    { id: "cleaner_01", x: 290, y: 291, width: 65, height: 17 },
+    { id: "fridge_01", required: true, x: 1100, y: 600, width: 164, height: 32 },
+    { id: "cooktop_01", required: true, x: 880, y: 580, width: 124, height: 32 },
+    { id: "plug_kettle", x: 887, y: 573, width: 82, height: 17 },
+    { id: "oven_01", required: true, x: 1000, y: 374, width: 152, height: 32 },
   ];
   const labels = layoutHouseLabels(markers, width, height);
   assert.deepEqual(labels.map(({ id }) => id), ["display_01", "light_01", "oven_01", "cooktop_01", "fridge_01"]);
-  for (const [screenWidth, screenHeight] of [[1920, 1080], [1440, 900]]) {
-    const scale = Math.min(screenWidth / 1920, screenHeight / 1080);
-    const pixels = (position) => Math.round(position * scale);
-    for (const [index, label] of labels.entries()) {
-      assert.ok(label.left >= 8 && label.right <= width - 8);
-      assert.ok(label.top >= 46 && label.top + label.height <= height - 44);
-      for (const other of labels.slice(index + 1)) {
-        assert.ok(pixels(label.right) <= pixels(other.left) || pixels(other.right) <= pixels(label.left) ||
-          pixels(label.top + label.height) <= pixels(other.top) || pixels(other.top + other.height) <= pixels(label.top));
-      }
-    }
+  for (const [screenWidth, screenHeight] of HOUSE_SCREENS) {
+    assertNoLabelOverlap(labels, width, height, Math.min(screenWidth / 1920, screenHeight / 1080));
   }
 });
 
-test("viewer fits resting labels around planned and changed devices", () => {
-  const markers = [
-    { id: "oven_01", focused: true, x: 635, y: 240, width: 160, height: 70 },
-    { id: "plug_kettle", x: 660, y: 245, width: 140, height: 40 },
-    { id: "fridge_01", x: 680, y: 240, width: 170, height: 40 },
-    { id: "oversized", x: 670, y: 240, width: 160, height: 420 },
+test("viewer fits entrance, planned and changed labels ahead of resting tags at all three screen sizes", () => {
+  // Approximate stage anchors and measured-box inputs for the crowded birthday state.
+  const fixtures = [
+    { id: "entrance", required: true, x: .31, y: .275, width: 146, height: 29 },
+    { id: "display_01", required: true, x: .55, y: .25, width: 112, height: 62 },
+    { id: "light_01", required: true, x: .45, y: .33, width: 120, height: 62 },
+    { id: "cooktop_01", required: true, x: .67, y: .4, width: 130, height: 56 },
+    { id: "oven_01", required: true, x: .73, y: .51, width: 208, height: 95 },
+    { id: "fridge_01", required: true, x: .84, y: .40, width: 208, height: 97 },
+    { id: "plug_kettle", required: true, x: .78, y: .46, width: 108, height: 23 },
+    { id: "styler_01", x: .21, y: .34, width: 65, height: 17 },
+    { id: "cleaner_01", x: .59, y: .45, width: 66, height: 17 },
+    { id: "purifier_01", x: .42, y: .32, width: 67, height: 17 },
   ];
-  const labels = layoutHouseLabels(markers, 800, 430, { fitUnfocused: true });
-  assert.equal(labels[0].top, 158);
-  assert.deepEqual(labels.map(({ id }) => id), ["oven_01", "fridge_01", "plug_kettle"]);
-  const positioned = [...labels].sort((a, b) => a.top - b.top);
-  for (const [index, label] of positioned.entries()) {
-    assert.ok(label.top >= 46 && label.top + label.height <= 386);
-    if (index > 0) assert.ok(positioned[index - 1].top + positioned[index - 1].height < label.top);
+  for (const [screenWidth] of HOUSE_SCREENS) {
+    const mainWidth = Math.min(screenWidth * .92, 1248);
+    const width = Math.floor(mainWidth) - 2, height = Math.floor(mainWidth / 1.86) - 2;
+    const markers = fixtures.map((box) => ({ ...box, x: box.x * width, y: box.y * height }));
+    const labels = layoutHouseLabels(markers, width, height);
+    const placed = new Set(labels.map(({ id }) => id));
+    assert.ok(markers.filter(({ required }) => required).every(({ id }) => placed.has(id)));
+    assert.ok(placed.has("styler_01"));
+    assert.ok(!placed.has("purifier_01"));
+    assertNoLabelOverlap(labels, width, height);
   }
 });
 

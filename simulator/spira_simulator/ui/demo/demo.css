@@ -208,6 +208,10 @@ h1{font-size:var(--size-heading);line-height:1.11;letter-spacing:-.065em;font-we
 .house-head .kicker{margin-bottom:3px}
 .house-head h1{font-size:54px}
 .house-head .lead{max-width:666px;font-size:24px;text-align:right;line-height:1.42;margin:0 0 3px}
+.house-view #viewer-markers{padding:52px 12px 0}
+.house-view .viewer-marker.focused{max-width:min(100%,23rem);font-size:1rem}
+.house-view .device-legend{position:absolute;bottom:12px;left:17px;right:17px;font-size:16px;pointer-events:none}
+.house-view .entrance-history{padding:var(--space-xs)}
 .marker-trace{display:block;overflow:hidden;text-overflow:ellipsis;margin-top:2px;color:var(--muted);font-size:15px;font-weight:400}
 .ledger{display:flex;flex-direction:column;grid-column:2;grid-row:2;padding:20px 20px 12px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);overflow:hidden}
 .ledger-head{flex:none;display:flex;justify-content:space-between;align-items:center;margin-bottom:13px}
@@ -261,12 +265,11 @@ h1{font-size:var(--size-heading);line-height:1.11;letter-spacing:-.065em;font-we
 .plan-list li { grid-template-columns:172px minmax(0,1fr); }
 .plan-list small { display:block;color:var(--muted); }
 .plan-card + .plan-card { margin-top:20px; }
-#home.introducing .room-key, #home.introducing .device-key { opacity:0; }
+#home.introducing .room-key, #home.introducing .device-legend { opacity:0; }
 #home[aria-busy="true"] #timeline { opacity:.6; }
 #ledger { min-height:0;overflow:auto; }
 .ledger-row p { margin-left:63px; }
 #timeline button:disabled:not([aria-current="step"]):not(.past) { opacity:.6; }
-.device-key li small { font-size:14px;color:var(--muted);margin-left:3px; }
 
 
 .owner-tag{display:none}

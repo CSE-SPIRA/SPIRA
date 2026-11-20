@@ -1,10 +1,12 @@
 {% macro device_marker(device) %}
-  <div class="marker viewer-marker device-position" data-device="{{ device.id }}" data-values="{{ device.visual_values | tojson | forceescape }}"{% if not device.planned and (not device.change or device.change[0] != "spira") %} data-resting=""{% endif %}>
-    <article class="home-device" data-observation="{{ device.observation }}"{% if device.change %} data-change="{{ device.change[0] }}"{% endif %}>
-      <h3>{{ device.name }} <small class="substrate{% if device.physical %} physical{% endif %}">{{ device.substrate }}{% if device.physical %} · 미검증{% endif %}</small>
-        {% if device.class_a %}<small class="substrate" aria-describedby="class-a-note" title="{{ device.assumption }}">부류 A</small>{% endif %}
+  {% set full = device.changed or device.planned %}
+  <div class="viewer-marker" data-device="{{ device.id }}" data-values="{{ device.visual_values | tojson | forceescape }}"{% if not full %} data-resting=""{% endif %}{% if full or device.observation_label or device.substrate_exception or device.class_exception %} data-required=""{% endif %}>
+    <article class="home-device" aria-describedby="device-legend" data-observation="{{ device.observation }}"{% if device.change %} data-change="{{ device.change[0] }}"{% endif %}>
+      <h3{% if not full and device.content is not none %} title="{{ device.content }}"{% endif %}>{{ device.name }}
+        {% if device.substrate_exception %}<small class="substrate{% if device.physical %} physical{% endif %}">{{ device.substrate }}{% if device.physical %} · 미검증{% endif %}</small>{% endif %}
+        {% if device.class_exception %}<small class="substrate">부류 {{ "A" if device.class_a else "B" }}</small>{% endif %}
       </h3>
-      {% if device.content is not none %}<p class="device-value">{{ device.content }}</p>{% endif %}
+      {% if device.content is not none %}<p class="device-value{% if not full %} visually-hidden{% endif %}">{{ device.content }}</p>{% endif %}
       {% if device.observation_label %}<p class="observation-warning">{{ device.observation_label }}{% if device.observation == "stale" %} · {{ device.observed_at }}{% endif %}</p>{% endif %}
       {% if device.change %}<p class="change-marker">{{ device.change[1] }}</p>{% endif %}
     </article>
@@ -38,15 +40,16 @@
       <section class="viewer-room entrance" data-room="entrance">
         <h2>현관</h2>
         <div class="room-devices">
-          <div id="entrance-observations" class="marker viewer-marker">
+          <div id="entrance-observations" class="viewer-marker" {% if entrance %}data-required=""{% else %}data-resting=""{% endif %}>
             <div class="home-device">
-              <h3>현관</h3>
               {% if entrance %}
-              <ul>
-                {% for fact in entrance %}<li data-signal="{{ fact.signal }}">{{ fact.label }} <time datetime="{{ fact.occurred_at }}">{{ fact.at }}</time></li>{% endfor %}
+              {% set latest = entrance[-1] %}
+              <h3 id="entrance-summary" tabindex="0">{{ latest.label }}{% if entrance | length > 1 %} · 이전 {{ entrance | length - 1 }}건{% endif %}</h3>
+              <ul id="entrance-history" class="entrance-history" tabindex="0" aria-label="현관 관찰 기록">
+                {% for fact in entrance | reverse %}<li data-signal="{{ fact.signal }}">{{ fact.label }} <time datetime="{{ fact.occurred_at }}">{{ fact.at }}</time></li>{% endfor %}
               </ul>
               {% else %}
-              <p>관찰된 현관 사건 없음</p>
+              <h3 title="관찰된 현관 사건 없음">현관</h3>
               {% endif %}
             </div>
           </div>
@@ -56,8 +59,8 @@
     </div>
   </div>
   <div id="viewer-reports" class="viewer-reports" data-live="">
-    {% if tiles | selectattr("class_a") | first %}
-    <p id="class-a-note">부류 A · 패널 조작 보고 가정</p>
+    {% if tiles %}
+    <p id="device-legend" class="device-legend">기기 기본 표기 · {{ "실물 · 미검증" if physical_default else "가상" }} · 부류 {{ "A (패널 조작 보고 가정)" if class_a_default else "B" }}{% if not class_a_default and tiles | selectattr("class_a") | first %} · 부류 A는 패널 조작 보고 가정{% endif %}</p>
     {% endif %}
     {% for device, entries in unplaced.items() %}
     {% for entry in entries %}<p class="planned">{{ device }} · {{ entry.action }} · {{ entry.wait }}</p>{% endfor %}

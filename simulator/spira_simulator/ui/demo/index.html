@@ -7,6 +7,7 @@
 <title>SPIRA · 주문에서 집까지</title>
 <link rel="stylesheet" href="/sim/assets/house/tokens.css">
 <link rel="stylesheet" href="/sim/assets/house/house.css">
+<link rel="stylesheet" href="/sim/assets/house/viewer.css">
 <link rel="stylesheet" href="/sim/assets/demo/demo.css">
 <script type="importmap">
 {"imports":{"three":"/sim/assets/house/three.module.min.js"}}
@@ -55,10 +56,10 @@
         <p class="lead" id="home-caption"></p>
       </header>
       <figure id="view" class="house-view" aria-label="현관, 거실, 주방의 입체 모형">
-        <div id="world" class="house-world"></div><div id="markers" class="house-markers"></div>
+        <div id="world" class="house-world"></div><div id="viewer-markers"></div>
         <span class="owner-tag">시뮬레이터 · 집</span>
         <div class="room-key" aria-hidden="true"><span>현관</span><span>거실</span><span>주방</span></div>
-        <ul id="device-key" class="device-key" aria-label="집에 있는 기기"></ul>
+        <p id="device-legend" class="device-legend"></p>
       </figure>
       <aside class="ledger" aria-label="허브가 기록한 일">
         <div class="ledger-head"><h2>허브 장부</h2><span id="ledger-label"></span><span class="owner-tag">Hub 기록</span></div>

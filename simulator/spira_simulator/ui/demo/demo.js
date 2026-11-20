@@ -1,6 +1,6 @@
 // Reasoning uses the Server's app contract. House surfaces use World observations.
 import { createFlow } from "./flow.js";
-import { createHouse, hsvColor, TV_SCENES } from "../house/house.js";
+import { createHouse, hsvColor, replaceHouseMarkers, TV_SCENES } from "../house/house.js";
 import { buildChain, houseDevicePresentation } from "./chain.js";
 
 const $ = (id) => document.getElementById(id);
@@ -30,7 +30,7 @@ const state = {
   config: null, scenes: null, flow: null, house: null, scale: 1, page: "reason",
   order: "birthday", step: 0, mapOpen: false, sharing: false, transitioning: false,
   episodeId: null, episode: null, rationale: null, cards: [], capture: null, reader: null,
-  homeStep: 0, homeBusy: false, applied: new Set(), hub: null, snapshot: null, chain: buildChain(),
+  homeStep: 0, homeBusy: false, applied: new Set(), hub: null, snapshot: null, houseMarkup: "", chain: buildChain(),
 };
 
 async function api(path, options) {
@@ -662,17 +662,19 @@ function acceptHub(hub) {
 async function refreshSnapshot() {
   state.snapshot = await api("/sim/snapshot", { signal: AbortSignal.timeout(2500) });
   refreshChain();
-  const { devices } = state.chain;
-  state.house?.update(state.snapshot);
-  const observed = devices.filter((device) => device.modeled && device.state !== null);
-  const key = $("device-key");
-  const markup = rows(observed, ({ label, substrate, assumption }) =>
-    `<li title="${esc(assumption || "")}">${esc(label)}
-      <small>${substrate === "physical" ? "실물 · 미검증" : "가상"}</small></li>`);
-  if (key.dataset.content !== markup) {
-    key.dataset.content = markup;
-    key.innerHTML = markup;
+}
+
+async function refreshHouseMarkers() {
+  const response = await fetch("/sim/viewer?fragment=true", { signal: AbortSignal.timeout(2500) });
+  if (!response.ok) throw new Error(response.status);
+  const fragment = new DOMParser().parseFromString(await response.text(), "text/html");
+  const markers = fragment.getElementById("viewer-markers");
+  if (markers.outerHTML !== state.houseMarkup) {
+    state.houseMarkup = markers.outerHTML;
+    replaceHouseMarkers($("viewer-markers"), markers);
+    state.house?.setMarkers(markers);
   }
+  $("device-legend").textContent = fragment.getElementById("device-legend")?.textContent ?? "";
 }
 
 async function refreshHub() {
@@ -684,7 +686,7 @@ async function pollHouse() {
     if (!state.transitioning) {
       const inHouse = state.page === "house";
       const stage = state.scenes.reason[state.step].id;
-      const reads = inHouse ? [refreshSnapshot()] : [];
+      const reads = inHouse ? [refreshSnapshot(), refreshHouseMarkers()] : [];
       if (state.config.hub && (inHouse || (state.episodeId && ["tasks", "plan", "hub"].includes(stage)))) {
         reads.push(refreshHub());
       }
@@ -698,7 +700,8 @@ function openHouseView() {
   $("home").hidden = false;
   if (!state.house && !$("world").hasChildNodes()) {
     try {
-      state.house = createHouse($("world"), $("markers"), $("view"), { decorateLabel: decorateHouseLabel });
+      state.house = createHouse($("world"), $("view"), { decorateLabel: decorateHouseLabel });
+      state.house.setMarkers($("viewer-markers"));
     } catch (error) {
       const message = document.createElement("p");
       message.className = "error";
@@ -708,7 +711,6 @@ function openHouseView() {
     }
   }
   renderTimeline();
-  if (state.snapshot) state.house?.update(state.snapshot);
   state.house?.resize();
   directHouse(true);
   renderLedger();
@@ -751,7 +753,7 @@ async function enterHouse() {
     $("home").classList.add("introducing");
     $("home").inert = true;
     openHouseView();
-    await refreshSnapshot().catch(() => {});
+    await Promise.allSettled([refreshSnapshot(), refreshHouseMarkers()]);
     const source = $("source-dot");
     const anchor = state.house?.anchor("light_01");
     const color = hsvColor(plannedLight() ?? undefined);

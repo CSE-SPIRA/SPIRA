@@ -739,6 +739,14 @@ def test_sim_at16_mixed_stage_labels_virtual_assumption_provisional(tmp_path):
         assert tiles["tapo:light_02"]["qualification"] == "unqualified"
         assert not tiles["tapo:light_02"]["available"]
         assert tiles["matter:light_03"]["substrate"] == "virtual"
+        view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
+        for device, exceptions in (
+            ("light_01", []),
+            ("light_02", ["실물 · 미검증", "부류 B"]),
+            ("light_03", ["부류 B"]),
+        ):
+            heading = view.find(f'.//div[@data-device="{device}"]/article/h3')
+            assert [mark.text for mark in heading.findall("small")] == exceptions
         for target in ("tapo:light_02", "matter:light_03"):
             assert tiles[target]["local_operation_reporting"] is False
             assert app.state.world.read(target)["local_operation"] is False
@@ -867,6 +875,14 @@ def test_sim_at19_live_3d_households_and_household_content(tmp_path, monkeypatch
         post(
             client,
             "/operator/device",
+            target="mqtt:purifier_01",
+            actor="resident",
+            actor_name="엄마",
+            values={"mode": "auto"},
+        )
+        post(
+            client,
+            "/operator/device",
             target=OVEN,
             actor="resident",
             actor_name="엄마",
@@ -898,8 +914,6 @@ def test_sim_at19_live_3d_households_and_household_content(tmp_path, monkeypatch
             "light_01": "분홍 330/45/70",
             "display_01": "공주 화면",
             "fridge_01": notice,
-            "purifier_01": "자동",
-            "styler_01": "대기 설정 없음",
         }.items():
             assert (
                 view.findtext(
@@ -907,16 +921,24 @@ def test_sim_at19_live_3d_households_and_household_content(tmp_path, monkeypatch
                 )
                 == content
             )
-        assert "가상" in page and "패널 조작 보고 가정" in page
-        assert {
-            row.get("data-signal"): row.text.strip()
-            for row in view.findall('.//section[@data-room="entrance"]//li')
-        } == {
-            "package": "택배 들임",
-            "bell": "초인종 울림",
-            "door": "문 열림 감지",
-            "presence": "손님 있음",
-        }
+        for device, content in (("purifier_01", "자동"), ("styler_01", "대기 설정 없음")):
+            marker = view.find(f'.//div[@data-device="{device}"]')
+            assert marker.get("data-resting") == ""
+            assert marker.find("article/h3").get("title") == content
+            assert marker.find("article/h3/small") is None
+            assert marker.findtext('article/p[@class="device-value visually-hidden"]') == content
+        assert view.findtext('.//p[@id="device-legend"]') == "기기 기본 표기 · 가상 · 부류 A (패널 조작 보고 가정)"
+        assert view.findtext('.//h3[@id="entrance-summary"]') == "손님 있음 · 이전 3건"
+        assert view.find('.//h3[@id="entrance-summary"]').get("tabindex") == "0"
+        assert [
+            (row.get("data-signal"), row.text.strip())
+            for row in view.findall('.//ul[@id="entrance-history"]/li')
+        ] == [
+            ("presence", "손님 있음"),
+            ("door", "문 열림 감지"),
+            ("bell", "초인종 울림"),
+            ("package", "택배 들임"),
+        ]
         post(
             client,
             "/operator/device",
@@ -926,9 +948,18 @@ def test_sim_at19_live_3d_households_and_household_content(tmp_path, monkeypatch
             values={"color": {"kelvin": 2700}},
         )
         post(client, "/operator/home", action="event_end")
-        page = client.get("/sim/viewer").text
-        assert "2700K" in page and "아빠 · 기기 패널" in page
-        assert "손님 나감" in page and "손님 있음" not in page
+        view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
+        person_marker = view.find('.//div[@data-device="light_01"]')
+        assert person_marker.get("data-resting") is None
+        assert person_marker.findtext('article/p[@class="device-value"]') == "2700K"
+        assert person_marker.findtext('article/p[@class="change-marker"]') == "아빠 · 기기 패널"
+        assert view.findtext('.//h3[@id="entrance-summary"]') == "손님 나감 · 이전 4건"
+        post(client, "/operator/home", action="guests_arrive")
+        view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
+        assert view.findtext('.//h3[@id="entrance-summary"]') == "손님 있음 · 이전 7건"
+        history = view.findall('.//ul[@id="entrance-history"]/li')
+        assert len(history) == 8
+        assert sum(row.text.strip() == "손님 있음" for row in history) == 2
 
     first_home = "http://127.0.0.1:8730/sim/viewer"
     monkeypatch.setenv("WORLD_PEER_VIEWERS", f"지아네={first_home}")

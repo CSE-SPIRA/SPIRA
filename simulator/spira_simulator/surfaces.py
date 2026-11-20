@@ -240,27 +240,33 @@ def viewer_world(world: World) -> dict:
     with world.store.lock:
         now = world.clock()
         snapshot = world.snapshot(for_display=True)
-        truth = world.store.latest_truth()
-    changes = {
-        fact["target"]: latest_change(fact)
-        for fact in truth
-        if fact["logical_id"] is not None
-    }
-    entrance = {}
-    for fact in truth:
-        event = ENTRANCE_EVENTS.get(fact["event_type"])
-        if fact["logical_id"] is None and event:
-            sensor, label = event
-            occurred_at = fact["occurred_at"]
-            entrance.pop(sensor, None)
-            entrance[sensor] = {
+        changes = {
+            fact["target"]: latest_change(fact) for fact in world.store.latest_truth()
+        }
+        home_truth = world.store.home_truth(tuple(ENTRANCE_EVENTS))
+    entrance = []
+    for fact in home_truth:
+        sensor, label = ENTRANCE_EVENTS[fact["event_type"]]
+        occurred_at = fact["occurred_at"]
+        entrance.append(
+            {
                 "signal": sensor,
                 "label": label,
                 "at": display_time(occurred_at),
                 "occurred_at": occurred_at,
             }
+        )
     devices = tiles(world, snapshot, changes)
+    physical_default = sum(device["physical"] for device in devices) > len(devices) / 2
+    class_a_default = sum(device["class_a"] for device in devices) > len(devices) / 2
     for device, report in zip(devices, snapshot["devices"], strict=True):
+        configured = world.devices[report["target"]]
+        device["changed"] = report["target"] in changes or any(
+            key in report["values"] and report["values"][key] != prop.initial
+            for key, prop in configured.properties.items()
+        )
+        device["substrate_exception"] = device["physical"] != physical_default
+        device["class_exception"] = device["class_a"] != class_a_default
         device["visual_values"] = {
             key: report["values"][key]
             for key in HOUSE_VISUAL_PROPERTIES.get(report["device_type"], ())
@@ -270,7 +276,9 @@ def viewer_world(world: World) -> dict:
         "clock": display_time(now),
         "clock_at": now.isoformat(),
         "tiles": devices,
-        "entrance": list(entrance.values()),
+        "entrance": entrance,
+        "physical_default": physical_default,
+        "class_a_default": class_a_default,
     }
 
 
