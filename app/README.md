@@ -33,8 +33,10 @@ Optional Dart defines:
   fixture demo. Omit it to exercise initial setup.
 - `SPIRA_DISCOVERY_JSON` supplies a C-2 device manifest for reviewing available
   actions. The demo can use `contracts/fixtures/ep_9031/devices.json`.
-  Selections stay on this device. The App contract has no discovery or
-  delegation-publishing route.
+  In **우리 집**, opened from a preparation card, the manifest for the current
+  household also supplies devices outside that card's rationale. Without it,
+  the view shows the card's selected devices by room. Setup selections stay on
+  this device. The App contract has no discovery or delegation-publishing route.
 - `SPIRA_GOOGLE_CLIENT_ID` enables Google Calendar setup. Register
   `org.cse_spira.spira_app` and the build's signing SHA-1 as an Android OAuth
   client, enable Calendar API, and set the Web client ID used by the Android

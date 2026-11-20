@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
 import '../contracts.dart' as wire;
+import '../theme.dart';
 import 'labels.dart';
+import 'our_home.dart';
 import 'rationale.dart';
 import 'setup.dart';
 
@@ -140,21 +142,37 @@ class _PreparationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final stopPending = app.stopPending(card.cardId);
     final stopUncertain = app.stopUncertain(card.cardId);
     return Card(
       key: ValueKey(card.cardId),
+      color: appPaper,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(appCardRadius),
+        side: BorderSide(color: colors.outlineVariant),
+      ),
       margin: const EdgeInsets.symmetric(vertical: 6),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              card.text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.titleLarge,
+            FutureBuilder<wire.Rationale>(
+              future: app.requestedRationale(card.episodeId),
+              builder: (context, snapshot) {
+                final intent = snapshot.data?.intents
+                    .where((intent) => intent.cardId == card.cardId)
+                    .firstOrNull;
+                return Text.rich(
+                  highlightTheme(
+                    card.text,
+                    intent?.situation.theme,
+                    colors.onSecondaryContainer,
+                  ),
+                  style: theme.textTheme.titleLarge,
+                );
+              },
             ),
             const SizedBox(height: 8),
             Text(
@@ -172,7 +190,7 @@ class _PreparationCard extends StatelessWidget {
             if (app.controlErrors[card.cardId] case final error?)
               StatusMessage(error),
             for (final line in card.lines.take(4)) ...[
-              const Divider(height: 24),
+              const Divider(height: 16),
               _PreparationLine(app: app, card: card, line: line),
             ],
             const SizedBox(height: 8),
@@ -183,6 +201,10 @@ class _PreparationCard extends StatelessWidget {
                 TextButton(
                   onPressed: () => openRationale(context, app, card.episodeId),
                   child: const Text('WHY · 이유 보기'),
+                ),
+                TextButton(
+                  onPressed: () => openOurHome(context, app, card),
+                  child: const Text('우리 집'),
                 ),
                 if (!card.stopped &&
                     card.buttons.contains(wire.CardButton.STOP))
@@ -217,43 +239,67 @@ class _PreparationLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final timing = lineTimeLabel(line);
+    final theme = Theme.of(context);
+    final timing = lineTimeLabel(line) ?? lineLabel(wire.LineState.HELD);
     final state = visibleLineLabel(line.state);
     final pending = app.linePending(card, line);
     final on = line.state == wire.LineState.OFF;
     final end = line.endState;
     final outcome = end == null ? null : endLabel(end);
     final note = line.note;
-    return Column(
+    return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(line.text, style: Theme.of(context).textTheme.titleMedium),
-        if (timing != null) Text(timing),
-        if (state != null) Text(state),
-        if (outcome != null) Text(outcome),
-        if (note != null && note != outcome) Text(note),
-        if (pending) const StatusMessage('항목 변경 확인 중…'),
-        Wrap(
-          spacing: 8,
-          children: [
-            TextButton(
-              onPressed: () => openRationale(
-                context,
-                app,
-                card.episodeId,
-                focus: (cardId: card.cardId, taskId: line.taskId),
-              ),
-              child: Text('왜?', semanticsLabel: '${line.text} · 왜?'),
-            ),
-            if (app.canSwitch(card, line))
-              TextButton(
-                onPressed: pending ? null : () => app.switchLine(card, line),
-                child: Text(
-                  on ? '항목 켜기' : '항목 끄기',
-                  semanticsLabel: '${line.text} ${on ? '켜기' : '끄기'}',
+        Icon(
+          line.checked ? Icons.check : Icons.circle_outlined,
+          color: appGreen,
+          size: 17,
+          semanticLabel: line.checked ? '선택됨' : '선택 해제됨',
+        ),
+        const SizedBox(width: 9),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(line.text, style: theme.textTheme.titleMedium),
+              const SizedBox(height: 4),
+              Text(
+                timing,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
               ),
-          ],
+              if (state != null && state != timing) Text(state),
+              if (outcome != null) Text(outcome),
+              if (note != null && note != outcome) Text(note),
+              if (pending) const StatusMessage('항목 변경 확인 중…'),
+              Wrap(
+                spacing: 8,
+                children: [
+                  TextButton(
+                    onPressed: () => openRationale(
+                      context,
+                      app,
+                      card.episodeId,
+                      focus: (cardId: card.cardId, taskId: line.taskId),
+                    ),
+                    child: Text('왜?', semanticsLabel: '${line.text} · 왜?'),
+                  ),
+                  if (app.canSwitch(card, line))
+                    TextButton(
+                      onPressed: pending
+                          ? null
+                          : () => app.switchLine(card, line),
+                      child: Text(
+                        on ? '항목 켜기' : '항목 끄기',
+                        semanticsLabel: '${line.text} ${on ? '켜기' : '끄기'}',
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
         ),
       ],
     );

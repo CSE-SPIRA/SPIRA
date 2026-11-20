@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
 import '../contracts.dart' as wire;
+import '../theme.dart';
 import 'labels.dart';
 import 'setup.dart';
 
@@ -14,14 +15,12 @@ void openRationale(
   String episode, {
   RationaleTaskLink? focus,
 }) {
+  late final rationale = app.rationale(episode);
   Navigator.push<void>(
     context,
     MaterialPageRoute(
-      builder: (_) => _RationaleScreen(
-        app: app,
-        rationale: app.rationale(episode),
-        focus: focus,
-      ),
+      builder: (_) =>
+          _RationaleScreen(app: app, rationale: rationale, focus: focus),
     ),
   );
 }
@@ -92,9 +91,16 @@ class _RationaleContentState extends State<_RationaleContent> {
     }
   }
 
-  void _reveal(GlobalKey anchor) {
+  void _reveal(GlobalKey anchor, {bool animate = false}) {
     if (anchor.currentContext case final target?) {
-      Scrollable.ensureVisible(target, alignment: 0.05);
+      Scrollable.ensureVisible(
+        target,
+        alignment: 0.05,
+        duration: animate && !MediaQuery.disableAnimationsOf(target)
+            ? appSettle
+            : Duration.zero,
+        curve: appEase,
+      );
     }
   }
 
@@ -109,6 +115,12 @@ class _RationaleContentState extends State<_RationaleContent> {
     };
     final linkedEvents = {
       for (final intent in result.intents) ?calendar[intent.calendarEventId],
+    };
+    final scheduleStarts = {
+      for (final intent in result.intents)
+        if (intent.cardId case final cardId?
+            when calendar.containsKey(intent.calendarEventId))
+          cardId: app.cards[cardId]?.startsAt,
     };
 
     wire.LineElement? cardLine(String cardId, String taskId) => app
@@ -133,7 +145,7 @@ class _RationaleContentState extends State<_RationaleContent> {
         : null;
     final showSituation = focusedIntent == null
         ? null
-        : () => _reveal(_situationAnchor);
+        : () => _reveal(_situationAnchor, animate: true);
 
     List<String> basisLabels(
       List<String> sources, {
@@ -188,7 +200,7 @@ class _RationaleContentState extends State<_RationaleContent> {
             intent: intent,
             basisLabels: basisLabels,
             showTask: intent == focusedIntent
-                ? () => _reveal(_taskAnchor)
+                ? () => _reveal(_taskAnchor, animate: true)
                 : null,
           ),
       ],
@@ -201,6 +213,7 @@ class _RationaleContentState extends State<_RationaleContent> {
           _TaskPanel(
             key: _taskAnchor,
             current: replacement,
+            scheduleStart: scheduleStarts[focus?.cardId],
             selected: true,
             showSituation: showSituation,
           ),
@@ -209,6 +222,7 @@ class _RationaleContentState extends State<_RationaleContent> {
             key: task == focusedTask ? _taskAnchor : null,
             task: task,
             current: cardLine(task.cardId, task.taskId),
+            scheduleStart: scheduleStarts[task.cardId],
             selected: task == focusedTask,
             showSituation: task == focusedTask ? showSituation : null,
           ),
@@ -332,9 +346,23 @@ class _Situation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final situation = intent.situation;
     final basis = intent.basis;
     final selected = showTask != null;
+    final slots = [
+      ('행사', situation.event, basis.event),
+      ('손님', situation.guests, basis.guests),
+      ('활동', situation.activity, basis.activity),
+      ('테마', situation.theme, basis.theme),
+    ];
+    final firstConnected = slots.indexWhere(
+      (slot) => slot.$2?.trim().isNotEmpty ?? false,
+    );
+    final caption = theme.textTheme.bodySmall?.copyWith(
+      color: colors.onSurfaceVariant,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -343,21 +371,30 @@ class _Situation extends StatelessWidget {
             padding: EdgeInsets.only(bottom: 8),
             child: Text('선택한 할 일의 근거'),
           ),
-        for (final (label, value, sources) in [
-          ('행사', situation.event, basis.event),
-          ('손님', situation.guests, basis.guests),
-          ('활동', situation.activity, basis.activity),
-          ('테마', situation.theme, basis.theme),
-        ]) ...[
-          _SituationSlot(
-            label: label,
-            value: value,
-            clues: basisLabels(sources, productName: label == '테마'),
-            isTheme: label == '테마',
-            selected: selected,
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            children: [
+              Expanded(flex: 6, child: Text('주문과 일정에서 찾은 근거', style: caption)),
+              const SizedBox(width: _proofGap),
+              Expanded(flex: 5, child: Text('짐작한 상황', style: caption)),
+              const SizedBox(width: _proofGap),
+            ],
           ),
-          const SizedBox(height: 8),
-        ],
+        ),
+        for (final (index, (label, value, sources)) in slots.indexed)
+          _ProofRow(
+            slot: _SituationSlot(
+              label: label,
+              value: value,
+              isTheme: label == '테마',
+              selected: selected,
+            ),
+            clues: basisLabels(sources, productName: label == '테마'),
+            hasValue: value?.trim().isNotEmpty ?? false,
+            branch: firstConnected >= 0 && index >= firstConnected,
+            first: index == firstConnected,
+          ),
         _IntentPanel(
           sentence: intent.intentText,
           themePhrase: situation.theme,
@@ -375,6 +412,93 @@ class _Situation extends StatelessWidget {
       ],
     );
   }
+}
+
+const _proofGap = 16.0;
+
+class _ProofRow extends StatelessWidget {
+  const _ProofRow({
+    required this.slot,
+    required this.clues,
+    required this.hasValue,
+    required this.branch,
+    required this.first,
+  });
+
+  final Widget slot;
+  final List<String> clues;
+  final bool hasValue;
+  final bool branch;
+  final bool first;
+
+  @override
+  Widget build(BuildContext context) {
+    final line = Theme.of(context).colorScheme.outline;
+    return CustomPaint(
+      painter: branch ? _IntentBranch(line, first, hasValue) : null,
+      child: Padding(
+        padding: const EdgeInsets.only(right: _proofGap, bottom: 8),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 6,
+              child: _Panel(
+                padding: const EdgeInsets.all(8),
+                child: _Chips(clues, onSurface: true),
+              ),
+            ),
+            SizedBox(
+              width: _proofGap,
+              child: clues.isNotEmpty && hasValue
+                  ? Row(
+                      children: [
+                        Expanded(
+                          child: ColoredBox(
+                            color: line,
+                            child: const SizedBox(height: 1),
+                          ),
+                        ),
+                        Container(
+                          width: 4,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: appGreen,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ],
+                    )
+                  : null,
+            ),
+            Expanded(flex: 5, child: slot),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _IntentBranch extends CustomPainter {
+  const _IntentBranch(this.color, this.first, this.hasValue);
+
+  final Color color;
+  final bool first;
+  final bool hasValue;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = color;
+    final x = size.width - _proofGap / 2;
+    final y = (size.height - 8) / 2;
+    if (hasValue) {
+      canvas.drawLine(Offset(size.width - _proofGap, y), Offset(x, y), paint);
+    }
+    canvas.drawLine(Offset(x, first ? y : 0), Offset(x, size.height), paint);
+  }
+
+  @override
+  bool shouldRepaint(_IntentBranch old) =>
+      color != old.color || first != old.first || hasValue != old.hasValue;
 }
 
 String _calendarLabel(wire.CalendarElement event) {
@@ -413,20 +537,28 @@ class _ChainSection extends StatelessWidget {
 }
 
 class _Panel extends StatelessWidget {
-  const _Panel({required this.child, this.color, this.selected = false});
+  const _Panel({
+    required this.child,
+    this.color,
+    this.selected = false,
+    this.padding = const EdgeInsets.all(14),
+    this.radius = 12,
+  });
 
   final Widget child;
   final Color? color;
   final bool selected;
+  final EdgeInsets padding;
+  final double radius;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: padding,
       decoration: BoxDecoration(
         color: color ?? colors.surface,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(radius),
         border: Border.all(
           color: selected ? colors.primary : colors.outlineVariant,
           width: selected ? 2 : 1,
@@ -532,14 +664,12 @@ class _SituationSlot extends StatelessWidget {
   const _SituationSlot({
     required this.label,
     required this.value,
-    required this.clues,
     required this.isTheme,
     required this.selected,
   });
 
   final String label;
   final String? value;
-  final List<String> clues;
   final bool isTheme;
   final bool selected;
 
@@ -554,6 +684,7 @@ class _SituationSlot extends StatelessWidget {
         : colors.onPrimaryContainer;
     return _Panel(
       selected: selected,
+      padding: const EdgeInsets.all(8),
       color: themed
           ? colors.secondaryContainer
           : hasValue
@@ -570,10 +701,6 @@ class _SituationSlot extends StatelessWidget {
             hasValue ? value! : '알 수 없어요',
             style: theme.textTheme.titleMedium?.copyWith(color: foreground),
           ),
-          if (clues.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            _Chips(clues, onSurface: true),
-          ],
         ],
       ),
     );
@@ -634,10 +761,9 @@ class _IntentPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-    final phrase = themePhrase ?? '';
-    final start = phrase.isEmpty ? -1 : sentence.indexOf(phrase);
     return _Panel(
       color: colors.primary,
+      radius: appCardRadius,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -647,20 +773,10 @@ class _IntentPanel extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text.rich(
-            start < 0
-                ? TextSpan(text: sentence)
-                : TextSpan(
-                    children: [
-                      TextSpan(text: sentence.substring(0, start)),
-                      TextSpan(
-                        text: phrase,
-                        style: TextStyle(color: colors.secondaryContainer),
-                      ),
-                      TextSpan(text: sentence.substring(start + phrase.length)),
-                    ],
-                  ),
+            highlightTheme(sentence, themePhrase, appPinkOnGreen),
             style: theme.textTheme.titleLarge?.copyWith(
               color: colors.onPrimary,
+              fontWeight: FontWeight.w600,
             ),
           ),
           if (clues.isNotEmpty) ...[
@@ -685,12 +801,14 @@ class _TaskPanel extends StatelessWidget {
     super.key,
     this.task,
     required this.current,
+    required this.scheduleStart,
     required this.selected,
     required this.showSituation,
   }) : assert(task != null || current != null);
 
   final wire.Task? task;
   final wire.LineElement? current;
+  final String? scheduleStart;
   final bool selected;
   final VoidCallback? showSituation;
 
@@ -713,7 +831,8 @@ class _TaskPanel extends StatelessWidget {
       wire.Way.NOTICE => '안내',
       null => null,
     };
-    final timing = lineTimeLabel(current);
+    final timing =
+        lineTimeDerivation(current, scheduleStart) ?? lineTimeLabel(current);
     final state = current?.state ?? task?.state;
     final status = state == null ? null : visibleLineLabel(state);
 
@@ -745,8 +864,9 @@ class _TaskPanel extends StatelessWidget {
           if (timing != null)
             Text(
               timing,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: colors.primary,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colors.onSurfaceVariant,
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
           if (devices.isNotEmpty) ...[

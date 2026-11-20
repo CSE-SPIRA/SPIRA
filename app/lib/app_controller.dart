@@ -506,6 +506,14 @@ class AppController extends ChangeNotifier {
       stale = false;
       refreshed = true;
       refreshError = null;
+      // Card theme phrases come from the same stored rationale used by WHY.
+      for (final episode in episodes.values) {
+        if (_disposed || cardsFor(episode).isEmpty) continue;
+        unawaited(
+          rationale(episode.episodeId)
+              .then<void>((_) {}, onError: (Object _) {}),
+        );
+      }
     } catch (error) {
       stale = true;
       refreshError = _error(error, '새로 불러오지 못했어요. 다시 시도해 주세요.');
@@ -723,18 +731,27 @@ class AppController extends ChangeNotifier {
     });
   }
 
+  Future<wire.Rationale>? requestedRationale(String episode) =>
+      _rationales[episode];
+
   Future<wire.Rationale> rationale(String episode) {
-    return _rationales.putIfAbsent(episode, () async {
-      try {
-        final rationale = await api.rationale(episode);
-        if (rationale.episodeId != episode) {
-          throw const FormatException('Wrong episode');
-        }
-        return rationale;
-      } catch (_) {
-        _rationales.remove(episode);
-        rethrow;
-      }
+    return _rationales.putIfAbsent(episode, () {
+      late final Future<wire.Rationale> request;
+      request = api
+          .rationale(episode)
+          .then((rationale) {
+            if (rationale.episodeId != episode) {
+              throw const FormatException('Wrong episode');
+            }
+            return rationale;
+          })
+          .catchError((Object error, StackTrace stackTrace) {
+            if (identical(_rationales[episode], request)) {
+              _rationales.remove(episode);
+            }
+            Error.throwWithStackTrace(error, stackTrace);
+          });
+      return request;
     });
   }
 

@@ -93,6 +93,22 @@ String? lineTimeLabel(wire.LineElement? line) =>
       _ => null,
     };
 
+String? lineTimeDerivation(wire.LineElement? line, String? scheduleStart) {
+  final time = line?.when?.time;
+  if (time == null || scheduleStart == null) return null;
+  final task = _seoulTime(time);
+  final event = _seoulTime(scheduleStart);
+  final minutes =
+      (event.difference(task).inMilliseconds / Duration.millisecondsPerMinute)
+          .round();
+  final relative = switch (minutes) {
+    0 => '같은 시각',
+    > 0 => '$minutes분 전',
+    _ => '${minutes.abs()}분 후',
+  };
+  return '${_lineClock(event)} 일정 → $relative → ${_lineClock(task)}';
+}
+
 String _lineClock(DateTime seoul) {
   final day = koreanWeekdays[seoul.weekday - 1][0];
   final hour = seoul.hour.toString().padLeft(2, '0');

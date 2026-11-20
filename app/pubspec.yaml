@@ -24,3 +24,16 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/fonts/OFL.txt
+  fonts:
+    - family: IBM Plex Sans KR
+      fonts:
+        - asset: assets/fonts/IBMPlexSansKR-Regular.otf
+          weight: 400
+        - asset: assets/fonts/IBMPlexSansKR-Medium.otf
+          weight: 500
+        - asset: assets/fonts/IBMPlexSansKR-SemiBold.otf
+          weight: 600
+        - asset: assets/fonts/IBMPlexSansKR-Bold.otf
+          weight: 700

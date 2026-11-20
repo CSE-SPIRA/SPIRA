@@ -13,6 +13,7 @@ import 'package:spira_app/contracts.dart' as wire;
 import 'package:spira_app/main.dart';
 import 'package:spira_app/platform/android_bridge.dart';
 import 'package:spira_app/platform/google_calendar.dart';
+import 'package:spira_app/theme.dart';
 
 Map<String, dynamic> fixture(String file, {String episode = 'ep_9031'}) =>
     jsonDecode(File('../contracts/fixtures/$episode/$file').readAsStringSync())
@@ -1075,6 +1076,146 @@ void main() {
     expect(find.text('일정이 시작될 때'), findsNothing);
   });
 
+  testWidgets('card title wraps and highlights the theme from its rationale', (
+    tester,
+  ) async {
+    final peer = Peer();
+    peer.episodes['ep_9031'] = fixture('episode.json');
+    final card = fixture('card.v1.json');
+    lines(card).first['checked'] = false;
+    peer.cards = [card];
+    final rationale = peer.rationales.remove('ep_9031')!;
+    final app = controller(peer);
+    await openApp(tester, app, size: const Size(320, 1050));
+
+    final title = find.text(card['text'] as String);
+    final plain = tester.widget<Text>(title);
+    expect(plain.maxLines, isNull);
+    expect(plain.overflow, isNot(TextOverflow.ellipsis));
+    expect(tester.getSize(title).height, greaterThan(40));
+    expect((plain.textSpan! as TextSpan).children, isNull);
+
+    peer.rationales['ep_9031'] = rationale;
+    await app.sync();
+    await tester.pumpAndSettle();
+    final pink = Theme.of(tester.element(title))
+        .colorScheme
+        .onSecondaryContainer;
+    expect(
+      (tester.widget<Text>(title).textSpan! as TextSpan).children,
+      contains(
+        TextSpan(
+          text: '디즈니 공주',
+          style: TextStyle(color: pink),
+        ),
+      ),
+    );
+    expect(
+      find.descendant(
+        of: find.byType(Card),
+        matching: find.byIcon(Icons.check),
+      ),
+      findsNWidgets(3),
+    );
+    expect(
+      find.descendant(
+        of: find.byType(Card),
+        matching: find.byIcon(Icons.circle_outlined),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+    'WHY derives before, after, and same time from the linked start',
+    (tester) async {
+      final peer = Peer();
+      peer.episodes['ep_9031'] = fixture('episode.json');
+      final card = fixture('card.v1.json');
+      lines(card)[1]['when'] = {'time': '2026-10-18T00:15:00+09:00'};
+      peer.cards = [card];
+      await openApp(tester, controller(peer), size: const Size(390, 760));
+      await tapText(tester, 'WHY · 이유 보기');
+
+      expect(find.text('토 14:00 일정 → 90분 전 → 토 12:30'), findsOneWidget);
+      expect(find.text('토 14:00 일정 → 615분 후 → 일 00:15'), findsOneWidget);
+      expect(find.text('토 14:00 일정 → 같은 시각 → 토 14:00'), findsOneWidget);
+      expect(find.text('손님이 오면'), findsOneWidget);
+    },
+  );
+
+  testWidgets('our home marks devices for the card that opened it', (
+    tester,
+  ) async {
+    final peer = Peer();
+    peer.episodes['ep_9031'] = fixture('episode.json')
+      ..['card_ids'] = ['nc_331', 'nc_340'];
+    peer.cards = [
+      fixture('card.v1.json'),
+      fixture('card.found.json', episode: 'ep_9120')
+        ..['episode_id'] = 'ep_9031',
+    ];
+    (peer.rationales['ep_9031']!['tasks'] as List).add({
+      'task_id': 't_notice#7',
+      'card_id': 'nc_340',
+      'line': '냉장고 준비',
+      'need': '별도 준비',
+      'way': 'notice',
+      'state': 'scheduled',
+      'devices': [
+        {'id': 'fridge_01', 'type': 'fridge', 'room': '주방'},
+      ],
+    });
+    final app = controller(
+      peer,
+      discovered: wire.Devices.fromJson(fixture('devices.json')),
+    );
+    await openApp(tester, app, size: const Size(390, 760));
+    await tapText(tester, '우리 집');
+
+    Finder statusFor(String device, String status) => find.descendant(
+      of: find.ancestor(
+        of: find.text(device),
+        matching: find.byType(MergeSemantics),
+      ),
+      matching: find.text(status),
+    );
+
+    expect(find.text('거실'), findsOneWidget);
+    expect(find.text('주방'), findsOneWidget);
+    expect(find.text('확인한 기기 7대'), findsOneWidget);
+    expect(statusFor('로봇청소기', '준비에 선택됨'), findsOneWidget);
+    expect(statusFor('냉장고', '쉬는 중'), findsOneWidget);
+    expect(find.text('준비에 선택됨'), findsNWidgets(6));
+
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView), const Offset(0, -600));
+    await tester.pumpAndSettle();
+    await tapText(tester, '우리 집', index: 1);
+    expect(statusFor('냉장고', '준비에 선택됨'), findsOneWidget);
+    expect(statusFor('로봇청소기', '쉬는 중'), findsOneWidget);
+    expect(peer.rationaleReads, 1);
+  });
+
+  testWidgets('our home shows only selected devices without an inventory', (
+    tester,
+  ) async {
+    final peer = Peer();
+    peer.episodes['ep_9031'] = fixture('episode.json');
+    peer.cards = [fixture('card.v1.json')];
+    await openApp(tester, controller(peer), size: const Size(390, 760));
+    await tapText(tester, '우리 집');
+
+    expect(find.text('거실'), findsOneWidget);
+    expect(find.text('주방'), findsOneWidget);
+    expect(find.text('확인한 기기 6대'), findsOneWidget);
+    expect(find.text('준비에 선택됨'), findsNWidgets(6));
+    expect(find.text('쉬는 중'), findsNothing);
+    expect(find.text('냉장고'), findsNothing);
+    expect(find.textContaining('집 기기 목록을 받지 못해'), findsOneWidget);
+  });
+
   testWidgets(
     'APP-AT-11 shows the ep_9031 evidence chain and live card state',
     (tester) async {
@@ -1126,10 +1267,10 @@ void main() {
         '거실 로봇청소기',
         '주방 인덕션 · 주방 스마트 플러그',
         '설정 대기',
-        '토 12:30',
-        '토 13:30',
+        '토 14:00 일정 → 90분 전 → 토 12:30',
+        '토 14:00 일정 → 30분 전 → 토 13:30',
         '손님이 오면',
-        '토 14:00',
+        '토 14:00 일정 → 같은 시각 → 토 14:00',
         '씻지 말고 키친타월을 깔아 냉장 보관하고, 토요일 꾸미기 직전에 씻어 주세요',
         '꾸미기 직전까지 냉장고 안쪽에 두고, 휘핑할 때 볼도 차갑게 해 두면 잘 올라와요',
       ]) {
@@ -1147,13 +1288,12 @@ void main() {
       const intent = '디즈니 공주 테마로 손님 여럿이 오는 아이 생일 파티를 열고, 컵케이크를 굽고 꾸미려는 준비';
       final intentText = find.text(intent);
       final span = tester.widget<Text>(intentText).textSpan! as TextSpan;
-      final theme = Theme.of(tester.element(intentText));
       expect(
         span.children,
         contains(
           TextSpan(
             text: '디즈니 공주',
-            style: TextStyle(color: theme.colorScheme.secondaryContainer),
+            style: TextStyle(color: appPinkOnGreen),
           ),
         ),
       );
@@ -1215,8 +1355,11 @@ void main() {
 
       expect(find.text('선택한 할 일').hitTestable(), findsOneWidget);
       expect(find.text('거실 청소 다시 켜기').hitTestable(), findsOneWidget);
-      expect(find.text('토 12:45').hitTestable(), findsOneWidget);
-      expect(find.text('토 12:30'), findsNothing);
+      expect(
+        find.text('토 14:00 일정 → 75분 전 → 토 12:45').hitTestable(),
+        findsOneWidget,
+      );
+      expect(find.textContaining('토 12:30'), findsNothing);
       expect(
         find.text('이 할 일의 자세한 근거를 볼 수 없어요.').hitTestable(),
         findsOneWidget,
@@ -1244,6 +1387,8 @@ void main() {
       expect(find.text('c1'), findsNothing);
       expect(find.text('손님'), findsOneWidget);
       expect(find.text('알 수 없어요'), findsOneWidget);
+      expect(find.text('토 12:30'), findsOneWidget);
+      expect(find.textContaining('분 전 →'), findsNothing);
       expect(find.textContaining('끝난 걸 확인하면 풀어요'), findsNothing);
     },
   );

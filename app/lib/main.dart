@@ -129,8 +129,14 @@ class _HomeState extends State<_Home> with WidgetsBindingObserver {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: app,
     builder: (context, _) => Scaffold(
+      backgroundColor: app.step == SetupStep.ready
+          ? Theme.of(context).colorScheme.surface
+          : null,
       appBar: AppBar(
         title: const Text('SPIRA'),
+        backgroundColor: app.step == SetupStep.ready
+            ? Theme.of(context).colorScheme.surface
+            : null,
         actions: [
           if (app.needsToken)
             IconButton(
