@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 
 from .contracts import offset_time
 from .dashboard_state import state_view
+from .onboarding import add_onboarding
 from .store import encode
 
 HOUSEHOLD_TIME = ZoneInfo("Asia/Seoul")
@@ -15,7 +16,7 @@ BY_LABEL = {"spira": "SPIRA", "user": "사람", "unknown": "모름", "hub": "집
 REPORT_LABEL = {"ack": "ack", "event": "event", "run": "결과", "restore": "restore"}
 
 
-def create_app(runtime, *, lifespan=None):
+def create_app(runtime, *, lifespan=None, hub_key=None, lg_http=None):
     app = FastAPI(title="SPIRA Home Hub", lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -33,6 +34,7 @@ def create_app(runtime, *, lifespan=None):
     async def dashboard():
         return render(state_view(runtime))
 
+    add_onboarding(app, runtime, hub_key=hub_key, lg_http=lg_http)
     return app
 
 

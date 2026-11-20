@@ -5,9 +5,23 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from spira_contracts.common import HomeEvent
-from spira_contracts.devices import Devices
+from spira_contracts.devices import Device, Devices
 
 from .contracts import read_model, wire
+
+SIMULATOR_MAPPINGS = {
+    "cleaner": {"clean": "clean"},
+    "display": {"play_mood": "play_mood", "off": {"fixed": {"play_mood": None}}},
+    "cooktop": {"child_lock": {"fixed": {"child_lock": True}}},
+    "oven": {"set_cook_standby": "preset"},
+    "fridge": {"show_notice": "show_notice", "clear_notice": {"fixed": {"show_notice": None}}},
+    "purifier": {"mode": {"properties": {"mode": "mode"}},
+                 "wind_strength": {"properties": {"wind_strength": "wind_strength"}}},
+    "dishwasher": {"set_course_standby": {"properties": {"course": "course"}},
+                   "delayed_start": {"properties": {"hours": "delay_hours"}}},
+    "washer": {"set_course_standby": {"properties": {"course": "course"}}},
+    "speaker": {"play": "play", "stop": {"fixed": {"play": None}}},
+}
 
 
 @dataclass(frozen=True)
@@ -45,6 +59,7 @@ class Installation:
     devices: Devices
     bindings: dict[str, Binding]
     home_rules: tuple[HomeRule, ...]
+    lg_account_devices: frozenset[str]
 
     @property
     def delegates(self):
@@ -85,10 +100,64 @@ class Installation:
             if not sources or any(not source.target or not source.event_type for source in sources):
                 raise ValueError("Home rules need explicitly bound sources")
             rules.append(HomeRule(HomeEvent(item["event"]).value, sources, item.get("count_field")))
-        return cls(devices, bindings, tuple(rules))
+        lg_account_devices = raw.get("lg_account_devices", [])
+        if not isinstance(lg_account_devices, list) or not all(
+            isinstance(device_id, str) and device_id in ids for device_id in lg_account_devices
+        ):
+            raise ValueError("LG installation entries must name configured devices")
+        return cls(devices, bindings, tuple(rules), frozenset(lg_account_devices))
 
     def projection(self):
         return wire(self.devices)["devices"]
+
+    def with_onboarding(self, records):
+        devices = self.delegates
+        bindings = self.bindings.copy()
+        for device_id, record in records.items():
+            base = devices.get(device_id)
+            if record["source"] == "installation":
+                if base is None:
+                    continue
+                offered = {command.cmd: command for command in base.commands}
+                settings = record["settings"]
+                commands = [offered[cmd] for cmd in settings["delegated_commands"] if cmd in offered]
+                device = with_settings(base, settings, commands)
+            else:
+                device = Device.model_validate(record["device"])
+                configured = base is not None and base.type == device.type
+                if configured:
+                    device = device.model_copy(update={
+                        "substrate": base.substrate, "events": base.events, "noisy": base.noisy,
+                    })
+                target = bindings[device_id].target if configured else f"mqtt:{device_id}"
+                template = bindings[device_id] if configured else Binding(target, target, {})
+                defaults = SIMULATOR_MAPPINGS.get(device.type, {})
+                mappings = {}
+                for command in device.commands:
+                    mapping = template.commands.get(command.cmd, defaults.get(command.cmd))
+                    if mapping is None:
+                        continue
+                    try:
+                        check_mapping(mapping, command.value_schema)
+                    except ValueError:
+                        # The account can offer a schema the installed adapter cannot execute.
+                        continue
+                    mappings[command.cmd] = mapping
+                bindings[device_id] = Binding(template.target, template.native_identity, mappings)
+            devices[device_id] = device
+        if len({binding.target for binding in bindings.values()}) != len(bindings):
+            raise ValueError("Each device needs a unique native target")
+        return Installation(self.devices.model_copy(update={"devices": list(devices.values())}),
+                            bindings, self.home_rules, self.lg_account_devices)
+
+
+def with_settings(device, settings, commands):
+    fields = {"room": settings["room"], "commands": commands}
+    if settings["label"] is not None:
+        return device.model_copy(update={**fields, "label": settings["label"]})
+    # A local null label is the absence of the optional C-2 label.
+    body = device.model_dump(exclude={"label"})
+    return Device.model_validate({**body, **fields})
 
 
 def check_mapping(mapping, schema):

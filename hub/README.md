@@ -85,7 +85,7 @@ prefix. Start the Hub in a third terminal.
 ```sh
 PYTHONPATH=contracts/generated/python uv run --no-project --python 3.12 \
   --with-requirements hub/requirements.txt python -m hub.spira_hub \
-  --installation hub/installation.example.json --db hub/hub.sqlite3
+  --installation hub/installation.example.json --db /private/tmp/spira-hub.sqlite3
 ```
 
 The dashboard listens on loopback at port 8088. It shows waiting work,
@@ -96,6 +96,66 @@ The fixture's dates are fixed. The live Hub uses wall time, so past windows
 and elapsed lifecycles remain past. The acceptance tests
 exercise those snapshots at their original scenario times.
 
+### App onboarding over the home network
+
+Set `SPIRA_SIMULATOR_URL` to the selected test home's HTTP origin and
+`WORLD_OPERATOR_TOKEN` to the token configured on that Simulator. Enable
+its operator service. The Hub sends HTTP Basic credentials with username
+`operator` to `GET /lg/devices`. Start the Hub with `--host` set to
+its LAN address for a phone on the same home network. Both App routes use
+the Hub's port and require `X-API-Key` with the household Hub key.
+
+`GET /home/onboarding/devices` takes no body. It returns source metadata
+and the Hub's current settings separately. The command's `value_schema`
+is null for a no-value command and `basis` is null when unknown. An
+unconfigured candidate has null room and label and an empty delegation
+under `stored`.
+
+```json
+{
+  "devices": [
+    {
+      "id": "fridge_01",
+      "type": "fridge",
+      "label": "냉장고",
+      "room": null,
+      "source": "lg_account",
+      "commands": [
+        {"cmd": "show_notice", "value_schema": "text", "basis": "lg_assumed"},
+        {"cmd": "clear_notice", "value_schema": null, "basis": "lg_assumed"}
+      ],
+      "never": [],
+      "stored": {"room": null, "label": null, "delegated_commands": []}
+    }
+  ]
+}
+```
+
+`PUT /home/onboarding/devices` takes the following body. Each submitted
+device replaces its settings. Devices omitted from the request keep theirs.
+Null clears a stored room or label and an empty command array revokes all
+delegation for that device. A successful write returns HTTP 200 and
+`{"revision": 4}`, with the actual published C-2 revision in place of 4.
+
+```json
+{
+  "devices": [
+    {
+      "id": "fridge_01",
+      "room": "주방",
+      "label": "우리 집 냉장고",
+      "delegated_commands": ["show_notice"]
+    }
+  ]
+}
+```
+
+Errors use `{"code": "...", "message": "..."}`. The routes return 401 for
+authentication failure, 422 for invalid settings, 503 for missing discovery
+configuration or an unavailable installation, and 502 for peer failure. If
+the Hub saves settings but the C-2 upload fails, the response says the upload
+is pending and normal Server reconciliation retries it.
+
 ### Installation and lifecycle
 
 - `devices` contains the C-2 devices admitted and delegated by the installation
@@ -104,6 +164,11 @@ exercise those snapshots at their original scenario times.
   A mapping can name a single property for the complete command value, rename
   every parameter with `{"properties": {...}}`, or supply `{"fixed": {...}}`
   for a command that takes no C-1 value.
+- `lg_account_devices` marks seeded installation entries that come from
+  LG discovery for onboarding. The other installation entries provide the
+  manual candidates. The test LG account supplies the offered commands and
+  their basis for each returned LG device. Rooms for those candidates
+  come from stored settings and never from the LG account.
 - An optional `native_identity` distinguishes a replacement behind a reused
   target. Change it before assigning the reused target to the replacement.
   Editing the installation changes live delegation. Save the JSON atomically
@@ -122,6 +187,10 @@ exercise those snapshots at their original scenario times.
   restore still-owned effects. An observed end honors the plan's `after`
   delay. Cancellation with `restore: true` releases still-owned effects
   immediately, including an owned cleaner job via conditional `clean: null`.
+- A dispatched item notice ends with a conditional write of
+  `{"show_notice": null}` to the fridge when its C-1 end condition is met.
+  The Hub verifies the empty slot by fresh readback and sends a C-4 run
+  result with `cmd: "clear_notice"` and the original item task ID.
 - Keep the SQLite database when restarting. It holds version floors, waiting
   work, reservations, ownership, and immutable C-3/C-4 bytes. A dispatch
   interrupted after reservation is exposed as unknown. The Hub reconciles

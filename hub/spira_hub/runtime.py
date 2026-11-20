@@ -25,7 +25,8 @@ class Runtime:
         self.installation_path = installation_path
         self.clock = clock
         self.verify_seconds, self.verify_interval = verify_seconds, verify_interval
-        self.installation = Installation.load(self.installation_path, server.household)
+        self.configured = Installation.load(self.installation_path, server.household)
+        self.installation = self.configured.with_onboarding(store.get("onboarding", {}))
         self.bindings = {}
         self.capabilities = {}
         self.observations = Observations(store, server.household, clock)
@@ -58,11 +59,16 @@ class Runtime:
 
     def reload_installation(self):
         try:
-            installation = Installation.load(self.installation_path, self.server.household)
+            configured = Installation.load(self.installation_path, self.server.household)
+            installation = configured.with_onboarding(self.store.get("onboarding", {}))
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
             self.config_error = type(error).__name__
             return
         self.config_error = None
+        self.configured = configured
+        self.use_installation(installation)
+
+    def use_installation(self, installation):
         if installation != self.installation:
             self.installation = installation
             self.observations.sequences.clear()
@@ -121,31 +127,47 @@ class Runtime:
     async def register(self, remote_revision):
         if self.config_error:
             return
-        configured = self.installation.devices
-        projection = self.installation.projection()
         saved = self.store.get("registry")
-        if (not saved or projection != saved["devices"]
+        if (not saved or self.installation.projection() != saved["devices"]
                 or remote_revision > saved["revision"]
-                or configured.revision > saved["revision"]):
-            revision = max(configured.revision, remote_revision + 1)
-            if saved:
-                revision = max(revision, saved["revision"] + 1)
-            devices = Devices(
-                household_id=configured.household_id, revision=revision,
-                updated_at=self.clock().isoformat(), devices=configured.devices,
-            )
+                or self.installation.devices.revision > saved["revision"]):
+            devices = self.next_registry(self.installation, remote_revision)
             saved = wire(devices)
             with self.store.db:
                 self.store.put("registry", saved)
             self.registered = False
         if not self.registered or remote_revision != saved["revision"]:
-            try:
-                revision = await self.server.register(Devices.model_validate(saved))
-                self.registered = revision == saved["revision"]
-            except IO_FAILURES:
-                self.registered = False
+            await self.send_registry(Devices.model_validate(saved))
             return True
         return False
+
+    def next_registry(self, installation, remote_revision):
+        configured = installation.devices
+        saved_revision = self.store.get("registry", {}).get("revision", -1)
+        return Devices(
+            household_id=configured.household_id,
+            revision=max(configured.revision, remote_revision + 1, saved_revision + 1),
+            updated_at=self.clock().isoformat(), devices=configured.devices,
+        )
+
+    async def send_registry(self, devices):
+        self.registered = False
+        try:
+            self.registered = await self.server.register(devices) == devices.revision
+        except IO_FAILURES:
+            pass
+        return self.registered
+
+    async def save_onboarding(self, records, installation):
+        """Persist a registry revision before upload, with the pull lock held."""
+        pull, _ = await self.server.pull()
+        devices = self.next_registry(installation, pull.devices_revision)
+        packet(devices, "devices.json")
+        with self.store.db:
+            self.store.put("onboarding", records)
+            self.store.put("registry", wire(devices))
+        self.use_installation(installation)
+        return devices.revision if await self.send_registry(devices) else None
 
     async def flush(self):
         for kind in ("ack", "event", "execution"):

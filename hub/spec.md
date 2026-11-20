@@ -35,7 +35,8 @@ same logical device ID, room, or label. (PC-5)
 
 **H2-R1.** The Hub MUST publish only admitted devices and explicitly delegated
 commands/value schemas in C-2, including `never` prohibitions and the current
-devices revision. It MUST NOT execute a command that is no longer delegated.
+devices revision. It MUST NOT execute a Server-plan command that is no longer
+delegated.
 (PC-3, PC-5)
 
 **H2-R2.** Discovery or order sharing MUST NOT grant delegation. A valid,

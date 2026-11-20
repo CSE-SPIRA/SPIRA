@@ -165,6 +165,7 @@
       }
     ]
   },
+  "lg_account_devices": ["cleaner_01", "speaker_01", "oven_01", "fridge_01", "air_purifier_01"],
   "bindings": {
     "cleaner_01": {
       "target": "mqtt:cleaner_01",
