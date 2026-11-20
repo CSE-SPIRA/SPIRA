@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
@@ -199,11 +200,7 @@ class AppApi {
     return wire.orderAcceptedFromJson(await _send(request, {200, 202}));
   }
 
-  Future<wire.OrderAccepted> shareExample() async {
-    // The demo shell route replays a recorded order and only needs a PNG part.
-    final image = base64Decode(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=',
-    );
+  Future<wire.OrderAccepted> shareExample(Uint8List image) async {
     final request = http.MultipartRequest('POST', _uri('/demo/api/order'))
       ..fields['sample'] = 'birthday'
       ..files.add(

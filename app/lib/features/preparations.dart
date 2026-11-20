@@ -5,6 +5,7 @@ import '../app_controller.dart';
 import '../contracts.dart' as wire;
 import '../theme.dart';
 import 'labels.dart';
+import 'order_extraction.dart';
 import 'our_home.dart';
 import 'rationale.dart';
 import 'setup.dart';
@@ -67,10 +68,15 @@ class Preparations extends StatelessWidget {
               app.accepted.isEmpty &&
               app.queuedShares == 0)
             const StatusMessage('주문 화면을 캡처한 뒤 안드로이드 공유 메뉴에서 SPIRA를 선택해 주세요.'),
-          for (final _ in app.accepted)
-            const StatusMessage('주문을 받았어요. 읽기 결과를 기다리는 중이에요.'),
+          for (final id in app.accepted)
+            if (!app.episodes.containsKey(id))
+              _OrderSection(key: ValueKey(id), app: app, episodeId: id),
           for (final episode in known)
-            _OrderSection(app: app, episode: episode),
+            _OrderSection(
+              key: ValueKey(episode.episodeId),
+              app: app,
+              episodeId: episode.episodeId,
+            ),
         ],
       ),
     );
@@ -78,16 +84,17 @@ class Preparations extends StatelessWidget {
 }
 
 class _OrderSection extends StatelessWidget {
-  const _OrderSection({required this.app, required this.episode});
+  const _OrderSection({super.key, required this.app, required this.episodeId});
 
   final AppController app;
-  final wire.Episode episode;
+  final String episodeId;
 
   @override
   Widget build(BuildContext context) {
-    final cards = app.cardsFor(episode);
+    final episode = app.episodes[episodeId];
     final theme = Theme.of(context);
-    final status = switch (episode.status) {
+    final status = switch (episode?.status) {
+      null => '주문을 받았어요. 읽기 결과를 기다리는 중이에요.',
       wire.EpisodeStatus.RECEIVED => '주문을 받았어요. 읽기 대기 중이에요.',
       wire.EpisodeStatus.READING => '주문을 읽고 있어요.',
       wire.EpisodeStatus.READ_FAILED => '주문을 읽지 못했어요. 주문 화면을 캡처해서 다시 공유해 주세요.',
@@ -103,46 +110,68 @@ class _OrderSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            seoulDateTime(episode.sharedAt),
-            style: theme.textTheme.titleMedium,
-          ),
+          if (episode != null)
+            Text(
+              seoulDateTime(episode.sharedAt),
+              style: theme.textTheme.titleMedium,
+            ),
           StatusMessage(status),
-          if (episode.itemCount > 0) Text('읽은 품목 ${episode.itemCount}개'),
-          Wrap(
-            spacing: 8,
-            children: [
-              if (app.canEdit(episode))
-                TextButton(
-                  onPressed: () => Navigator.push<void>(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => _OrderEditor(app: app, episode: episode),
-                    ),
-                  ),
-                  child: const Text('읽은 품목 수정'),
-                ),
-              if (episode.cardIds.isEmpty &&
-                  const {
-                    wire.EpisodeStatus.JUDGED,
-                    wire.EpisodeStatus.CLOSED,
-                  }.contains(episode.status))
-                TextButton(
-                  onPressed: () =>
-                      openRationale(context, app, episode.episodeId),
-                  child: const Text('WHY · 이유 보기'),
-                ),
-            ],
+          OrderExtraction(
+            episode: episode,
+            images: app.orderImages(episodeId),
+            rationale: app.requestedRationale(episodeId),
+            child: episode == null
+                ? const SizedBox.shrink()
+                : _OrderPreparation(app: app, episode: episode),
           ),
-          for (final card in cards) _PreparationCard(app: app, card: card),
-          if (episode.itemTasks.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            _ItemGuidance(episode: episode),
-          ],
         ],
       ),
     );
   }
+}
+
+class _OrderPreparation extends StatelessWidget {
+  const _OrderPreparation({required this.app, required this.episode});
+
+  final AppController app;
+  final wire.Episode episode;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Wrap(
+        spacing: 8,
+        children: [
+          if (app.canEdit(episode))
+            TextButton(
+              onPressed: () => Navigator.push<void>(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => _OrderEditor(app: app, episode: episode),
+                ),
+              ),
+              child: const Text('읽은 품목 수정'),
+            ),
+          if (episode.cardIds.isEmpty &&
+              const {
+                wire.EpisodeStatus.JUDGED,
+                wire.EpisodeStatus.CLOSED,
+              }.contains(episode.status))
+            TextButton(
+              onPressed: () => openRationale(context, app, episode.episodeId),
+              child: const Text('WHY · 이유 보기'),
+            ),
+        ],
+      ),
+      for (final card in app.cardsFor(episode))
+        _PreparationCard(app: app, card: card),
+      if (episode.itemTasks.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        _ItemGuidance(episode: episode),
+      ],
+    ],
+  );
 }
 
 class _PreparationCard extends StatelessWidget {

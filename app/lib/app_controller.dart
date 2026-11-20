@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api/app_api.dart';
@@ -85,6 +87,7 @@ class AppController extends ChangeNotifier {
   final episodes = <String, wire.Episode>{};
   final cards = <String, wire.Card>{};
   final accepted = <String>{};
+  final _orderImages = <String, List<Uint8List>>{};
   final _startedTasks = <String, Set<String>>{};
   final _pendingStops = <String, Set<String>>{};
   final _uncertainStops = <String>{};
@@ -116,6 +119,9 @@ class AppController extends ChangeNotifier {
       if (cards[id] case final card? when card.episodeId == episode.episodeId)
         card,
   ];
+
+  List<Uint8List> orderImages(String episodeId) =>
+      _orderImages[episodeId] ?? [];
 
   bool stopPending(String cardId) => _pendingStops.containsKey(cardId);
   bool stopUncertain(String cardId) => _uncertainStops.contains(cardId);
@@ -418,6 +424,15 @@ class AppController extends ChangeNotifier {
         // Persist the receipt before allowing Android to discard the images.
         accepted.add(receipt.episodeId);
         await _save();
+        final images = <Uint8List>[];
+        for (final image in order.images) {
+          try {
+            images.add(await image.readAsBytes());
+          } on FileSystemException {
+            // The upload is already accepted even if its local preview is gone.
+          }
+        }
+        _orderImages[receipt.episodeId] = images;
         await platform.acknowledge(_scope, order.sourceId, receipt.episodeId);
         queuedShares--;
         _change();
@@ -434,8 +449,13 @@ class AppController extends ChangeNotifier {
     _change();
     try {
       await _serialize(() async {
-        final receipt = await api.shareExample();
+        // The demo shell's birthday sample, rendered from its sampleOrder canvas.
+        final asset = await rootBundle.load('assets/example-order.png');
+        final image = Uint8List.sublistView(asset);
+        final receipt = await api.shareExample(image);
+        _orderImages[receipt.episodeId] = [image];
         accepted.add(receipt.episodeId);
+        _change();
         await _save();
         await _refresh();
       });
@@ -449,6 +469,17 @@ class AppController extends ChangeNotifier {
 
   Future<void> _refresh() async {
     final id = household!;
+    // Keep the capture through the refresh that delivers the read items.
+    // Captures are session-only and are never included in the saved snapshot.
+    _orderImages.removeWhere((episodeId, _) {
+      if (accepted.contains(episodeId)) return false;
+      final episode = episodes[episodeId];
+      return episode != null &&
+          (episode.items.isNotEmpty ||
+              episode.maskedCount > 0 ||
+              (episode.status != wire.EpisodeStatus.RECEIVED &&
+                  episode.status != wire.EpisodeStatus.READING));
+    });
     try {
       final poll = await api.cards(id, since: _cursor);
       final list = await api.episodes(id);
@@ -517,6 +548,10 @@ class AppController extends ChangeNotifier {
         }
         episodes[episode.episodeId] = episode;
         accepted.remove(episode.episodeId);
+        if (episode.status == wire.EpisodeStatus.READ_FAILED ||
+            episode.status == wire.EpisodeStatus.PAUSED_SKIP) {
+          _orderImages.remove(episode.episodeId);
+        }
         if (platform != null &&
             episode.status == wire.EpisodeStatus.READ_FAILED) {
           _notifications[jsonEncode(['read_failed', episode.episodeId])] = [
@@ -536,9 +571,12 @@ class AppController extends ChangeNotifier {
       stale = false;
       refreshed = true;
       refreshError = null;
-      // Card theme phrases come from the same stored rationale used by WHY.
+      // Card themes and set-aside items come from the stored rationale.
       for (final episode in episodes.values) {
-        if (_disposed || cardsFor(episode).isEmpty) continue;
+        final justRead =
+            _orderImages.containsKey(episode.episodeId) &&
+            (episode.items.isNotEmpty || episode.maskedCount > 0);
+        if (_disposed || (!justRead && cardsFor(episode).isEmpty)) continue;
         unawaited(
           rationale(episode.episodeId)
               .then<void>((_) {}, onError: (Object _) {}),

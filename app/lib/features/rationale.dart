@@ -5,6 +5,7 @@ import '../app_controller.dart';
 import '../contracts.dart' as wire;
 import '../theme.dart';
 import 'labels.dart';
+import 'order_extraction.dart';
 import 'setup.dart';
 
 typedef RationaleTaskLink = ({String cardId, String taskId});
@@ -108,7 +109,8 @@ class _RationaleContentState extends State<_RationaleContent> {
   Widget build(BuildContext context) {
     final result = widget.result;
     final app = widget.app;
-    final items = app.episodes[result.episodeId]?.items ?? const [];
+    final episode = app.episodes[result.episodeId];
+    final items = episode?.items ?? const [];
     final itemsByType = {for (final item in items) item.type: item};
     final calendar = {
       for (final event in result.evidence.calendar) event.id: event,
@@ -163,31 +165,11 @@ class _RationaleContentState extends State<_RationaleContent> {
             item.type,
     ];
 
-    final readItems = [
-      for (final item in items)
-        _ItemRow(
-          type: item.type,
-          qty: item.qty,
-          setAside: result.unbundled.contains(item.type),
-        ),
-      for (final type in result.unbundled.toSet())
-        if (type.trim().isNotEmpty && !itemsByType.containsKey(type))
-          _ItemRow(type: type, qty: null, setAside: true),
-    ];
     final orders = _ChainSection(
       title: '주문에서 읽은 것',
       children: [
-        if (readItems.isNotEmpty)
-          _Panel(
-            child: Column(
-              children: [
-                for (final (index, item) in readItems.indexed) ...[
-                  if (index > 0) const Divider(height: 1),
-                  item,
-                ],
-              ],
-            ),
-          ),
+        if (episode != null && (items.isNotEmpty || episode.maskedCount > 0))
+          OrderItemList(episode: episode, unbundled: result.unbundled),
       ],
     );
 
@@ -565,46 +547,6 @@ class _Panel extends StatelessWidget {
         ),
       ),
       child: child,
-    );
-  }
-}
-
-class _ItemRow extends StatelessWidget {
-  const _ItemRow({
-    required this.type,
-    required this.qty,
-    required this.setAside,
-  });
-
-  final String type;
-  final int? qty;
-  final bool setAside;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final small = theme.textTheme.bodySmall?.copyWith(
-      color: theme.colorScheme.onSurfaceVariant,
-    );
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            flex: 3,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(type, style: theme.textTheme.titleMedium),
-                if (setAside) Text('이번 준비와 따로 본 물건', style: small),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Flexible(child: Text(qty == null ? '수량 미확인' : '$qty개', style: small)),
-        ],
-      ),
     );
   }
 }

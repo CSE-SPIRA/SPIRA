@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 // ignore: deprecated_member_use
 import 'package:flutter/material.dart';
@@ -21,7 +22,10 @@ Map<String, dynamic> fixture(String file, {String episode = 'ep_9031'}) =>
         as Map<String, dynamic>;
 
 class TestImage extends Fake implements File {
+  TestImage({this.preview});
+
   static final _bytes = utf8.encode('screenshot');
+  final Uint8List? preview;
 
   @override
   String get path => '/0.jpg';
@@ -30,10 +34,15 @@ class TestImage extends Fake implements File {
   Uri get uri => Uri.file(path);
 
   @override
-  Future<int> length() async => _bytes.length;
+  Future<int> length() async => (preview ?? _bytes).length;
 
   @override
-  Stream<List<int>> openRead([int? start, int? end]) => Stream.value(_bytes);
+  Stream<List<int>> openRead([int? start, int? end]) =>
+      Stream.value(preview ?? _bytes);
+
+  @override
+  Future<Uint8List> readAsBytes() async =>
+      preview ?? (throw const FileSystemException('No local preview'));
 }
 
 class TestStore implements AppStore {
@@ -352,6 +361,114 @@ void main() {
       expect(find.textContaining('조명 색온도 설정'), findsNothing);
     },
   );
+
+  for (final reducedMotion in [false, true]) {
+    testWidgets(
+      'shared screenshot becomes read items with reduced motion $reducedMotion',
+      (tester) async {
+        if (reducedMotion) {
+          tester.platformDispatcher.accessibilityFeaturesTestValue =
+              const FakeAccessibilityFeatures(disableAnimations: true);
+          addTearDown(
+            tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+          );
+        }
+        final image = File('assets/example-order.png').readAsBytesSync();
+        final platform = TestPlatform();
+        final peer = Peer()
+          ..upload = (_) async => Peer.response({
+            'episode_id': 'ep_9031',
+            'status': 'received',
+          }, 202);
+        final app = controller(peer, platform: platform);
+        await openApp(tester, app);
+
+        platform.orders.add(
+          SharedOrder('capture', '2026-10-15T21:00:08+09:00', [
+            TestImage(preview: image),
+          ]),
+        );
+        await app.sync();
+        await tester.pump();
+        expect(platform.acknowledged['capture'], 'ep_9031');
+        expect(find.text('주문을 받았어요. 읽기 결과를 기다리는 중이에요.'), findsOneWidget);
+        final picture = tester.widget<Image>(find.byType(Image));
+        expect(picture.semanticLabel, '공유한 주문 화면');
+        expect(
+          ((picture.image as ResizeImage).imageProvider as MemoryImage).bytes,
+          same(image),
+        );
+        expect(find.byType(Card), findsNothing);
+
+        final complete = fixture('episode.json')
+          ..['status'] = 'notified'
+          ..['item_count'] = 3
+          ..['masked_count'] = 1
+          ..['item_tasks'] = [];
+        complete['items'] = (complete['items'] as List<Object?>)
+            .take(2)
+            .toList();
+        peer.episodes['ep_9031'] = {
+          ...complete,
+          'status': 'reading',
+          'item_count': 0,
+          'masked_count': 0,
+          'items': [],
+          'card_ids': [],
+        };
+        await app.sync();
+        await tester.pump();
+        expect(find.text('주문을 읽고 있어요.'), findsOneWidget);
+        expect(find.text('수량 미확인'), findsNothing);
+        final scan = find.byKey(const ValueKey('order-scan-line'));
+        if (reducedMotion) {
+          expect(scan, findsNothing);
+        } else {
+          final start = tester.getTopLeft(scan);
+          await tester.pump(const Duration(milliseconds: 400));
+          expect(tester.getTopLeft(scan).dy, greaterThan(start.dy));
+        }
+
+        peer.episodes['ep_9031'] = complete;
+        peer.cards = [fixture('card.v1.json')];
+        const maskedName = '가린 상품 이름';
+        peer.rationales['ep_9031']!['unbundled'] = ['딸기', maskedName];
+        await app.sync();
+        await tester.pump();
+        if (reducedMotion) {
+          expect(find.byType(Image), findsNothing);
+          expect(find.byType(Card), findsOneWidget);
+          await tester.pumpAndSettle();
+        } else {
+          expect(find.byType(Image), findsOneWidget);
+          expect(find.byType(Card), findsNothing);
+          await tester.pumpAndSettle();
+          expect(find.byType(Image), findsNothing);
+          expect(find.byType(Card), findsOneWidget);
+        }
+        for (final text in [
+          '딸기',
+          '설향 딸기 500g (냉장)',
+          '2개',
+          '컵케이크 믹스',
+          'OO 컵케이크 믹스',
+          '수량 미확인',
+          '가린 물건 1개',
+          '이번 준비와 따로 본 물건',
+        ]) {
+          expect(find.text(text), findsOneWidget, reason: text);
+        }
+        expect(find.text(maskedName), findsNothing);
+        await tapText(tester, '읽은 품목 3개');
+        expect(find.text('수량 미확인'), findsNothing);
+        await tapText(tester, 'WHY · 이유 보기');
+        expect(find.text('주문에서 읽은 것'), findsOneWidget);
+        expect(find.text('수량 미확인'), findsOneWidget);
+        expect(find.text('가린 물건 1개'), findsOneWidget);
+        expect(find.text(maskedName), findsNothing);
+      },
+    );
+  }
 
   testWidgets(
     'APP-AT-01 sends only Calendar contract fields after connection',
@@ -1163,6 +1280,11 @@ void main() {
         latin1.decode(request.bodyBytes),
         contains('filename="example-order.png"'),
       );
+      final sample = File('assets/example-order.png').readAsBytesSync();
+      expect(
+        latin1.decode(request.bodyBytes).contains(latin1.decode(sample)),
+        isTrue,
+      );
       peer.episodes['ep_9031'] = fixture('episode.json')
         ..['card_ids'] = ['nc_331', 'nc_340'];
       peer.cards = [
@@ -1230,6 +1352,7 @@ void main() {
     await tester.enterText(find.byType(TextField), 'test-home-key');
     await tapText(tester, '연결');
     await tapText(tester, '예시 주문으로 공유');
+    await tapText(tester, '읽은 품목 9개');
     await tapText(tester, '왜?');
     expect(find.text('판단 근거'), findsOneWidget);
     await tester.tap(find.byType(BackButton));
@@ -1340,7 +1463,6 @@ void main() {
         '테마',
         '손님 여러 명',
         '컵케이크 굽고 꾸미기',
-        '디즈니 공주 케이크 토퍼',
         '디즈니 공주',
         '손님 오기 전 거실 정리',
         '손님 오기 전 거실 청소',
@@ -1356,6 +1478,7 @@ void main() {
       ]) {
         expect(find.text(sentence), findsOneWidget, reason: sentence);
       }
+      expect(find.text('디즈니 공주 케이크 토퍼'), findsNWidgets(2));
       expect(find.text('토요일 생일 일정'), findsNWidgets(2));
       expect(find.text('가구 유형'), findsNWidgets(2));
       expect(find.text('실행'), findsNWidgets(3));
