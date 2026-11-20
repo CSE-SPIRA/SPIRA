@@ -69,10 +69,10 @@ listed command delegated, every `never` action shown as not delegated and not
 selectable ("하지 않아요"). The user changes only what they want. (PC-3, PC-5)
 
 **A2-R4.** Discovery and the confirmed rooms, names and delegation MUST go
-through a Home Hub onboarding port in the home network. Until the Hub onboarding
-API is specified in hub/spec.md, the App MUST use a local stand-in that reads
-the manifest given in `SPIRA_DISCOVERY_JSON` and keeps the result on the phone,
-and MUST say plainly that it has not reached the home hub yet. (PC-3)
+through the Hub's home-network onboarding API ([`hub/spec.md`](../hub/spec.md)).
+Only when no Hub address is configured, the App MUST use a local stand-in that
+reads the manifest given in `SPIRA_DISCOVERY_JSON` and keeps the result on the
+phone, and MUST say plainly that it has not reached the home hub yet. (PC-3)
 
 ### A3. Shared orders
 
