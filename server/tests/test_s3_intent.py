@@ -172,3 +172,49 @@ def test_run_stores_intent(mock_llm):
         e = s.get(Episode, ep)
         assert e.intent["bundles"][0]["intent_id"] == "kid_birthday_party"
         assert e.stage == "s2"
+
+
+def test_key_word_and_in_text_ignore_list_marks():
+    """Dry run A 01b (11-21): theme "하츄핑, 공주, 핑크" written as "하츄핑·공주·핑크 테마" was retried."""
+    from spira_server.pipeline.s3_intent import in_text, key_word
+
+    assert key_word("하츄핑, 공주, 핑크") == "하츄핑"
+    assert key_word("컵케이크 굽고 꾸미기") == "컵케이크"
+    assert key_word("생일") == "생일"
+    assert in_text("하츄핑, 공주, 핑크", "하츄핑·공주·핑크 테마의 생일 파티")
+    assert in_text("하츄핑, 공주, 핑크", "하츄핑/공주/핑크 테마")
+    assert in_text("디즈니 공주", "디즈니 공주 테마로 손님 여럿이 오는 생일")
+    assert not in_text("하츄핑, 공주, 핑크", "공룡 테마의 생일 파티")
+
+
+C2_ERROR = ('묶음 1의 일정 c2(가족 모임)는 이 의도(아이 생일 파티)와 맞는 행사가 아니다 (맞는 태그: 생일). '
+            "물건이 가리키는 행사의 일정이 없으면 calendar_event_id는 null로 둔다")
+
+
+def test_r44_wrong_calendar_is_retried_once(mock_llm):
+    """Dry run A 02 (11-21): birthday items linked to the family-gathering event c2."""
+    wrong = {"bundles": [_bundle(calendar_event_id="c2")], "none_reason": None}
+    _record(mock_llm, D["context"], D["items"], wrong, retry_errors=[C2_ERROR], retry_output=D["decision"])
+    intent = judge_from_context(D["context"], D["items"])
+    assert intent["bundles"][0]["calendar_event_id"] == "c1"
+    assert mock_llm.calls("s3") == 2
+
+
+def test_r44_wrong_calendar_twice_is_unlinked_not_failed(mock_llm):
+    wrong = {"bundles": [_bundle(calendar_event_id="c2")], "none_reason": None}
+    _record(mock_llm, D["context"], D["items"], wrong, retry_errors=[C2_ERROR], retry_output=wrong)
+    intent = judge_from_context(D["context"], D["items"])
+    [b] = intent["bundles"]
+    assert b["intent_id"] == "kid_birthday_party"
+    assert (b["calendar_event_id"], b["calendar_tags"], b["use_window"]) == (None, [], None)
+    assert intent["error"] == {"notes": ["bundle 1: calendar c2 does not match kid_birthday_party -> unlinked"]}
+    assert mock_llm.calls("s3") == 2
+
+
+def test_r44_intents_without_related_tags_may_link_any_event(mock_llm):
+    baking = _bundle(intent_id="home_baking", intent_text="컵케이크를 굽고 꾸미려는 준비", calendar_event_id="c2",
+                     situation={"event": None, "guests": None, "activity": "컵케이크 굽고 꾸미기", "theme": None})
+    _record(mock_llm, D["context"], D["items"], {"bundles": [baking], "none_reason": None})
+    intent = judge_from_context(D["context"], D["items"])
+    assert intent["bundles"][0]["calendar_event_id"] == "c2"
+    assert mock_llm.calls("s3") == 1

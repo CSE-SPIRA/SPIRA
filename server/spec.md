@@ -670,7 +670,7 @@ Example: `contracts/fixtures/ep_9031/calendar.json` → c1 `[생일]`, c2 `[가�
 
 ### 9.2 Prompt summary (`s3_system.txt`)
 
-Most orders are plain shopping; weak evidence → no intent (a wrong intent that moves the home is worse than a missed one). Evidence order: items > calendar (only to link an intent the items already show) > household types and unusual items (narrowing only). One bundle per intent, an item in one bundle only. Labels only from the list, separated by their distinguishing clues; `unclassified` only for one clear purpose not in the list; never guess health/body purposes. Situation fields only with basis (item types, calendar ids, "가구 유형"); never copy other homes' details; guests by count of one-per-person items above the household size, counting pack sizes; "모름" quantities are not used. Never write dates, weekdays or times. `intent_text` contains every filled field and nothing else.
+Most orders are plain shopping; weak evidence → no intent (a wrong intent that moves the home is worse than a missed one). Evidence order: items > calendar (only to link an intent the items already show) > household types and unusual items (narrowing only). One bundle per intent, an item in one bundle only. Labels only from the list, separated by their distinguishing clues; `unclassified` only for one clear purpose not in the list; never guess health/body purposes. Situation fields only with basis (item types, calendar ids, "가구 유형"); never copy other homes' details; guests by count of one-per-person items above the household size, counting pack sizes; "모름" quantities are not used. Link a calendar event only when its occasion is the intent's occasion, even if it is the only event left (birthday items with only a "가족 모임" event → no link). Never write dates, weekdays or times. `intent_text` contains every filled field, in the same words as the field, and nothing else.
 
 ### 9.3 User message
 
@@ -715,7 +715,8 @@ def build_schema(item_types, cal_ids, intent_ids):
 - an item in two bundles;
 - two bundles with the same `intent_id` (except `unclassified`);
 - bundles empty and `none_reason` empty, or bundles present and `none_reason` set;
-- a filled situation field whose key word is not in `intent_text` (key word = the value itself, or for multi-word values its longest word);
+- a filled situation field that is not in `intent_text`: the whole value ignoring spaces and the list marks `,` `·` `/` is not there, and neither is its key word (the value itself, or for several words its longest word; words are split on spaces and those marks). "하츄핑, 공주, 핑크" is found in "하츄핑·공주·핑크 테마…";
+- a linked calendar event whose tags share none of the intent's `related_tags` (`contracts/kb/intents.json`); checked only for intents that have related tags (not `unclassified`, not intents with an empty list) and only on the first attempt — a link still wrong after the retry is removed (`calendar_event_id` null, the time is then found by §10.3) and noted in `error.notes`, the bundle is kept;
 - (schema already rejects unknown labels, items, calendar ids).
 
 ### 9.6 Failure handling
@@ -1354,3 +1355,5 @@ Not yet in the Notion server spec (synchronised in one pass later). B.2 lists th
 | R40 | S1 reads carts and product pages as well as order screens (tests and demos share a temporary cart); unchecked, sold-out and recommended items are skipped; `qty` / `order_no` null when not shown (11-21, 서진) | §0, §7, `s1_*.txt` |
 | R41 | Anthropic calls use JSON outputs (`output_config.format`), not forced tool use; the enforced schemas (S1, calendar, S3) stay within the documented strict-schema limits (16 unions, 24 optional fields; test). Found in dry run A (11-21) | §6.1, §3.2 |
 | R42 | S4 runs without an enforced schema: the schema is sent as prompt text and the stage validates (its schema grows with the devices; Anthropic refused it as too large in dry run A). `s4_system.txt` [답의 형식] states the format; prose or code fences around the JSON are cut away (11-21, 서진) | §6.1, §10.8 |
+| R43 | S3 format check: situation values are compared with `intent_text` ignoring spaces and the list marks `,` `·` `/`, and the key word is split on them too (a theme "하츄핑, 공주, 핑크" written as "하츄핑·공주·핑크" was retried in dry run A, 11-21) | §9.5 |
+| R44 | S3 links a calendar event only if its tags share one of the intent's `related_tags` (intents with related tags only): one retry, then the link is removed and the bundle kept. Prompt: no link to an event of another occasion; `intent_text` repeats the fields' words (dry run A 02: birthday items linked to "가족 모임"; a reworded activity caused a retry, 11-21, 서진) | §9.2, §9.5 |

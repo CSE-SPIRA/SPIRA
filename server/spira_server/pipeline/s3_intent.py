@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, datetime, timedelta
 from typing import Literal
 
@@ -128,12 +129,43 @@ def build_schema(item_types: list[str], cal_ids: list[str], intent_ids: list[str
 
 # -------------------------------------------------------------------------------------------- format check (§9.5)
 
+WORD_SEPARATORS = re.compile(r"[\s,·・/、]+")
+
+
 def key_word(value: str) -> str:
-    words = value.split()
-    return max(words, key=len) if len(words) > 1 else value
+    """The value itself, or for several words its longest word. Words are split on spaces and the list marks
+    `,` `·` `/` (spec §9.5): "하츄핑, 공주, 핑크" -> "하츄핑"."""
+    words = [w for w in WORD_SEPARATORS.split(value) if w]
+    return max(words, key=len) if len(words) > 1 else value.strip()
 
 
-def format_check(decision: BaseModel) -> list[str]:
+def in_text(value: str, text: str) -> bool:
+    """A situation value counts as written in intent_text when, ignoring spaces and list marks, the whole value is
+    there ("하츄핑, 공주, 핑크" ~ "하츄핑·공주·핑크"), or its key word is."""
+    squash = lambda s: WORD_SEPARATORS.sub("", s)  # noqa: E731
+    return squash(value) in squash(text) or key_word(value) in text
+
+
+def calendar_mismatch(intent_id: str, event_tags: list[str] | None) -> bool:
+    """A linked event whose tags share nothing with the intent's related tags (spec §9.5, R44). Checked only for
+    intents that have related tags; unclassified and intents without related tags may link any event."""
+    if event_tags is None or intent_id == "unclassified":
+        return False
+    related = next((set(i.related_tags) for i in get_lists().intents if i.id == intent_id), set())
+    return bool(related) and not related & set(event_tags)
+
+
+def calendar_error(n: int, intent_id: str, event_id: str, event_tags: list[str]) -> str:
+    intent = next((i for i in get_lists().intents if i.id == intent_id), None)
+    name = intent.name if intent else intent_id
+    related = ", ".join(intent.related_tags) if intent else ""
+    tags = ", ".join(event_tags) or "태그 없음"
+    return (f"묶음 {n}의 일정 {event_id}({tags})는 이 의도({name})와 맞는 행사가 아니다 (맞는 태그: {related}). "
+            "물건이 가리키는 행사의 일정이 없으면 calendar_event_id는 null로 둔다")
+
+
+def format_check(decision: BaseModel, event_tags: dict[str, list[str]] | None = None) -> list[str]:
+    """Spec §9.5. `event_tags` (calendar id -> tags) turns on the calendar check (R44)."""
     errors: list[str] = []
     seen: dict[str, int] = {}
     intents: dict[str, int] = {}
@@ -148,9 +180,13 @@ def format_check(decision: BaseModel) -> list[str]:
                 errors.append(f"묶음 {intents[bundle.intent_id]}과 묶음 {n}의 intent_id가 같다 ({bundle.intent_id}). "
                               "같은 의도는 한 묶음으로 합친다")
             intents.setdefault(bundle.intent_id, n)
+        if event_tags is not None and bundle.calendar_event_id:
+            tags = event_tags.get(bundle.calendar_event_id)
+            if calendar_mismatch(bundle.intent_id, tags):
+                errors.append(calendar_error(n, bundle.intent_id, bundle.calendar_event_id, tags or []))
         for key in SITUATION_KEYS:
             value = getattr(bundle.situation, key)
-            if value and value not in bundle.intent_text and key_word(value) not in bundle.intent_text:
+            if value and not in_text(value, bundle.intent_text):
                 errors.append(f'묶음 {n}의 {key} "{value}": intent_text에 없다. '
                               "채운 상황 칸을 intent_text에 모두 담는다")
     reason = (decision.none_reason or "").strip()
@@ -170,10 +206,18 @@ def judge_from_context(context: dict, items: list[dict], llm: LLM | None = None,
     calendar = (context["for_intent"].get("this_home") or {}).get("calendar") or []
     cal_ids = [e["id"] for e in calendar]
     schema = build_schema(types, cal_ids, get_lists().intent_ids)
+    tags_by_id = {e["id"]: list(e.get("tags") or []) for e in calendar}
+    attempts = {"n": 0}
+
+    def check(decision: BaseModel) -> list[str]:
+        # The calendar check asks once; a link still wrong after the retry is removed below, not failed (R44).
+        attempts["n"] += 1
+        return format_check(decision, tags_by_id if attempts["n"] == 1 else None)
+
     result = call_with_retry(
         llm or get_llm(), stage="s3", system=prompts.system("s3"), user=build_intent_message(context, items),
         schema=schema, retry_template=prompts.text("s3_retry.txt"), default=None, episode_id=episode_id,
-        check=format_check,
+        check=check,
     )
     if not result.ok:
         return {"bundles": [], "unbundled": types, "none_reason": "format_fail",
@@ -189,9 +233,13 @@ def judge_from_context(context: dict, items: list[dict], llm: LLM | None = None,
             if situation[key] and not basis[key]:
                 notes.append(f"bundle {n}: {key} without basis -> null")
                 situation[key] = None
+        event_id = b.calendar_event_id
+        if event_id and calendar_mismatch(b.intent_id, tags_by_id.get(event_id)):
+            notes.append(f"bundle {n}: calendar {event_id} does not match {b.intent_id} -> unlinked")
+            event_id = None
         bundles.append({"intent_id": b.intent_id, "intent_text": b.intent_text,
                         "items": list(dict.fromkeys(b.items)), "situation": situation, "basis": basis,
-                        "calendar_event_id": b.calendar_event_id, "calendar_tags": [], "use_window": None})
+                        "calendar_event_id": event_id, "calendar_tags": [], "use_window": None})
     max_bundles = get_config().numbers.max_bundles
     keep = sorted(range(len(bundles)), key=lambda i: (-len(bundles[i]["items"]), i))[:max_bundles]
     bundles = [bundles[i] for i in sorted(keep)]
