@@ -29,9 +29,9 @@ class Preparations extends StatelessWidget {
           if (app.shareIssue case final issue?)
             StatusMessage(switch (issue) {
               'count' => '주문 화면을 한 번에 1~3장 공유해 주세요.',
-              'size' => '이미지 한 장은 5MB 이하여야 해요.',
-              'format' => 'JPG 또는 PNG 주문 화면을 공유해 주세요.',
-              'rejected' => '서버가 이미지를 읽을 수 없어요. 새 캡처를 공유해 주세요.',
+              'size' => '주문 화면의 사진 용량이 너무 커요. 더 작은 사진을 공유해 주세요.',
+              'format' => '휴대폰에서 주문 화면을 캡처해서 공유해 주세요.',
+              'rejected' => '주문 화면을 읽을 수 없어요. 다시 찍어서 공유해 주세요.',
               _ => '공유한 이미지를 열 수 없어요. 주문 화면을 다시 공유해 주세요.',
             }),
           if (app.queuedShares > 0) const StatusMessage('공유한 주문을 보내는 중이에요…'),
@@ -116,7 +116,7 @@ class _OrderSection extends StatelessWidget {
                 TextButton(
                   onPressed: () =>
                       openRationale(context, app, episode.episodeId),
-                  child: const Text('WHY · 이유 보기'),
+                  child: const Text('준비 이유 보기'),
                 ),
             ],
           ),
@@ -187,7 +187,7 @@ class _PreparationCard extends StatelessWidget {
                     card.episodeId,
                     cardId: card.cardId,
                   ),
-                  child: const Text('WHY · 이유 보기'),
+                  child: const Text('준비 이유 보기'),
                 ),
                 if (!card.stopped &&
                     card.buttons.contains(wire.CardButton.STOP))

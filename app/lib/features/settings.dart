@@ -20,75 +20,71 @@ class SettingsScreen extends StatelessWidget {
         padding: const EdgeInsets.all(20),
         children: [
           PeerLabel(app.fixture),
-          const SizedBox(height: 16),
-          Text('자동 준비', style: Theme.of(context).textTheme.titleLarge),
-          const Text(
-            '일시정지하면 시작 전 준비를 취소하고, 진행 중인 준비는 그대로 이어가요. '
-            '일시정지 중 공유한 주문은 보관해요. 재개하면 이후 주문부터 새로 준비해요.',
-          ),
-          StatusMessage(
-            app.pausePending
-                ? '자동 준비 상태 변경을 확인하는 중…'
-                : switch (app.paused) {
-                    true => '자동 준비 일시정지됨',
-                    false => '자동 준비 켜짐',
-                    null => '자동 준비 상태 미확인',
-                  },
-          ),
-          if (app.controlErrors['pause'] case final error?)
-            StatusMessage(error),
-          Wrap(
-            spacing: 8,
-            children: [
-              if (app.paused != true)
-                OutlinedButton(
-                  onPressed: app.pausePending
-                      ? null
-                      : () => app.setPaused(true),
-                  child: const Text('자동 준비 일시정지'),
-                ),
-              if (app.paused != false)
-                OutlinedButton(
-                  onPressed: app.pausePending
-                      ? null
-                      : () => app.setPaused(false),
-                  child: const Text('자동 준비 재개'),
-                ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          const Divider(),
-          if (app.canResendCalendar)
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('캘린더 다시 보내기'),
-              onTap: app.resendCalendar,
-            ),
           ListTile(
             contentPadding: EdgeInsets.zero,
-            title: const Text('우리 집 기억'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.push<void>(
-              context,
-              MaterialPageRoute(builder: (_) => _MemoryScreen(app)),
-            ),
+            title: const Text('연결 코드 입력'),
+            onTap: () async {
+              final token = await showDialog<String>(
+                context: context,
+                builder: (_) => const _TokenDialog(),
+              );
+              if (token != null && context.mounted) app.useToken(token);
+            },
           ),
-          if (app.discovered?.devices case final devices?
-              when devices.isNotEmpty) ...[
+          if (!app.starting && app.step == SetupStep.ready) ...[
+            const SizedBox(height: 16),
+            Text('자동 준비', style: Theme.of(context).textTheme.titleLarge),
+            const Text(
+              '일시정지하면 시작 전 준비를 취소하고, 진행 중인 준비는 그대로 이어가요. '
+              '일시정지 중 공유한 주문은 보관해요. 재개하면 이후 주문부터 새로 준비해요.',
+            ),
+            StatusMessage(
+              app.pausePending
+                  ? '자동 준비 상태 변경을 확인하는 중…'
+                  : switch (app.paused) {
+                      true => '자동 준비 일시정지됨',
+                      false => '자동 준비 켜짐',
+                      null => '자동 준비 상태를 아직 확인하지 못했어요.',
+                    },
+            ),
+            if (app.controlErrors['pause'] case final error?)
+              StatusMessage(error),
+            Wrap(
+              spacing: 8,
+              children: [
+                if (app.paused != true)
+                  OutlinedButton(
+                    onPressed: app.pausePending
+                        ? null
+                        : () => app.setPaused(true),
+                    child: const Text('자동 준비 일시정지'),
+                  ),
+                if (app.paused != false)
+                  OutlinedButton(
+                    onPressed: app.pausePending
+                        ? null
+                        : () => app.setPaused(false),
+                    child: const Text('자동 준비 재개'),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 24),
             const Divider(),
-            Text('기기 동작 선택', style: Theme.of(context).textTheme.titleLarge),
-            const Text('이 앱에 저장된 선택이에요.'),
-            for (final device in devices) ...[
-              const SizedBox(height: 12),
-              Text(
-                '${device.label ?? deviceLabel(device.type)} · ${device.room ?? '공간 미확인'} · '
-                '${device.substrate == wire.Substrate.VIRTUAL ? '가상 기기' : '실물 기기'}',
+            if (app.canResendCalendar)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('캘린더 다시 보내기'),
+                onTap: app.resendCalendar,
               ),
-              for (final entry in (app.deviceChoices[device.id] ?? {}).entries)
-                Text(
-                  '${commandLabel(entry.key)} · ${entry.value == DeviceChoice.delegated ? '맡기기로 선택' : '맡기지 않기로 선택'}',
-                ),
-            ],
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('우리 집 기억'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push<void>(
+                context,
+                MaterialPageRoute(builder: (_) => _MemoryScreen(app)),
+              ),
+            ),
           ],
         ],
       ),
@@ -112,7 +108,7 @@ class PeerLabel extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
         child: Text(
-          fixture ? '계약 테스트 서버' : '실제 서버 프로필',
+          fixture ? '시연용 연결' : '일반 연결',
           style: Theme.of(context).textTheme.labelMedium,
         ),
       ),
@@ -168,7 +164,7 @@ class _MemoryScreenState extends State<_MemoryScreen> {
         setState(() {
           _message = _awaitingDeletion == null
               ? '우리 집 기억을 불러오지 못했어요.'
-              : '서버에서 삭제 결과를 확인하지 못했어요.';
+              : '기억이 삭제됐는지 확인하지 못했어요.';
           _busy = false;
         });
       }
@@ -270,5 +266,47 @@ class _MemoryScreenState extends State<_MemoryScreen> {
         ],
       ],
     ),
+  );
+}
+
+class _TokenDialog extends StatefulWidget {
+  const _TokenDialog();
+
+  @override
+  State<_TokenDialog> createState() => _TokenDialogState();
+}
+
+class _TokenDialogState extends State<_TokenDialog> {
+  final _text = TextEditingController();
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('연결 코드 입력'),
+    content: TextField(
+      controller: _text,
+      obscureText: true,
+      autocorrect: false,
+      enableSuggestions: false,
+      decoration: const InputDecoration(labelText: '연결 코드'),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('취소'),
+      ),
+      FilledButton(
+        onPressed: () {
+          final token = _text.text.trim();
+          if (token.isNotEmpty) Navigator.pop(context, token);
+        },
+        child: const Text('연결'),
+      ),
+    ],
   );
 }

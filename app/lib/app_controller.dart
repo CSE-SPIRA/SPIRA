@@ -3,34 +3,26 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api/app_api.dart';
 import 'contracts.dart' as wire;
 import 'platform/android_bridge.dart';
+import 'platform/app_store.dart';
 import 'platform/google_calendar.dart';
+import 'platform/home_hub_onboarding.dart';
 
-abstract interface class AppStore {
-  Future<String?> read(String key);
-  Future<void> write(String key, String value);
+enum SetupStep { start, household, calendar, devices, ready }
+
+class DevicePreparation {
+  const DevicePreparation(this.card, this.line, {required this.sharedLine});
+
+  final wire.Card card;
+  final wire.LineElement line;
+  final bool sharedLine;
 }
-
-class PreferencesAppStore implements AppStore {
-  final _preferences = SharedPreferencesAsync();
-
-  @override
-  Future<String?> read(String key) => _preferences.getString(key);
-
-  @override
-  Future<void> write(String key, String value) =>
-      _preferences.setString(key, value);
-}
-
-enum SetupStep { household, calendar, devices, ready }
-
-enum DeviceChoice { undecided, delegated, never }
 
 const _pollInterval = Duration(seconds: 30);
+const _connectionCodeHint = '설정에서 연결 코드를 입력해 주세요.';
 
 class AppController extends ChangeNotifier {
   AppController({
@@ -38,8 +30,8 @@ class AppController extends ChangeNotifier {
     required this.platform,
     required this.store,
     required this.fixture,
+    required this.homeHub,
     this.readCalendar,
-    this.discovered,
     this.configuredHousehold,
   });
 
@@ -48,7 +40,7 @@ class AppController extends ChangeNotifier {
   final AppStore store;
   final bool fixture;
   final CalendarReader? readCalendar;
-  final wire.Devices? discovered;
+  final HomeHubOnboardingPort homeHub;
   final String? configuredHousehold;
 
   String get _environment =>
@@ -59,7 +51,7 @@ class AppController extends ChangeNotifier {
   String get _calendarKey => 'spira.calendar.v1.$_scope';
 
   String? household;
-  SetupStep step = SetupStep.household;
+  SetupStep step = SetupStep.start;
   bool starting = true;
   bool busy = false;
   bool stale = true;
@@ -74,7 +66,8 @@ class AppController extends ChangeNotifier {
   int queuedShares = 0;
 
   final householdTypes = <String>{};
-  final deviceChoices = <String, Map<String, DeviceChoice>>{};
+  HomeDiscovery home = const HomeDiscovery();
+  final _legacyDelegation = <String, Set<String>>{};
   final episodes = <String, wire.Episode>{};
   final cards = <String, wire.Card>{};
   final accepted = <String>{};
@@ -85,6 +78,8 @@ class AppController extends ChangeNotifier {
   final controlErrors = <String, String>{};
   final _notifications = <String, List<String>>{};
   final _rationales = <String, Future<wire.Rationale>>{};
+  final _rationaleData = <String, wire.Rationale>{};
+  bool _homeOpen = false;
 
   String? _cursor;
   Timer? _timer;
@@ -109,6 +104,65 @@ class AppController extends ChangeNotifier {
       if (cards[id] case final card? when card.episodeId == episode.episodeId)
         card,
   ];
+
+  Set<String>? savedDelegation(wire.DeviceElement device) {
+    final saved =
+        home.settings[device.id]?.delegated ?? _legacyDelegation[device.id];
+    return saved?.intersection(HomeDeviceSettings.selectable(device));
+  }
+
+  Map<String, List<DevicePreparation>> get devicePreparations {
+    final result = <String, List<DevicePreparation>>{};
+    final devices = {for (final device in home.devices) device.id: device.type};
+    for (final episode in orderedEpisodes) {
+      final rationale = _rationaleData[episode.episodeId];
+      if (rationale == null) continue;
+      final tasks = {
+        for (final task in rationale.tasks) (task.cardId, task.taskId): task,
+      };
+      for (final card in cardsFor(episode)) {
+        for (final line in card.lines) {
+          final mapped = tasks[(card.cardId, line.taskId)]?.devices;
+          if (mapped == null) continue;
+          final ids = {for (final device in mapped) device.id};
+          // The current room label can change without changing device identity.
+          for (final device in mapped) {
+            if (devices[device.id] == device.type && ids.remove(device.id)) {
+              result
+                  .putIfAbsent(device.id, () => [])
+                  .add(
+                    DevicePreparation(
+                      card,
+                      line,
+                      sharedLine: mapped.length > 1,
+                    ),
+                  );
+            }
+          }
+        }
+      }
+    }
+    return result;
+  }
+
+  void openHome() {
+    _homeOpen = true;
+    unawaited(_loadHomeRationales(refresh: true));
+  }
+
+  void closeHome() => _homeOpen = false;
+
+  Future<void> _loadHomeRationales({bool refresh = false}) async {
+    final reads = <Future<void>>[];
+    for (final episode in episodes.values) {
+      if (cardsFor(episode).isEmpty) continue;
+      if (refresh) _invalidateRationale(episode.episodeId);
+      reads.add(
+        rationale(episode.episodeId).then<void>((_) {}, onError: (Object _) {}),
+      );
+    }
+    await Future.wait(reads);
+  }
 
   bool stopPending(String cardId) => _pendingStops.containsKey(cardId);
   bool stopUncertain(String cardId) => _uncertainStops.contains(cardId);
@@ -157,17 +211,23 @@ class AppController extends ChangeNotifier {
       step = SetupStep.values.byName(setup['step'] as String);
       _calendarConnected = setup['calendarConnected'] as bool? ?? false;
       householdTypes.addAll((setup['types'] as List<dynamic>).cast<String>());
-      for (final entry in (setup['choices'] as Map<String, dynamic>).entries) {
-        deviceChoices[entry.key] = (entry.value as Map<String, dynamic>).map(
-          (command, choice) =>
-              MapEntry(command, DeviceChoice.values.byName(choice as String)),
-        );
+      if (setup['choices'] case final Map<String, dynamic> choices) {
+        for (final entry in choices.entries) {
+          final commands = entry.value as Map<String, dynamic>;
+          _legacyDelegation[entry.key] = {
+            for (final command in commands.entries)
+              if (command.value == 'delegated') command.key,
+          };
+        }
       }
     } else if (configuredHousehold != null) {
       household = configuredHousehold;
       step = SetupStep.ready;
     }
     if (household == null) return;
+    if (step == SetupStep.devices || step == SetupStep.ready) {
+      home = await homeHub.discover(_scope);
+    }
     final cached = await store.read(_snapshotKey);
     if (cached == null) return;
     final value = jsonDecode(cached) as Map<String, dynamic>;
@@ -207,19 +267,13 @@ class AppController extends ChangeNotifier {
     );
   }
 
-  Future<void> _saveSetup() => store.write(
+  Future<void> _saveSetup({SetupStep? nextStep}) => store.write(
     _setupKey,
     jsonEncode({
       'household': household,
-      'step': step.name,
+      'step': (nextStep ?? step).name,
       'calendarConnected': _calendarConnected,
       'types': householdTypes.toList(),
-      'choices': deviceChoices.map(
-        (key, value) => MapEntry(
-          key,
-          value.map((command, choice) => MapEntry(command, choice.name)),
-        ),
-      ),
     }),
   );
 
@@ -248,7 +302,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> submitHousehold(Set<String> types) async {
-    if (busy) return;
+    if (busy || step != SetupStep.household) return;
     await _setup(() async {
       householdTypes
         ..clear()
@@ -271,17 +325,23 @@ class AppController extends ChangeNotifier {
     });
   }
 
+  void beginSetup() {
+    step = SetupStep.household;
+    _change();
+  }
+
   Future<void> finishCalendar({required bool connect}) async {
-    if (busy) return;
+    if (busy || step != SetupStep.calendar) return;
     await _setup(() async {
       if (connect) {
         final reader = readCalendar;
         if (reader == null) throw StateError('Calendar unavailable');
         await _sendCalendar(household!, await reader(interactive: true));
       }
+      home = await homeHub.discover(_scope);
       _calendarConnected = connect;
+      await _saveSetup(nextStep: SetupStep.devices);
       step = SetupStep.devices;
-      await _saveSetup();
     });
   }
 
@@ -330,21 +390,30 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> finishDevices(
-    Map<String, Map<String, DeviceChoice>> choices,
-  ) async {
-    if (busy) return;
+  Future<void> finishDevices(Map<String, HomeDeviceSettings> settings) async {
+    if (busy || step != SetupStep.devices) return;
     await _setup(() async {
-      deviceChoices
-        ..clear()
-        ..addAll(choices);
+      await _saveHome(settings);
+      await _saveSetup(nextStep: SetupStep.ready);
       step = SetupStep.ready;
-      await _saveSetup();
     });
     if (step == SetupStep.ready) {
       _requestNotificationPermission();
       await sync();
     }
+  }
+
+  Future<void> editHomeDevice(String id, HomeDeviceSettings settings) =>
+      _saveHome({id: settings});
+
+  Future<void> _saveHome(Map<String, HomeDeviceSettings> settings) async {
+    final updated = Map<String, HomeDeviceSettings>.unmodifiable({
+      ...home.settings,
+      ...settings,
+    });
+    await homeHub.saveRoomsNamesDelegation(_scope, home, updated);
+    home = HomeDiscovery(manifest: home.manifest, settings: updated);
+    _change();
   }
 
   void _requestNotificationPermission() {
@@ -370,6 +439,7 @@ class AppController extends ChangeNotifier {
   void useToken(String token) {
     api.token = token;
     needsToken = false;
+    if (setupError == _connectionCodeHint) setupError = null;
     _change();
     unawaited(sync());
   }
@@ -458,6 +528,14 @@ class AppController extends ChangeNotifier {
                 .isBefore(DateTime.parse(previous.updatedAt))) {
           continue;
         }
+        if (previous == null ||
+            (_homeOpen && card.updatedAt != previous.updatedAt) ||
+            !setEquals(
+              previous.lines.map((line) => line.taskId).toSet(),
+              card.lines.map((line) => line.taskId).toSet(),
+            )) {
+          _invalidateRationale(card.episodeId);
+        }
         cards[card.cardId] = card;
         if (card.notify) {
           _notifications[jsonEncode([card.cardId, card.updatedAt])] = [
@@ -484,7 +562,7 @@ class AppController extends ChangeNotifier {
       }
       for (final episode in details) {
         if (episodes[episode.episodeId]?.status != episode.status) {
-          _rationales.remove(episode.episodeId);
+          _invalidateRationale(episode.episodeId);
         }
         episodes[episode.episodeId] = episode;
         accepted.remove(episode.episodeId);
@@ -511,7 +589,10 @@ class AppController extends ChangeNotifier {
       refreshError = _error(error, '새로 불러오지 못했어요. 다시 시도해 주세요.');
     }
     _change();
-    await _deliverNotifications();
+    await Future.wait([
+      _deliverNotifications(),
+      if (_homeOpen) _loadHomeRationales(),
+    ]);
   }
 
   Future<void> _deliverNotifications() async {
@@ -724,18 +805,30 @@ class AppController extends ChangeNotifier {
   }
 
   Future<wire.Rationale> rationale(String episode) {
-    return _rationales.putIfAbsent(episode, () async {
-      try {
-        final rationale = await api.rationale(episode);
-        if (rationale.episodeId != episode) {
-          throw const FormatException('Wrong episode');
-        }
-        return rationale;
-      } catch (_) {
-        _rationales.remove(episode);
-        rethrow;
-      }
-    });
+    if (_rationales[episode] case final request?) return request;
+    late final Future<wire.Rationale> request;
+    request = api
+        .rationale(episode)
+        .then((result) {
+          if (result.episodeId != episode) {
+            throw const FormatException('Wrong episode');
+          }
+          if (_rationales[episode] == request) {
+            _rationaleData[episode] = result;
+            if (_homeOpen) _change();
+          }
+          return result;
+        })
+        .catchError((Object error, StackTrace stack) {
+          if (_rationales[episode] == request) _rationales.remove(episode);
+          Error.throwWithStackTrace(error, stack);
+        });
+    return _rationales[episode] = request;
+  }
+
+  void _invalidateRationale(String episode) {
+    _rationales.remove(episode);
+    _rationaleData.remove(episode);
   }
 
   Future<wire.Memory> memory() async {
@@ -752,12 +845,12 @@ class AppController extends ChangeNotifier {
     if (error is AppApiException) {
       if (error.status == 401) {
         needsToken = true;
-        return '서버 접속 토큰을 입력해 주세요.';
+        return _connectionCodeHint;
       }
       return switch (error.code) {
         wire.ErrorCode.LINE_STARTED => '이미 시작된 항목은 바꿀 수 없어요.',
-        wire.ErrorCode.INVALID_IMAGE => '서버가 이미지를 읽을 수 없어요. 새 캡처를 공유해 주세요.',
-        wire.ErrorCode.HOUSEHOLD_TYPES_INVALID => '선택한 가구 유형을 함께 사용할 수 없어요.',
+        wire.ErrorCode.INVALID_IMAGE => '주문 화면을 읽을 수 없어요. 다시 찍어서 공유해 주세요.',
+        wire.ErrorCode.HOUSEHOLD_TYPES_INVALID => '함께 고를 수 없는 항목이 있어요.',
         _ => fallback,
       };
     }

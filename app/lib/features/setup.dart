@@ -2,8 +2,7 @@
 import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
-import '../contracts.dart' as wire;
-import 'labels.dart';
+import 'device_setup.dart';
 
 class SetupScreen extends StatefulWidget {
   const SetupScreen(this.app, {super.key});
@@ -26,7 +25,16 @@ class _SetupScreenState extends State<SetupScreen> {
   static const _singleChoice = {'인원', '생활 단계'};
 
   late final Set<String> _types = {...widget.app.householdTypes};
-  final _choices = <String, Map<String, DeviceChoice>>{};
+  final _drafts = <String, DeviceDraft>{};
+  bool _choosingActions = false;
+
+  @override
+  void dispose() {
+    for (final draft in _drafts.values) {
+      draft.dispose();
+    }
+    super.dispose();
+  }
 
   bool get _validTypes {
     final hasCouple = _types.contains('부부·커플');
@@ -52,10 +60,12 @@ class _SetupScreenState extends State<SetupScreen> {
   Widget build(BuildContext context) {
     final app = widget.app;
     return ListView(
+      key: ValueKey((app.step, _choosingActions)),
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
       children: [
         if (app.setupError case final error?) StatusMessage(error),
         switch (app.step) {
+          SetupStep.start => _start(context),
           SetupStep.household => _household(context),
           SetupStep.calendar => _calendar(context),
           SetupStep.devices => _devices(context),
@@ -65,6 +75,19 @@ class _SetupScreenState extends State<SetupScreen> {
     );
   }
 
+  Widget _start(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Text('SPIRA와 함께 시작해요', style: Theme.of(context).textTheme.headlineMedium),
+      const SizedBox(height: 12),
+      const Text('공유한 주문과 캘린더 일정을 보고 집을 미리 준비해요.'),
+      const SizedBox(height: 8),
+      const Text('맡기기로 한 기기와 동작만 사용해요. 준비는 언제든 멈출 수 있어요.'),
+      const SizedBox(height: 20),
+      FilledButton(onPressed: widget.app.beginSetup, child: const Text('시작하기')),
+    ],
+  );
+
   Widget _household(BuildContext context) {
     final app = widget.app;
     return Column(
@@ -72,7 +95,7 @@ class _SetupScreenState extends State<SetupScreen> {
       children: [
         Text('우리 집 설정', style: Theme.of(context).textTheme.headlineMedium),
         const SizedBox(height: 8),
-        const Text('해당하는 가구 유형을 선택해 주세요.'),
+        const Text('우리 집에 해당하는 항목을 골라 주세요.'),
         for (final group in _groups.entries) ...[
           const SizedBox(height: 18),
           Text(group.key, style: Theme.of(context).textTheme.titleMedium),
@@ -101,7 +124,7 @@ class _SetupScreenState extends State<SetupScreen> {
             ],
           ),
         ],
-        if (!_validTypes) const StatusMessage('선택한 가구 유형을 함께 사용할 수 없어요.'),
+        if (!_validTypes) const StatusMessage('함께 고를 수 없는 항목이 있어요.'),
         const SizedBox(height: 24),
         FilledButton(
           onPressed: app.busy || _types.isEmpty || !_validTypes
@@ -120,9 +143,9 @@ class _SetupScreenState extends State<SetupScreen> {
       children: [
         Text('일정 연결', style: Theme.of(context).textTheme.headlineMedium),
         const SizedBox(height: 8),
-        const Text('Google 캘린더를 연결하면 향후 14일의 일정을 준비에 참고해요.'),
+        const Text('Google 캘린더를 연결하면 앞으로 14일 동안의 일정을 보고 준비해요.'),
         if (app.readCalendar == null)
-          const StatusMessage('이 환경에서 Google 캘린더 연결을 사용할 수 없어요.'),
+          const StatusMessage('지금은 Google 캘린더를 연결할 수 없어요.'),
         const SizedBox(height: 20),
         FilledButton(
           onPressed: app.busy || app.readCalendar == null
@@ -140,87 +163,91 @@ class _SetupScreenState extends State<SetupScreen> {
 
   Widget _devices(BuildContext context) {
     final app = widget.app;
-    final devices = app.discovered?.devices ?? const <wire.DeviceElement>[];
+    final drafts = [
+      for (final device in app.home.devices)
+        _drafts.putIfAbsent(
+          device.id,
+          () => DeviceDraft(
+            device,
+            saved: app.home.settings[device.id],
+            delegated: app.savedDelegation(device),
+          ),
+        ),
+    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('기기와 맡길 동작', style: Theme.of(context).textTheme.headlineMedium),
-        const SizedBox(height: 8),
         Text(
-          devices.isEmpty
-              ? '기기 검색 정보를 사용할 수 없어요.'
-              : '발견 목록에서 동작을 선택할 수 있어요. 이 선택은 이 앱에 저장돼요.',
+          _choosingActions ? 'SPIRA에게 맡길 일' : '기기가 있는 방과 이름',
+          style: Theme.of(context).textTheme.headlineMedium,
         ),
-        for (final device in devices)
+        const StatusMessage(homeHubPending),
+        if (drafts.isEmpty)
+          const Text('찾은 기기가 없어요.')
+        else
+          Text(
+            _choosingActions
+                ? '맡기고 싶지 않은 일만 선택을 풀어 주세요.'
+                : '찾은 방과 기기 이름이 맞으면 그대로 두고, 다르면 바꿔 주세요.',
+          ),
+        for (final draft in drafts)
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    device.label ?? deviceLabel(device.type),
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  Text(
-                    '${device.room ?? '공간 미확인'} · ${deviceLabel(device.type)} · '
-                    '${device.substrate == wire.Substrate.VIRTUAL ? '가상 기기' : '실물 기기'}',
-                  ),
-                  for (final command in device.commands)
-                    if (!device.never.contains(command.cmd)) ...[
-                      const SizedBox(height: 8),
-                      DropdownButtonFormField<DeviceChoice>(
-                        key: ValueKey('${device.id}/${command.cmd}'),
-                        initialValue:
-                            _choices[device.id]?[command.cmd] ??
-                            DeviceChoice.undecided,
-                        decoration: InputDecoration(
-                          labelText: commandLabel(command.cmd),
+              child: _choosingActions
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          draft.displayName,
+                          style: Theme.of(context).textTheme.titleMedium,
                         ),
-                        isExpanded: true,
-                        items: const [
-                          DropdownMenuItem(
-                            value: DeviceChoice.undecided,
-                            child: Text('미선택'),
-                          ),
-                          DropdownMenuItem(
-                            value: DeviceChoice.delegated,
-                            child: Text('맡기기'),
-                          ),
-                          DropdownMenuItem(
-                            value: DeviceChoice.never,
-                            child: Text('맡기지 않기'),
-                          ),
-                        ],
-                        onChanged: app.busy
-                            ? null
-                            : (choice) {
-                                if (choice == null) return;
-                                final selected = _choices.putIfAbsent(
-                                  device.id,
-                                  () => {},
-                                );
-                                if (choice == DeviceChoice.undecided) {
-                                  selected.remove(command.cmd);
-                                } else {
-                                  selected[command.cmd] = choice;
-                                }
-                              },
-                      ),
-                    ],
-                  for (final command in device.never)
-                    Text('${commandLabel(command)} · 위임 유보'),
-                ],
-              ),
+                        Text(
+                          draft.roomName.isEmpty ? '방을 골라 주세요' : draft.roomName,
+                        ),
+                        DelegationChoices(draft, enabled: !app.busy),
+                      ],
+                    )
+                  : DeviceFields(
+                      draft,
+                      reviewed: app.home.settings.containsKey(draft.device.id),
+                      enabled: !app.busy,
+                      onChanged: () => setState(() {}),
+                    ),
             ),
           ),
         const SizedBox(height: 18),
-        FilledButton(
-          onPressed: app.busy ? null : () => app.finishDevices(_choices),
-          child: Text(app.busy ? '저장 중…' : '설정 완료'),
-        ),
+        if (_choosingActions) ...[
+          FilledButton(
+            onPressed: app.busy ? null : () => _finishDevices(drafts),
+            child: Text(app.busy ? '저장 중…' : '설정 완료'),
+          ),
+          TextButton(
+            onPressed: app.busy
+                ? null
+                : () => setState(() => _choosingActions = false),
+            child: const Text('방과 이름 다시 보기'),
+          ),
+        ] else
+          FilledButton(
+            onPressed: () => setState(() => _choosingActions = true),
+            child: const Text('맡길 일 고르기'),
+          ),
       ],
     );
+  }
+
+  Future<void> _finishDevices(List<DeviceDraft> drafts) async {
+    final app = widget.app;
+    final messenger = ScaffoldMessenger.of(context);
+    await app.finishDevices({
+      for (final draft in drafts) draft.device.id: draft.settings,
+    });
+    if (app.step == SetupStep.ready && messenger.mounted) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('설정을 마쳤어요. $homeHubPending')),
+      );
+    }
   }
 }
 

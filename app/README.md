@@ -2,9 +2,11 @@
 
 Owner: Yejoon Kim
 
-SPIRA's Android app receives shared order screenshots, shows the Server's
-preparation cards and rationale, and sends card Stop, line off/on, and household
-pause/resume. Settings contains this-home memory and case deletion.
+SPIRA's Android app guides first-time delegation, receives shared order
+screenshots, shows preparation cards and rationale, and sends card Stop, line
+off/on, and household pause/resume. **우리 집** shows devices by room, what
+each device is allowed to do, and preparation status from cards and rationale.
+Settings contains this-home memory and case deletion.
 
 ## Run locally
 
@@ -23,18 +25,21 @@ in debug builds.
 flutter run -d <android-device-id> --dart-define-from-file=.env
 ```
 
-If the peer returns 401, open the key button and enter the App's bearer token
-for that session. The token stays in memory. Keep tokens out of the Dart defines.
+If the peer requires a bearer token, open **설정** and choose **연결 코드 입력**.
+The token stays in memory for the session. Keep tokens out of the Dart defines.
 Use Android's share menu to send one to three JPG or PNG screenshots to SPIRA.
 
 Optional Dart defines:
 
 - `SPIRA_HOUSEHOLD_ID` opens an already created household, useful for a scripted
   fixture demo. Omit it to exercise initial setup.
-- `SPIRA_DISCOVERY_JSON` supplies a C-2 device manifest for reviewing available
-  actions. The demo can use `contracts/fixtures/ep_9031/devices.json`.
-  Selections stay on this device. The App contract has no discovery or
-  delegation-publishing route.
+- `SPIRA_DISCOVERY_JSON` takes the contents of a C-2 device manifest. To try
+  onboarding with the birthday example from `app/`, omit `SPIRA_HOUSEHOLD_ID`
+  and add
+  `--dart-define="SPIRA_DISCOVERY_JSON=$(cat ../contracts/fixtures/ep_9031/devices.json)"`
+  to the run command. After reviewing rooms and names, keep the suggested
+  delegation or change it. Reopen **우리 집** to review or edit those settings.
+  The local stand-in saves them on the phone.
 - `SPIRA_GOOGLE_CLIENT_ID` enables Google Calendar setup. Register
   `org.cse_spira.spira_app` and the build's signing SHA-1 as an Android OAuth
   client, enable Calendar API, and set the Web client ID used by the Android
@@ -76,6 +81,7 @@ delivery, process recreation, and TalkBack still require an Android runtime.
   Server projects that outcome.
 - App API has no pause status read route. Settings uses the last successful
   pause/resume response and shows an unknown state before one is available.
-- Creating a household returns a one-time Hub key. Hub provisioning and
-  publishing delegation require an agreed handoff. The App does not contact the
-  Hub or the Simulator.
+- Creating a household returns a one-time Hub key. The App uses a local
+  onboarding port until the Hub API specifies discovery, provisioning and the
+  handoff for publishing delegation. Preparation status still comes from the
+  App API.

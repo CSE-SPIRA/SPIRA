@@ -9,7 +9,7 @@ String lineLabel(wire.LineState state) => switch (state) {
   wire.LineState.FAILED => '실패',
   wire.LineState.UNKNOWN => '결과 확인 불가',
   wire.LineState.BLOCKED => '실행하지 못함',
-  wire.LineState.USER_CHANGED => '사용자가 변경함',
+  wire.LineState.USER_CHANGED => '사람이 바꿨어요',
   wire.LineState.OFF => '꺼짐',
   wire.LineState.STOPPED => '중지됨',
   wire.LineState.CANCELLED => '취소됨',
@@ -20,11 +20,11 @@ String? visibleLineLabel(wire.LineState state) =>
     state == wire.LineState.SCHEDULED ? null : lineLabel(state);
 
 String endLabel(wire.EndState state) => switch (state) {
-  wire.EndState.RESTORED => '이전 상태로 복원됨',
-  wire.EndState.KEPT_USER_CHANGE => '사용자가 바꾼 상태를 유지함',
-  wire.EndState.RESTORE_FAILED => '복원 실패 또는 결과 확인 불가',
+  wire.EndState.RESTORED => '이전 상태로 돌아갔어요',
+  wire.EndState.KEPT_USER_CHANGE => '사람이 바꾼 그대로 두었어요',
+  wire.EndState.RESTORE_FAILED => '이전 상태로 돌아가지 못했거나 확인할 수 없어요',
   wire.EndState.WITHHELD => '행사 끝을 확인하지 못해 안전 설정을 그대로 두었어요.',
-  wire.EndState.NONE => '복원 대상 없음',
+  wire.EndState.NONE => '되돌릴 설정이 없어요',
 };
 
 String eventLabel(wire.TriggerEvent event) => switch (event) {
@@ -40,26 +40,29 @@ String deviceLabel(String type) => switch (type) {
   'oven' => '오븐',
   'cooktop' => '인덕션',
   'fridge' => '냉장고',
-  'smart_plug' => '스마트 플러그',
+  'smart_plug' => '전원 플러그',
   'speaker' => '스피커',
-  _ => type,
+  _ => '기기',
 };
+
+String deviceKindLabel(wire.Substrate substrate) =>
+    substrate == wire.Substrate.VIRTUAL ? '가상 기기' : '실물 기기';
 
 String commandLabel(String command) => switch (command) {
   'clean' => '청소',
-  'color' => '조명 색상 설정',
-  'color_temp' => '조명 색온도 설정',
-  'play_mood' => '분위기 화면 재생',
+  'color' => '조명 색 바꾸기',
+  'color_temp' => '조명을 따뜻한 색이나 차가운 색으로 바꾸기',
+  'play_mood' => '분위기에 맞는 화면 켜기',
   'off' => '전원 끄기',
   'child_lock' => '어린이 잠금',
-  'set_cook_standby' => '조리 대기 설정',
-  'show_notice' => '안내 표시',
-  'play' => '재생',
-  'stop' => '정지',
-  'purchase' => '구매',
-  'heat' => '가열',
-  'start' => '조리 시작',
-  _ => command,
+  'set_cook_standby' => '오븐 온도와 시간 맞춰 두기',
+  'show_notice' => '화면에 안내 띄우기',
+  'play' => '음악 틀기',
+  'stop' => '음악 끄기',
+  'purchase' => '물건 사기',
+  'heat' => '불 켜기',
+  'start' => '굽기 시작하기',
+  _ => '기기 동작',
 };
 
 DateTime _seoulTime(String raw) =>

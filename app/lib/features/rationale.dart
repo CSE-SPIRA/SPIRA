@@ -37,7 +37,7 @@ class _RationaleScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('WHY · 준비 이유')),
+    appBar: AppBar(title: const Text('준비 이유')),
     body: FutureBuilder<wire.Rationale>(
       future: rationale,
       builder: (context, snapshot) {
