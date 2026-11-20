@@ -1,7 +1,7 @@
 // Reasoning uses the Server's app contract. House surfaces use World observations.
 import { createFlow } from "/demo/assets/flow.js";
 import { createHouse, DEVICES, hsvColor, TV_SCENES } from "/demo/assets/house.js";
-import { displayTime, storyTimeOffset } from "/demo/assets/story-time.js";
+import { displayTime, storyClock, storyLedgerTime, storyObservedTime, storyPlanTime } from "/demo/assets/story-time.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -12,6 +12,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const motion = matchMedia("(prefers-reduced-motion: reduce)");
 const WAYS = { run: "실행", standby: "설정 대기", notice: "안내" };
 const EVENTS = { guest_arrived: "손님이 오면", event_end: "행사가 끝나면", "package.brought_in": "택배를 들여오면" };
+const OCCURRENCES = { guest_arrived: "손님 도착", event_end: "행사 종료", "package.brought_in": "택배 들여옴" };
 const FIELDS = { event: "행사", guests: "손님", activity: "활동", theme: "테마" };
 const ICONS = {
   딸기: "❋", "컵케이크 믹스": "▤", 휘핑크림: "▣", "세탁 세제": "▥", 로션: "◒",
@@ -48,25 +49,27 @@ function notice(text = "") {
   $("notice").textContent = text;
 }
 
-function storyOffset(cardId) {
+function cardStory(cardId) {
   if (!state.rationale) return null;
   const cards = cardId ? state.cards.filter((card) => card.card_id === cardId) : state.cards;
   for (const card of cards) {
     const id = state.rationale.intents.find((intent) => intent.card_id === card.card_id)?.calendar_event_id;
     const event = state.rationale.evidence.calendar.find((entry) => entry.id === id);
-    const offset = storyTimeOffset(event, card.starts_at);
-    if (offset !== null) return offset;
+    const windows = state.hub?.guest_windows?.[card.episode_id];
+    const guestLine = card.lines.find((line) => line.when?.event === "guest_arrived" && windows?.[line.task_id]);
+    const story = storyClock(event, card.starts_at, windows?.[guestLine?.task_id]?.to, state.config.story_timing);
+    if (story) return story;
   }
   return null;
 }
 
 function demoTime(at, cardId) {
-  return displayTime(at, storyOffset(cardId));
+  return displayTime(at, cardStory(cardId)?.offset);
 }
 
 function whenText(when, cardId) {
   if (!when) return "시간을 기다리는 중";
-  return when.time ? demoTime(when.time, cardId) : EVENTS[when.event] || when.event;
+  return when.time ? displayTime(storyPlanTime(when.time, cardStory(cardId))) : EVENTS[when.event] || when.event;
 }
 
 function paintTheme(text, theme) {
@@ -177,7 +180,7 @@ function renderPhone(scene) {
   const order = scene.id === "share";
   const items = state.episode?.items;
   const timestamp = plan && state.cards[0]?.updated_at || state.episode?.shared_at;
-  $("phone-time").textContent = displayTime(timestamp, plan ? storyOffset() : null, false);
+  $("phone-time").textContent = displayTime(timestamp, plan ? cardStory()?.offset : null, false);
   $("phone-order").textContent = plan ? "준비" : "주문";
   $("phone-order").setAttribute("aria-pressed", String(!state.mapOpen));
   $("phone-map").setAttribute("aria-pressed", String(state.mapOpen));
@@ -298,11 +301,12 @@ function taskTiming(task) {
   const card = state.cards.find(({ card_id }) => card_id === task.card_id);
   const when = card?.lines.find(({ task_id }) => task_id === task.task_id)?.when;
   if (!when) return "";
-  const end = whenText(when, card.card_id);
-  if (!when.time || storyOffset(card.card_id) === null) return end;
-  const minutes = Math.round((Date.parse(card.starts_at) - Date.parse(when.time)) / 60000);
+  const story = cardStory(card.card_id);
+  if (!when.time || !story) return whenText(when, card.card_id);
+  const at = storyPlanTime(when.time, story);
+  const minutes = Math.round((story.storyStart - at) / 60000);
   const relative = minutes === 0 ? "같은 시각" : `${Math.abs(minutes)}분 ${minutes > 0 ? "전" : "후"}`;
-  return `${demoTime(card.starts_at, card.card_id)} 일정 → ${relative} → ${end}`;
+  return `${displayTime(story.storyStart)} 일정 → ${relative} → ${displayTime(at)}`;
 }
 
 function translation(tasks, intents) {
@@ -574,16 +578,27 @@ function planReceipt() {
   return latest((row) => row.kind === "plan" && row.plan_id === state.episodeId);
 }
 
+function safetyTask() {
+  return state.rationale?.tasks.find((task) => task.devices.some((device) => device.id === "cooktop_01"));
+}
+
 function houseTime(scene) {
   if (scene.id === "plan") return planReceipt()?.at;
   if (scene.event) return latest((row) => row.event_type === scene.event &&
     (!state.episode || Date.parse(row.at) >= Date.parse(state.episode.shared_at)))?.at;
   if (scene.id === "party") return state.cards.find((card) => card.starts_at)?.starts_at;
   if (scene.id === "before") {
-    const kitchenTask = state.rationale?.tasks.find((task) => task.devices.some((device) => device.id === "cooktop_01"));
-    return state.cards.flatMap((card) => card.lines).find((line) => line.task_id === kitchenTask?.task_id)?.when?.time;
+    const task = safetyTask();
+    return state.cards.find((card) => card.card_id === task?.card_id)?.lines
+      .find((line) => line.task_id === task.task_id)?.when?.time;
   }
   return null;
+}
+
+function houseStoryTime(scene, at = houseTime(scene)) {
+  if (scene.id === "before") return displayTime(storyPlanTime(at, cardStory(safetyTask()?.card_id)));
+  if (scene.id === "party") return demoTime(at, state.cards.find((card) => card.starts_at)?.card_id);
+  return storyObservedTime(at, cardStory(), OCCURRENCES[scene.event]);
 }
 
 function renderTimeline() {
@@ -592,7 +607,7 @@ function renderTimeline() {
   const current = scenes[state.homeStep];
   const at = houseTime(current);
   const arrived = current.id !== "plan" || at;
-  $("home-time").textContent = demoTime(at);
+  $("home-time").textContent = houseStoryTime(current, at);
   $("home-title").textContent = arrived ? current.heading : "집에서 이어지는 준비";
   $("home-caption").textContent = current.lead;
   $("home").setAttribute("aria-busy", String(state.homeBusy));
@@ -601,7 +616,7 @@ function renderTimeline() {
     ${index === state.homeStep ? 'aria-current="step"' : ""}
     ${index < state.homeStep ? 'class="past"' : ""}
     ${state.homeBusy || index > state.homeStep + 1 ? "disabled" : ""}>
-    <time>${esc(demoTime(houseTime(scene)))}</time><span>${esc(scene.title)}</span></button></li>`);
+    <time>${esc(houseStoryTime(scene))}</time><span>${esc(scene.title)}</span></button></li>`);
   if (steps.dataset.content !== markup) {
     const focused = steps.contains(document.activeElement);
     steps.dataset.content = markup;
@@ -663,12 +678,19 @@ function ledgerRows(ledger) {
 function renderLedger() {
   $("ledger-label").textContent = state.config.hub ? "이 집이 본 일" : "허브 연결 없음";
   const ledger = $("ledger");
-  const offset = storyOffset();
   const markup = rows(ledgerRows(state.ledger).reverse(), (row) => {
     const reports = row.reports || [];
     const sent = reports.length ? (reports.every(({ delivered }) => delivered) ? "서버에 보냄" : "보내는 중") : "";
     const source = row.kind === "event" && row.device && row.by === "unknown" ? "기기 보고" : BY[row.by] || row.by;
-    return `<li class="ledger-row"><div><time datetime="${esc(row.at)}">${esc(displayTime(row.at, offset, offset !== null))}</time>
+    const planId = row.timing?.plan_id ?? row.plan_id;
+    const card = state.cards.find(({ lines }) => lines.some((line) => line.task_id === row.timing?.task_id));
+    let story = cardStory();
+    if (state.config.story_timing) {
+      story = !planId || planId === state.episodeId ? cardStory(card?.card_id) : null;
+    }
+    const label = OCCURRENCES[row.event_type ?? row.timing?.event];
+    const time = storyLedgerTime(row, story, label);
+    return `<li class="ledger-row"><div><time datetime="${esc(row.at)}">${esc(time)}</time>
       <strong>${row.label === "—" ? "" : esc(row.label) + " · "}${esc(row.what)}</strong>
       <span class="pill actor">${esc(source)}</span></div>
       ${sent ? `<p><span class="sent">${sent}</span></p>` : ""}</li>`;
@@ -864,6 +886,7 @@ async function boot() {
   [state.config, state.scenes] = await Promise.all([api("/demo/api/config"), api("/demo/assets/scenes.json")]);
   state.flow = createFlow($("route-list"), state.scenes.flow);
   $("fixture").hidden = !state.config.fixture;
+  $("compressed-time").hidden = !state.config.story_timing;
   $("orders").addEventListener("click", (event) => {
     const button = event.target.closest("[data-order]");
     if (button) chooseOrder(button.dataset.order);

@@ -116,7 +116,8 @@ def main():
                WORLD_PLANS=f"{urls['fixture']}/v1/hub/plans?household={HOUSEHOLD}", WORLD_PLANS_TOKEN=hub_key,
                WORLD_HUB_STATE_URL=f"{urls['hub']}/state",
                WORLD_DEMO="1", DEMO_SERVER_URL=urls["fixture"], DEMO_APP_TOKEN=APP_TOKEN,
-               DEMO_HUB_URL=urls["hub"], DEMO_FIXTURE_EPISODE=args.episode, DEMO_STARTS_IN=str(args.starts_in))
+               DEMO_HUB_URL=urls["hub"], DEMO_FIXTURE_EPISODE=args.episode, DEMO_STARTS_IN=str(args.starts_in),
+               DEMO_NUMBERS_PATH=str(ROOT / "server/config/numbers.yaml"))
         wait("Simulator", lambda: call(urls["sim"] + "/health")["mqtt"]["connected"])
         wait("Hub", lambda: call(urls["hub"] + "/health")["device_online"], seconds=30)
 

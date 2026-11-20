@@ -52,9 +52,10 @@ Rules the demo keeps:
   run commands from received plans supply the device count and settings. The
   handoff swatch uses the matching plan's light colour. Fixture judgments are
   labelled 예시 판단 in the header.
-- Plan, card, timeline and ledger timestamps use the offset from the linked
-  rationale calendar start to the card start. This display shift preserves the
-  Server's lead times, including the shorter lead times in `DEMO_MODE`.
+- Plan, card, timeline and ledger times use the linked rationale calendar for
+  display. In `DEMO_MODE`, scheduled leads and fallback times show the normal
+  Server values. Live events keep their offset from the start where it fits the
+  restored schedule, and otherwise use an event or relative-time label.
 - Three.js 0.160.0 is vendored (`three.module.min.js`, `orbit-controls.js`), so the
   demo runs without network.
 
@@ -67,3 +68,4 @@ Rules the demo keeps:
 | `DEMO_FIXTURE_EPISODE` | Fixture only: the default recorded judgment for a screenshot share |
 | `DEMO_STARTS_IN` | Fixture only: seconds from share to the event start (default 90) |
 | `DEMO_HUB_URL` | Hub for received plan actions and the ledger (`/state`) |
+| `DEMO_NUMBERS_PATH` | Path to the Server's `config/numbers.yaml` when using `DEMO_MODE=1` |

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Literal
 
 import httpx
+import yaml
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from spira_contracts.plan import Action
@@ -31,6 +32,7 @@ SERVER_READS = (
 )
 SAMPLE_EPISODES = {"birthday": "ep_9031", "groceries": "ep_9150"}
 COMMAND_PROPERTIES = {"color": "color", "play_mood": "play_mood", "set_cook_standby": "preset"}
+STORY_TIMING_KEYS = ("before_start_default_min", "guest_window_before_min", "end_fallback_min")
 
 
 def demo_config():
@@ -40,6 +42,20 @@ def demo_config():
         "hub": (os.getenv("DEMO_HUB_URL") or "").rstrip("/"),
         "fixture_episode": os.getenv("DEMO_FIXTURE_EPISODE") or "",
     }
+
+
+def story_timing():
+    path = os.getenv("DEMO_NUMBERS_PATH")
+    if not path:
+        return None
+    try:
+        numbers = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+        timing = {key: {"normal": numbers[key], "demo": numbers["demo"][key]} for key in STORY_TIMING_KEYS}
+    except (OSError, ValueError, yaml.YAMLError, KeyError, TypeError):
+        return None
+    if any(type(value) is not int or value < 0 for pair in timing.values() for value in pair.values()):
+        return None
+    return timing
 
 
 def same_origin(request: Request):
@@ -80,6 +96,54 @@ def received_actions(body: dict) -> dict:
     return plans
 
 
+def story_ledger(body: dict) -> tuple[list, dict]:
+    """Join ledger rows to the Hub's recorded schedule and trigger evidence for display."""
+    operations, restores, guest_windows = {}, {}, {}
+    for story in body.get("task_stories", []):
+        plan_id, task_id = story["plan_id"], story["task_id"]
+        context = {"plan_id": plan_id, "task_id": task_id}
+        trigger, triggered, end = {}, {}, {}
+        for step in story["steps"]:
+            kind = step["kind"]
+            if kind == "waiting":
+                trigger = step["trigger"]
+                if trigger.get("event") == "guest_arrived" and trigger.get("window"):
+                    guest_windows.setdefault(plan_id, {})[task_id] = trigger["window"]
+            elif kind == "triggered":
+                triggered = step
+            elif kind == "end":
+                end = step
+            elif kind == "restore_result":
+                restores[step["result_id"]] = end_timing(context, end, step["at"])
+            elif operation := step.get("operation_id"):
+                if step.get("phase") == "run":
+                    how = triggered.get("how")
+                    scheduled = trigger.get("time") if how in (None, "unknown") else None
+                    if how == "time":
+                        scheduled = triggered["at"]
+                    operations[operation] = dict(
+                        context, scheduled_at=scheduled, anchor="start", observed_at=step["at"],
+                        event=triggered.get("event_type", trigger.get("event")),
+                    )
+                elif step.get("phase") == "restore":
+                    operations[operation] = end_timing(context, end, step["at"])
+
+    ledger = []
+    for row in body.get("ledger", []):
+        timing = operations.get(row.get("operation_id"))
+        if row["kind"] == "restore" and not timing:
+            timing = next((restores[report["id"]] for report in row.get("reports", [])
+                           if report["kind"] == "restore" and report["id"] in restores), None)
+        ledger.append(dict(row, timing=timing) if timing else row)
+    return ledger, guest_windows
+
+
+def end_timing(context, end, observed_at):
+    scheduled = end.get("at") if end.get("rule") in ("time", "or_time") else None
+    return dict(context, scheduled_at=scheduled, anchor="end", observed_at=observed_at,
+                event=end.get("event_type"))
+
+
 def mount_demo(application: FastAPI, apply_home_event):
     fixture_share = asyncio.Lock()
 
@@ -102,6 +166,7 @@ def mount_demo(application: FastAPI, apply_home_event):
             "server": bool(cfg["server"]),
             "hub": bool(cfg["hub"]),
             "fixture": bool(cfg["fixture_episode"]),
+            "story_timing": story_timing(),
         }
 
     @application.get("/demo/api/server/{path:path}")
@@ -174,8 +239,9 @@ def mount_demo(application: FastAPI, apply_home_event):
             body = upstream.json()
         except (httpx.HTTPError, ValueError) as error:
             raise HTTPException(502, "Hub state is unavailable") from error
+        ledger, guest_windows = story_ledger(body)
         return {
-            "ledger": body.get("ledger", []), "waiting": body.get("waiting", []),
+            "ledger": ledger, "waiting": body.get("waiting", []), "guest_windows": guest_windows,
             "plan_actions": received_actions(body),
         }
 
