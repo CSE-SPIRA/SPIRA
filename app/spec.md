@@ -27,8 +27,10 @@ PC-3, PC-5, PC-6)
 **P-R2.** The App MUST derive product state only from contract values received
 from the Server and MUST distinguish observed results from acknowledgements,
 unknown facts from success, and virtual, physical, fixture, and real-Server
-qualification. It MUST NOT read or control the Hub or Simulator directly.
-(PC-4, PC-5)
+qualification. It MUST NOT read or control the Simulator, and MUST NOT control
+devices. Its only direct Hub interaction is the home-network onboarding of A2
+(device discovery, rooms, names, delegation); every other Hub fact reaches the
+App through the Server. (PC-4, PC-5)
 
 **P-R3.** Until the real Server implements the App contract, the local App peer
 MUST be the contract fixture Server at `hub/tests/fixture_server`. A run against
@@ -44,6 +46,12 @@ household types, and connect Google Calendar or skip it. These values are inputs
 to Server judgment, not App inference. This setup is the App's single delegation
 flow. (PC-1, PC-3)
 
+**A1-R2.** Before household creation, setup MUST show one start screen saying
+that SPIRA prepares the home ahead of time from shared orders and the calendar,
+acts only within the devices and actions the user delegates, and can be stopped
+at any time. It MUST NOT describe SPIRA as asking for approval per preparation.
+(PC-3)
+
 ### A2. Devices and delegated actions
 
 **A2-R1.** For each discovered device, setup MUST distinguish discovery from
@@ -51,6 +59,20 @@ delegation, identify its room, type, and virtual or physical substrate, and let
 the user choose delegated `commands` and non-delegated `never` actions. The App
 MUST NOT represent an undisclosed or unselected action as delegated. (PC-3,
 PC-5)
+
+**A2-R2.** Setup MUST let the user confirm or change each discovered device's room
+and display name before delegation. Discovered rooms MUST NOT be presented as
+confirmed; a device without a room is shown as "방을 골라 주세요". (PC-3)
+
+**A2-R3.** Delegation MUST start from defaults taken from the device list: every
+listed command delegated, every `never` action shown as not delegated and not
+selectable ("하지 않아요"). The user changes only what they want. (PC-3, PC-5)
+
+**A2-R4.** Discovery and the confirmed rooms, names and delegation MUST go
+through a Home Hub onboarding port in the home network. Until the Hub onboarding
+API is specified in hub/spec.md, the App MUST use a local stand-in that reads
+the manifest given in `SPIRA_DISCOVERY_JSON` and keeps the result on the phone,
+and MUST say plainly that it has not reached the home hub yet. (PC-3)
 
 ### A3. Shared orders
 
@@ -151,6 +173,25 @@ case. The App MUST refresh or otherwise observe Server confirmation before
 showing a deletion as complete; it MUST NOT offer memory editing or preference
 authoring. (PC-6)
 
+### A10. Our home
+
+**A10-R1.** "우리 집" MUST list rooms and their devices; for each device, the
+delegated and not-delegated actions; and what SPIRA currently holds on that
+device. Holding MUST be derived only by regrouping current card lines and the
+rationale's line -> device (room, type) mapping with their contract states (e.g.
+"잠금 중 · 생일 준비"; "사람이 바꿈 · 그대로 둬요"); the App MUST NOT infer device
+state otherwise. It MUST NOT offer device control. Tapping a device opens its
+room/name/delegation editing (A2) and the preparation lines that used it.
+(PC-3, PC-4, PC-5)
+
+### A11. Plain language
+
+**A11-R1.** User screens MUST NOT show engineering terms: raw device types
+(`smart_plug`), "위임 유보", contract or server names. The fixture/real-Server
+qualification required by P-R2/P-R3 stays visible but in plain words (e.g.
+"시연용 연결") and connection tokens are entered from settings, not as the first
+thing a new user sees. (PC-3)
+
 ## 3. Acceptance catalogue
 
 All tests observe the App through its rendered UI, Android OS boundary, or the
@@ -172,8 +213,14 @@ exits.
 | APP-AT-11 | Render the `ep_9031`-shaped rationale containing intent/situation basis, calendar evidence, `unbundled`, task need/device/state, `unusual_items`, `kb_counts`, and `kb_examples`. WHY shows only the A6-R1 whitelist and a second open does not cause an inference request. | PC-1, PC-2 | A6-R1 |
 | APP-AT-12 | Render the plain-groceries episode with `card_ids: []` and item guidance through unreleased, released, and closed states. No preparation card is fabricated, and the guidance lifecycle remains visible. | PC-1, PC-2 | A3-R2, A7-R1 |
 | APP-AT-13 | From settings, open memory, view Server rows, delete one case with a failed response and then a successful response/readback. No edit controls exist; failure remains visible; deletion is claimed only after Server confirmation. | PC-6 | A9-R1 |
-| APP-AT-14 | Run the same scene against the local fixture peer and against a qualified Server profile. Fixture qualification is visible and never presented as real-Server, physical-device, or native-lifecycle evidence; no App request reaches Hub or Simulator endpoints. | PC-4 | P-R2, P-R3 |
+| APP-AT-14 | Run the same scene against the local fixture peer and against a qualified Server profile. Fixture qualification is visible and never presented as real-Server, physical-device, or native-lifecycle evidence; only A2 onboarding may directly interact with the Hub, and no App request reaches the Simulator or controls devices. | PC-4 | P-R2, P-R3 |
 | APP-AT-15 | With Android large text and a screen reader enabled, locate and operate card Stop, pre-start line off/on, and settings pause. Each scope and pending/confirmed result is identifiable without color alone. | PC-5 | A5-R1, A5-R2, A5-R3 |
+| APP-AT-16 | Open a fresh App and read the start screen before creating the household. It explains preparation from shared orders and the calendar, the scope of what the user delegates, and the ability to stop at any time. No per-preparation approval is promised. | PC-3 | A1-R2 |
+| APP-AT-17 | Discover devices with and without room suggestions. Review each suggested room and name, see "방을 골라 주세요" for a missing room, and confirm or change both fields before moving to delegation. Suggestions are visibly unconfirmed. | PC-3 | A2-R2 |
+| APP-AT-18 | Open delegation after reviewing devices. Each listed command starts selected, each `never` action says "하지 않아요" and cannot be selected, and changing one command leaves the other defaults intact. | PC-3, PC-5 | A2-R3 |
+| APP-AT-19 | Start with a discovery manifest, save edited rooms, names and delegation, then reopen the App. The onboarding port's stand-in retains the settings on the phone and displays that they have yet to reach the home hub. The App sends no onboarding HTTP requests. | PC-3 | A2-R4, P-R2 |
+| APP-AT-20 | Open "우리 집" from the main screen. Rooms group their devices with both kinds of actions and current card states joined through rationale. Refresh with changed, ended, or missing line evidence. No device state is inferred, and tapping a device allows settings edits and shows related preparation lines without device controls. | PC-3, PC-4, PC-5 | A10-R1 |
+| APP-AT-21 | Review setup, settings, preparations, and "우리 집" in both connection profiles, including a device with an unknown type. Qualification stays visible in everyday language, raw technical terms are absent, and token entry is accessible through settings only. | PC-3 | A11-R1 |
 
 ## 4. Open items
 
