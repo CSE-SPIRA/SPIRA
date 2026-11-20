@@ -81,8 +81,9 @@ def property_words(prop, value):
 def run_words(cmd, value, status):
     if cmd == "clean":
         what = "청소 끝" if status == "completed" else "청소 시작" if status == "running" else "청소"
-    elif cmd in ("child_lock", "off", "stop", "show_notice"):
-        what = {"child_lock": "잠금", "off": "끔", "stop": "멈춤", "show_notice": "안내 표시"}[cmd]
+    elif cmd in ("child_lock", "off", "stop", "show_notice", "clear_notice"):
+        what = {"child_lock": "잠금", "off": "끔", "stop": "멈춤",
+                "show_notice": "안내 표시", "clear_notice": "안내 지움"}[cmd]
     else:
         prop = {"set_cook_standby": "preset"}.get(cmd, cmd)
         what = property_words(prop, value) or f"{cmd} 요청"

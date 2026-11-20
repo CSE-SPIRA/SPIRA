@@ -353,6 +353,11 @@ class Runtime:
         current = self.target(action)
         if not current or current[2] != attempt["epoch"]:
             return False
+        # Clearing an already empty slot may be acknowledged without a transition.
+        if (attempt.get("notice_end") and observation["available"] and not observation["local_operation"]
+                and same_values(before, desired) and same_values(observation, desired)
+                and witnesses(observation, desired) == witnesses(before, desired)):
+            return observation["operation_id"] in (None, attempt["op"])
         if (not observation["available"] or observation["world_revision"] <= before["world_revision"]
                 or observation["local_operation"]
                 or not no_earlier_than(observation["observed_at"], offset_time(attempt["sent_at"]))
@@ -378,7 +383,7 @@ class Runtime:
             translated = {"completed": "restored", "unverifiable": "unknown", "running": "unknown"}
             self.record_restore(attempt, translated.get(status, status))
             return
-        if status in ("completed", "running"):
+        if status in ("completed", "running") and not attempt.get("notice_end"):
             task = self.store.task(attempt["plan"], attempt["task"])
             if task["cancel"] is not False:
                 attempt["claims"] = claims_for(attempt)
@@ -447,7 +452,8 @@ class Runtime:
         if task["closed"] == "final":
             return
         attempts = [attempt for attempt in self.store.attempts(task=task)
-                    if attempt["kind"] == "run" and attempt["before"] is not None]
+                    if attempt["kind"] == "run" and not attempt.get("notice_end")
+                    and attempt["before"] is not None]
         triggered = offset_time(task["triggered_at"]) if attempts else None
         now = self.clock()
         match = end_match(self.store, task, now, started_at=triggered)
@@ -457,6 +463,9 @@ class Runtime:
         end = match["disposition"]
         if not attempts or end == "relinquished":
             self.close_task(task)
+            return
+        if end == "clear_notice":
+            await self.finish_notice(task, attempts, triggered)
             return
         if end == "withheld_end_not_observed":
             task["closed"] = end
@@ -492,6 +501,47 @@ class Runtime:
                  for device, outcomes in by_device.items()]
         done = all(attempt["op"] in current["restore_items"] for attempt in attempts)
         self.report_restore(current, "observed_end" if done else "waiting_for_read", items, close=done)
+
+    async def finish_notice(self, task, attempts, triggered):
+        sources = [attempt for attempt in attempts
+                   if attempt["action"]["device"] == "fridge_01"
+                   and attempt["action"]["cmd"] == "show_notice" and attempt["status"] != "failed"]
+        sent = {attempt["action_key"] for attempt in self.store.attempts(task=task)}
+        action = Action(device="fridge_01", cmd="clear_notice")
+        for original in sources:
+            key = "end/" + original["op"]
+            if key in sent:
+                continue
+            active = self.target(action)
+            if active and not active[3]:
+                await self.discover()
+                active = self.target(action)
+            generation = self.device.generation
+            before = await self.read(original["target"]) if active and active[2] == original["epoch"] else None
+            self.reload_installation()
+            task = self.store.task(task["plan"], task["id"])
+            if end_status(self.store, task, self.clock(), started_at=triggered) != "clear_notice":
+                return
+            active = self.target(action)
+            # The protocol represents the no-value command as a null notice slot.
+            desired = {"show_notice": None}
+            expected = witnesses(before, desired) if before else {}
+            attempt = self.attempt(task, key, action, active, before=before, desired=desired)
+            attempt.update(notice_end=True, substrate=original["substrate"])
+            writable = (not self.config_error and active and active[2] == original["epoch"]
+                        and generation == self.device.generation and before and before["available"]
+                        and active[3] and "clear_notice" in active[3].commands
+                        and "clear_notice" not in active[0].never and expected
+                        and desired.keys() <= before["values"].keys())
+            with self.store.db:
+                self.store.reserve(attempt)
+                if not writable:
+                    self.run_result(attempt, "unknown")
+            if writable:
+                await self.apply(attempt, expected, generation)
+        current = self.store.task(task["plan"], task["id"])
+        if end_status(self.store, current, self.clock(), started_at=triggered) == "clear_notice":
+            self.close_task(current)
 
     def record_end(self, task, match, now):
         history = task.setdefault("end_evidence", [])

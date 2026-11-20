@@ -153,6 +153,13 @@ def end_status(store, task, now, *, started_at=None):
     return match["disposition"] if match else None
 
 
+def notice_end(task):
+    body = task["body"]
+    return (body["source"] == "item" and body["way"] == "notice"
+            and any(action["device"] == "fridge_01" and action["cmd"] == "show_notice"
+                    for action in body["actions"]))
+
+
 def end_match(store, task, now, *, started_at=None):
     """Return the lifecycle disposition and the condition that selected it."""
     end = task["body"]["end"]
@@ -163,6 +170,7 @@ def end_match(store, task, now, *, started_at=None):
     if task["closed"] == "withheld_end_not_observed":
         return None
 
+    clear_notice = notice_end(task)
     absolute = end.get("or_time", end.get("time"))
     deadline = offset_time(absolute) if absolute else None
     rule = "or_time" if "or_time" in end else "time"
@@ -171,9 +179,12 @@ def end_match(store, task, now, *, started_at=None):
         if deadline is None or relative < deadline:
             deadline, rule = relative, "or_after"
     if started_at and end.get("on"):
-        earliest = max(offset_time(task["admitted_at"]), started_at)
+        # A door opening can reach the Hub before the Server's release version.
+        notice_open = clear_notice and end["on"] == "fridge.door_opened"
+        earliest = started_at if notice_open else max(offset_time(task["admitted_at"]), started_at)
+        frontier = 0 if notice_open else task["frontier"]
         devices = {action["device"] for action in task["body"]["actions"]}
-        for row in store.facts(after=task["frontier"], earliest=earliest.timestamp()):
+        for row in store.facts(after=frontier, earliest=earliest.timestamp()):
             event = json.loads(row["body"])
             if event["type"] != end["on"]:
                 continue
@@ -184,6 +195,8 @@ def end_match(store, task, now, *, started_at=None):
             if end.get("by") and event["payload"].get("by") != end["by"]:
                 continue
             at = offset_time(event["at"])
+            if notice_open and at <= started_at:
+                continue
             if at > now or (deadline is not None and at > deadline):
                 break
             if "after" in end:
@@ -192,10 +205,13 @@ def end_match(store, task, now, *, started_at=None):
                 return None
             return {"at": at.isoformat(), "how": "event", "event_type": event["type"],
                     "event_id": event["event_id"], "event_at": event["at"], "source": event["source"],
-                    "disposition": "restore" if end["restore"] else "relinquished"}
+                    "disposition": ("clear_notice" if clear_notice else
+                                    "restore" if end["restore"] else "relinquished")}
     if deadline is not None and deadline <= now:
         disposition = "relinquished"
-        if end["restore"]:
+        if clear_notice:
+            disposition = "clear_notice"
+        elif end["restore"]:
             disposition = "withheld_end_not_observed" if task["body"].get("protective") else "restore"
         return {"at": deadline.isoformat(), "how": "time" if rule == "time" else "fallback",
                 "rule": rule, "disposition": disposition}

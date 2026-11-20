@@ -228,6 +228,8 @@ class World:
             if not self.unchanged:
                 kind = native.spec["device_type"]
                 values = body["desired"].copy()
+                if kind == "fridge" and all(native.values[key] == value for key, value in values.items()):
+                    return dict(status=status, operation_id=operation, job_id=None)
                 event = None
                 if kind == "cleaner":
                     values["in_use"] = values["clean"] is not None

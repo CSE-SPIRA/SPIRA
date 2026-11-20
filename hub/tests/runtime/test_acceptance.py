@@ -1138,6 +1138,7 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
         hub.world.native["mqtt:fridge_01"].spec.update(
             local_operation_reporting=True, assumption="Virtual panel assumed",
         )
+        hub.world.native["mqtt:fridge_01"].spec["capabilities"]["commands"].append("clear_notice")
         hub.boot()
         await hub.runtime.discover()
         assert await hub.runtime.refresh()
@@ -1161,6 +1162,8 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
         await hub.cycle()
         at("2026-10-16T18:07:44+09:00")
         hub.world.change("mqtt:fridge_01", {}, event="fridge.door_opened", local=True)
+        await hub.cycle()
+        at("2026-10-16T20:07:44+09:00")
         await hub.cycle()
         at("2026-10-17T13:30:00+09:00")
         await hub.cycle()
@@ -1202,6 +1205,8 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
             ("냉장고", "안내 표시", "spira", ["run", "event"]),
             ("냉장고", "안내 표시", "spira", ["run", "event"]),
             ("냉장고", "문 열림", "user", ["event"]),
+            ("냉장고", "안내 지움", "spira", ["run", "event"]),
+            ("냉장고", "안내 지움", "spira", ["run"]),
             ("인덕션", "잠금", "spira", ["run", "event"]),
             ("전기포트", "끔", "spira", ["run", "event"]),
             ("현관", "손님 도착", "hub", ["event"]),
@@ -1216,14 +1221,15 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
             ("TV", "되돌림 → 꺼짐", "spira", ["restore", "event"]),
             ("조명", "그대로 (사람이 바꿈)", "hub", ["restore"]),
         ]
-        assert ledger[12]["acknowledgement"]["status"] == "ACCEPTED"
-        assert ledger[12]["read_back"]["preset"] == {"temp_c": 170, "minutes": 20}
+        oven = next(row for row in ledger if row["what"] == "170° 20분 대기")
+        assert oven["acknowledgement"]["status"] == "ACCEPTED"
+        assert oven["read_back"]["preset"] == {"temp_c": 170, "minutes": 20}
         assert ledger[-1]["status"] == "skipped_user_changed"
         reports = [report for row in ledger for report in row["reports"]]
         assert all(report["delivered"] and report["delivery_error"] is None for report in reports)
         receipts = await hub.receipts()
         events = {event["event_id"]: event for batch in receipts["events"] for event in batch}
-        assert [events[row["reports"][0]["id"]]["payload"]["by"] for row in ledger[13:15]] == ["user", "user"]
+        assert [events[row["reports"][0]["id"]]["payload"]["by"] for row in ledger[15:17]] == ["user", "user"]
         assert {report["id"] for report in reports if report["kind"] == "event"} == events.keys()
         assert {report["id"] for report in reports if report["kind"] in {"run", "restore"}} == {
             item["result_id"] for item in receipts["executions"]
