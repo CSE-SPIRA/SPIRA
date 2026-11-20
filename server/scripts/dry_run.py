@@ -22,7 +22,7 @@ import os
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -90,7 +90,8 @@ class RecordingProvider:
 
     def complete(self, **kw):
         started = time.monotonic()
-        entry = {"stage": kw["stage"], "system_chars": len(kw["system"]), "user": kw["user"],
+        entry = {"stage": kw["stage"], "enforce_schema": kw.get("enforce_schema", True),
+                 "system_chars": len(kw["system"]), "user": kw["user"],
                  "images": len(kw["images"])}
         try:
             reply = self.inner.complete(**kw)
@@ -117,7 +118,7 @@ def run(images_dir: Path, home_path: Path, kb: str, now: datetime | None, out_di
 
     _settings.cache_clear()
     from fastapi.testclient import TestClient
-    from sqlalchemy import select
+    from sqlalchemy import func, select
 
     from spira_server import clock
     from spira_server.config import get_config
@@ -143,12 +144,13 @@ def run(images_dir: Path, home_path: Path, kb: str, now: datetime | None, out_di
     out.mkdir(parents=True, exist_ok=True)
 
     _migrate()
+    with session_scope() as s:                       # only this run's LLM calls go to llm_calls.jsonl and the checks
+        first_call_id = (s.execute(select(func.max(LlmCall.id))).scalar() or 0) + 1
     llm = llm_client.get_llm()
     recorder = RecordingProvider(llm.provider)
     llm.provider = recorder
     run_clock = clock.MovableClock(now or clock.now())
     clock.set_now(run_clock)
-    started_at = run_clock.at
 
     print(f"[dry run] {images_dir.name}: {len(pictures)} image(s), KB_MODE={kb}, now={clock.iso(run_clock.at)}, "
           f"LLM={settings.llm_provider}/{settings.llm_model}, EMBED_MODE={settings.embed_mode}")
@@ -232,8 +234,7 @@ def run(images_dir: Path, home_path: Path, kb: str, now: datetime | None, out_di
         cards = [card_body(s, c, run_clock.at) for c in s.execute(select(Card).where(Card.episode_id == episode_id)
                                                                   .order_by(Card.ordinal)).scalars()]
         dump(out / "card.json", cards)
-        calls = s.execute(select(LlmCall).where(LlmCall.created_at >= started_at - timedelta(hours=1))
-                          .order_by(LlmCall.id)).scalars().all()
+        calls = s.execute(select(LlmCall).where(LlmCall.id >= first_call_id).order_by(LlmCall.id)).scalars().all()
         (out / "llm_calls.jsonl").write_text("".join(json.dumps(
             {"stage": c.stage, "episode_id": c.episode_id, "provider": c.provider, "model": c.model,
              "input_tokens": c.input_tokens, "output_tokens": c.output_tokens, "latency_ms": c.latency_ms,

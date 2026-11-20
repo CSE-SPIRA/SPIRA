@@ -5,8 +5,10 @@
                              check=format_check, retry_template=prompts.text("s3_retry.txt"), default=None)
 
 A provider returns parsed JSON; `LLM.structured` turns refusals, empty or unparseable answers and schema failures into
-`FormatError`. `call_with_retry` tries twice, appends the stage's retry text listing only the errors, falls back to the
-stage default, and writes one `llm_calls` row.
+`FormatError`. With `enforce_schema=False` (S4, spec §6.1) the provider does not ask for constrained output: it appends
+the JSON schema to the system prompt as text (`schema_block`) and the stage validates the answer as usual.
+`call_with_retry` tries twice, appends the stage's retry text listing only the errors, falls back to the stage default,
+and writes one `llm_calls` row.
 """
 
 from __future__ import annotations
@@ -50,7 +52,28 @@ class Provider(Protocol):
     model: str
 
     def complete(self, *, stage: str, system: str, user: str, json_schema: dict, schema_name: str,
-                 images: Sequence[bytes], timeout_s: int) -> RawReply: ...
+                 images: Sequence[bytes], timeout_s: int, enforce_schema: bool = True) -> RawReply: ...
+
+
+SCHEMA_HEADER = ("[답 JSON 스키마]\n"
+                 "답은 아래 JSON 스키마를 그대로 따르는 JSON 객체 하나다. "
+                 "앞뒤에 다른 글이나 코드 블록 표시(```)를 쓰지 않는다.")
+
+
+def schema_block(json_schema: dict) -> str:
+    """The schema as prompt text, for calls without constrained output (appended to the system prompt)."""
+    return SCHEMA_HEADER + "\n" + json.dumps(json_schema, ensure_ascii=False, separators=(",", ":"))
+
+
+def parse_json_text(text: str) -> Any:
+    """JSON from a text answer. Prose or a ```json fence around one object is cut away (first "{" to last "}")."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start == -1 or end <= start:
+            raise
+        return json.loads(text[start:end + 1])
 
 
 def pydantic_errors(e: ValidationError) -> list[str]:
@@ -75,12 +98,14 @@ class LLM:
         self.last_usage = Usage()
 
     def structured(self, *, stage: str, system: str, user: str, schema: type[BaseModel],
-                   images: Sequence[bytes] = (), episode_id: str | None = None, raw: bool = False) -> BaseModel | dict:
+                   images: Sequence[bytes] = (), episode_id: str | None = None, raw: bool = False,
+                   enforce_schema: bool = True) -> BaseModel | dict:
         """One provider call. Raises LLMTimeout / LLMError / FormatError."""
         started = time.monotonic()
         reply = self.provider.complete(
             stage=stage, system=system, user=user, json_schema=schema.model_json_schema(),
             schema_name=schema.__name__, images=list(images), timeout_s=self.timeout_s,
+            enforce_schema=enforce_schema,
         )
         self.last_usage = Usage(reply.input_tokens or 0, reply.output_tokens or 0,
                                 int((time.monotonic() - started) * 1000))
@@ -89,7 +114,7 @@ class LLM:
         data = reply.data
         if data is None and reply.text:
             try:
-                data = json.loads(reply.text)
+                data = parse_json_text(reply.text)
             except json.JSONDecodeError:
                 raise FormatError(["JSON이 아니다. 스키마에 맞는 JSON 하나로만 답해야 한다."]) from None
         if not isinstance(data, dict) or not data:
@@ -118,7 +143,8 @@ def retry_text(template: str, errors: list[str]) -> str:
 def call_with_retry(llm: LLM, *, stage: str, system: str, user: str, schema: type[BaseModel],
                     retry_template: str, default: Any, images: Sequence[bytes] = (),
                     episode_id: str | None = None, raw: bool = False,
-                    check: Callable[[Any], list[str]] | None = None, max_attempts: int = 2) -> CallResult:
+                    check: Callable[[Any], list[str]] | None = None, max_attempts: int = 2,
+                    enforce_schema: bool = True) -> CallResult:
     """Spec §6.2: never ask, never block. Writes one llm_calls row."""
     total = Usage()
     outcome, errors = "error", []
@@ -127,7 +153,7 @@ def call_with_retry(llm: LLM, *, stage: str, system: str, user: str, schema: typ
     for attempt in range(1, max_attempts + 1):
         try:
             out = llm.structured(stage=stage, system=system, user=message, schema=schema, images=images,
-                                 episode_id=episode_id, raw=raw)
+                                 episode_id=episode_id, raw=raw, enforce_schema=enforce_schema)
             errors = check(out) if check else []
         except LLMTimeout:
             outcome, errors = "timeout", []

@@ -17,7 +17,7 @@ dependencies = [
   "pyyaml>=6",
   "jsonschema>=4.23",
   "referencing>=0.35",
-  "anthropic>=0.40",
+  "anthropic>=2.12",
   "openai>=1.50",
   "google-genai>=1.0",
 ]

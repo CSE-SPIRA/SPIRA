@@ -134,3 +134,28 @@ def test_parse_answer():
     assert dry_run.parse_answer("딸기 · 2\n컵케이크 믹스 · ?\n감기약 · 1 · 가림\n제외: 메모\n\n") == [
         {"name": "딸기", "qty": 2, "masked": False}, {"name": "컵케이크 믹스", "qty": None, "masked": False},
         {"name": "감기약", "qty": 1, "masked": True}]
+
+
+def test_earlier_runs_are_not_counted(tmp_path, env):
+    """A failed run before must not fail the next run's LLM check (dry run A, 11-21: llm_calls of the last hour)."""
+    env(KB_MODE="off")
+    canned = _canned()
+    canned["cal"] = {"events": [{"id": "c1", "tags": ["병원"]}]}
+    llm_client.set_llm(llm_client.LLM(StageProvider(canned)))
+    home = str(SERVER_DIR / "dev" / "home.example.yaml")
+    first = tmp_path / "first"
+    first.mkdir()
+    dry_run.main(["--images", str(_folder(first, None)), "--home", home, "--now", "2026-10-15T21:00:08+09:00",
+                  "--out", str(tmp_path / "out1")])
+    llm_client.set_llm(llm_client.LLM(StageProvider(_canned())))
+    second = tmp_path / "second"
+    second.mkdir()
+    out = tmp_path / "out2"
+    code = dry_run.main(["--images", str(_folder(second, ANSWER)), "--home", home,
+                         "--now", "2026-10-15T21:00:08+09:00", "--out", str(out)])
+    checks = (out / "checks.txt").read_text(encoding="utf-8")
+    assert code == 0, checks
+    calls = [json.loads(x) for x in (out / "llm_calls.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [c["stage"] for c in calls] == ["cal", "s1", "s3", "s4"]
+    io = [json.loads(x) for x in (out / "llm_io.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert {x["stage"]: x["enforce_schema"] for x in io} == {"cal": True, "s1": True, "s3": True, "s4": False}
