@@ -47,6 +47,13 @@ World engine. The seven `ep_9031` devices are a fixture, not a closed device
 model. Discovery MUST report actual capability; it MUST NOT register a device or
 grant delegation in the Hub.
 
+**E1-R3.** The Simulator MUST stand in for the user's LG account in the demo.
+`GET /lg/devices` on the existing HTTP listener MUST use the existing operator
+authentication and return the loaded household's LG-brand devices in the shape
+defined in [protocol §13](protocol.md#13-demo-lg-account). It MUST NOT expose
+device room assignments or include non-LG devices. The Hub obtains non-LG
+devices from its installation file.
+
 <a id="e2"></a>
 
 ### E2. Commands and independently observed state (PC-4, PC-5)
@@ -69,6 +76,11 @@ apply as one valid effect or leave every property unchanged.
 **E2-R4.** Restart MUST preserve observable device state, operation identity,
 property witnesses, and unfinished job identity. Restart MUST NOT replay an old
 effect or reset the household implicitly.
+
+**E2-R5.** The Simulator MUST accept the value-less `clear_notice` command for
+`fridge_01` and empty its display slot. A fresh read MUST show no notice.
+`clear_notice` MUST have the same operation correlation as `show_notice`. The
+Hub decides when to send the clear at the end of a C-1 item notice task.
 
 <a id="e3"></a>
 
@@ -147,6 +159,10 @@ oven"), built from the profile's people and device commands, never from a plan.
 openable on its own URL on another phone, that lists the household's devices and
 lets a person change their values. A change from it MUST travel the
 `other_app` path (no local-operation report), so it reads as Class B to the Hub.
+
+**E5-R10.** The test home's fridge tile MUST stop showing the notice when a
+device observation shows the slot has cleared. Device tiles MUST show the
+household profile's `never` actions as locked, labelled `하지 않아요`.
 
 <a id="e6"></a>
 
@@ -245,6 +261,9 @@ passing claim until an implementation change supplies bounded evidence.
 | SIM-AT-19 | Open both households' viewers during the birthday scene | Each shows a floor plan with devices in their rooms and the entrance; tiles read as content (oven temperature and time, light colour, display scene, fridge notice); weekday and wall-clock time are shown; a link reaches the other home | E5-R4, E5-R5, E5-R7 | PC-4 | Required |
 | SIM-AT-20 | Inspect the viewer page and its data during an active plan | No item, intent, rationale, card text, Hub `by` or judge verdict appears; overlays carry device, action and trigger or time only | E5-R6 | PC-4, PC-5 | Required |
 | SIM-AT-21 | Use a named person control, then change the same device from the appliance-app page | The control emits the panel path with the person's name; the appliance-app change uses `other_app` with `local_operation=false`; both are in the truth journal | E5-R8, E5-R9, E6-R2 | PC-5, PC-6 | **Provisional for the Class A panel signal, pending PQ-01** |
+| SIM-AT-22 | Request `GET /lg/devices` for each demo profile with and without valid operator credentials | Authenticated responses contain only each profile's LG inventory with labels, commands, value schemas, bases, and `never` lists. Standard devices and room assignments are absent. Unauthenticated requests are denied. | E1-R3 | — | Required |
+| SIM-AT-23 | Show a notice on `fridge_01`, then send `clear_notice` and issue a fresh read | The acknowledgement and clear effect report echo the clear operation ID. The fresh read reports an empty slot and the test home no longer shows the notice. | E2-R2, E2-R5, E5-R10 | — | Required |
+| SIM-AT-24 | Load the test home for a profile with both LG and non-LG `never` actions | Each affected tile shows its profile restrictions as locked `하지 않아요` actions. | E5-R10 | — | Required |
 
 ## 4. Open items
 

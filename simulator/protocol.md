@@ -325,6 +325,7 @@ property witnesses for conditional writes.
 | `cooktop_01` | `child_lock` | `child_lock: true`. |
 | `oven_01` | `set_cook_standby` | `preset: {temp_c, minutes}`. Actual cooking starts with a local device action. |
 | `fridge_01` | `show_notice` | `show_notice: <text>`. The display slot holds the latest notice. Opening the door emits `fridge.door_opened`. |
+| `fridge_01` | `clear_notice` (no value) | `show_notice: null` empties the display slot. Fresh readback reports `show_notice: null`. The acknowledgement and the clear effect report echo the operation ID under §§5–6, as for `show_notice`. |
 | `plug_kettle` | `off` | `power: false`. |
 | `air_purifier_01` | `mode`, `wind_strength` | `mode` accepts `CLEAN`, `AUTO`, `CIRCULATOR`, `DUAL_CLEAN`. `wind_strength` accepts `LOW`, `MID`, `HIGH`, `AUTO`, `POWER`. |
 | `dishwasher_01` | `set_course_standby`, `delayed_start` | `course` accepts the [fixture's course enum](../contracts/fixtures/ep_9031/devices.json). `delay_hours` accepts relative hours from 1 to 12. A saved `null` clears the corresponding setting on restore. |
@@ -364,3 +365,18 @@ Both fields are required for playback. `playlist` is `calm`, `party`, or
 `family`. `volume` is a number from 0 through 100. The virtual speaker emits
 `speaker.changed` for playback changes and reports
 `local_operation_reporting: false`.
+
+## 13. Demo LG account
+
+`GET /lg/devices` on the Simulator's existing HTTP listener stands in for the
+user's LG account. It MUST use the existing operator HTTP Basic authentication
+described in the [Simulator README](README.md#run-locally).
+
+The response MUST be a JSON array of objects with exactly `id`, `type`, `label`,
+`commands`, and `never`. The IDs, device types, labels, and never actions come
+from the loaded household profile. Each command object MUST have exactly `cmd`,
+`value_schema`, and `basis`. `value_schema` uses the C-2 command value schema
+with `null` for a command that takes no value. `basis` is the profile's
+`command_basis` value, `sdk` or `lg_assumed`. The response MUST NOT contain
+device room assignments or list non-LG devices, including the standard lights
+and plugs. This discovery response does not grant delegation.
