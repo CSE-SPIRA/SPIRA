@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPIRA 시연</title>
+<link rel="stylesheet" href="/demo/assets/tokens.css">
+<link rel="stylesheet" href="/demo/assets/demo.css">
+<script type="importmap">
+{"imports": {"three": "/demo/assets/three.module.min.js"}}
+</script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">SPIRA</div>
+  <nav class="tabs" aria-label="페이지">
+    <button type="button" data-page="reason" aria-current="page">1 · 판단</button>
+    <button type="button" data-page="house">2 · 집</button>
+  </nav>
+  <div class="status" id="status"></div>
+</header>
+
+<main>
+  <!-- Page 1: the Server's reasoning -->
+  <section class="page reason" id="page-reason">
+    <div class="phone" aria-label="SPIRA 앱">
+      <div class="phone-notch"></div>
+      <div class="phone-screen" id="phone"></div>
+    </div>
+
+    <div class="reason-main">
+      <div class="flow" id="flow" aria-label="Server 흐름"></div>
+      <article class="stage-out" id="stage-out" aria-live="polite"></article>
+      <div class="stepper">
+        <button type="button" class="btn" id="prev">이전</button>
+        <span id="step-label"></span>
+        <button type="button" class="btn primary" id="next">다음</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Page 2: the house -->
+  <section class="page house" id="page-house" hidden>
+    <div class="house-stage">
+      <div id="house3d"></div>
+      <div id="house-tags"></div>
+      <div class="house-hud" id="house-hud"></div>
+    </div>
+    <aside class="hub-log">
+      <h2>집 허브가 본 것</h2>
+      <ol id="ledger"></ol>
+    </aside>
+    <footer class="timeline">
+      <ol id="timeline"></ol>
+    </footer>
+  </section>
+</main>
+
+<script type="module" src="/demo/assets/demo.js"></script>
+</body>
+</html>

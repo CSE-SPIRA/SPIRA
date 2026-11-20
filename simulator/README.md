@@ -56,6 +56,10 @@ Under **Private evidence**, set a command marker before an episode, then select 
 
 Counts cover the first valid command arrival for each operation ID, including rejected commands and accepted commands with no effect. A write to only `show_notice` goes in `notices`; every other command goes in `other_commands`. For groceries, check for zero other commands and look for the notices under `fridge_01`. The report lists `recording_since` because databases opened before this feature have no command-arrival history before that time. Command counts are available without a received C-3 source.
 
+## Demo
+
+`simulator/scripts/demo-up` starts the fixture Server, an MQTT broker, the Hub and the Simulator from this checkout and prints the `/demo` address: page 1 projects the Server's reasoning from the contract, page 2 shows the house in 3D with the Hub's ledger. See [DEMO.md](DEMO.md).
+
 ## Tests
 
 ```bash

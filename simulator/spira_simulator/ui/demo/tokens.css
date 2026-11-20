@@ -1,0 +1,26 @@
+/* Design tokens for the demo shell. Change the look here, not in demo.css. */
+:root {
+  --bg: #121419;
+  --panel: #1a1d24;
+  --panel-2: #222631;
+  --line: #2c313c;
+  --fg: #ece9e4;
+  --muted: #9aa0ab;
+  --accent: #ff8fc0;        /* concept colour; the house page also takes it from the plan */
+  --accent-2: #b99cff;
+  --ok: #7fd3a9;
+  --wait: #f2c46d;
+  --sim: #94b6ff;
+
+  --f-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+
+  --r-s: 8px;
+  --r-m: 12px;
+  --r-l: 20px;
+  --gap: 16px;
+
+  --t-fast: 180ms;
+  --t-slow: 520ms;
+  color-scheme: dark;
+}

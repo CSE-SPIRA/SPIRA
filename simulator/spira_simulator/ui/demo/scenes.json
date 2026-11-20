@@ -1,0 +1,27 @@
+{
+  "$comment": "The storyboard as data. Page 1 stages follow the Server pipeline (S1-S5); page 2 steps are world events. Text and order can change here without touching code.",
+  "reason": [
+    {"id": "share", "node": 0, "title": "주문 공유", "lead": "쿠팡 주문 화면을 SPIRA 앱으로 공유합니다. 묻지 않습니다."},
+    {"id": "extract", "node": 1, "title": "주문 추출", "lead": "스크린샷에서 물건과 수량을 읽습니다. 화면에 적힌 것만."},
+    {"id": "context", "node": 2, "title": "맥락 붙이기", "lead": "이 집의 평소 주문, 캘린더, 그리고 비슷한 다른 집 주문(합성 지식 베이스)을 찾아 붙입니다."},
+    {"id": "intent", "node": 3, "title": "의도 판단", "lead": "물건이 가장 강한 근거입니다. 상황 칸은 근거가 있을 때만 채웁니다."},
+    {"id": "tasks", "node": 4, "title": "할 일 생성", "lead": "그날 집에 필요한 것을 찾고, 이 집 기기로 채울 수 있는 것만 할 일로 만듭니다."},
+    {"id": "plan", "node": 5, "title": "계획 확정 → 집 허브", "lead": "알림 카드는 한 번. 계획은 집 허브로 넘어가고, 그다음은 집이 합니다."}
+  ],
+  "flow": [
+    {"title": "주문", "sub": "앱 공유"},
+    {"title": "추출", "sub": "S1"},
+    {"title": "맥락", "sub": "S2 · RAG"},
+    {"title": "의도", "sub": "S3"},
+    {"title": "할 일", "sub": "S4"},
+    {"title": "계획", "sub": "S5 → 허브"}
+  ],
+  "house": [
+    {"id": "plan", "time": "목 21:11", "title": "계획 받음", "camera": "overview"},
+    {"id": "delivery", "time": "금 19:30", "title": "택배 들여옴", "action": "delivery", "camera": "fridge"},
+    {"id": "before", "time": "토 13:30", "title": "손님 오기 전", "camera": "living"},
+    {"id": "guests", "time": "토 13:52", "title": "첫 손님 도착", "action": "guests_arrive", "camera": "party"},
+    {"id": "party", "time": "토 14:00", "title": "파티 시간", "camera": "kitchen"},
+    {"id": "end", "time": "토 17:50", "title": "파티 끝", "action": "event_end", "camera": "overview"}
+  ]
+}
