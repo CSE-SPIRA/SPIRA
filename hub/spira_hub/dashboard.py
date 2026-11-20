@@ -1,23 +1,25 @@
-"""Read-only Hub evidence for operators."""
+"""Read-only household ledger and Hub diagnostics."""
 
 from html import escape
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from .contracts import offset_time
 from .dashboard_state import state_view
 from .store import encode
 
 HOUSEHOLD_TIME = ZoneInfo("Asia/Seoul")
-BY_LABEL = {"spira": "SPIRA", "user": "사람", "unknown": "모름", "hub": "집"}
-REPORT_LABEL = {"ack": "ack", "event": "event", "run": "결과", "restore": "restore"}
+BY_LABEL = {"spira": "SPIRA", "user": "사람", "unknown": "기기 보고", "hub": "집"}
 
 
 def create_app(runtime, *, lifespan=None):
     app = FastAPI(title="SPIRA Home Hub", lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
+    app.mount("/assets", StaticFiles(directory=Path(__file__).with_name("dashboard_assets")), name="dashboard-assets")
 
     @app.get("/health")
     async def health():
@@ -38,42 +40,37 @@ def create_app(runtime, *, lifespan=None):
 
 def seen(state):
     plans = " · ".join(
-        f'{escape(plan["plan_id"])} 계획 v{plan["plan_version"]} · 할 일 {plan["task_count"]}'
+        f'계획 v{plan["plan_version"]} · 할 일 {plan["task_count"]}'
         for plan in state["current_plans"]
     ) or "현재 계획 없음 · 할 일 0"
-    connection = ("연결됨" if state["server_confirmed"] else
-                  "연결 실패" if state["server_error"] else "연결 확인 중")
-    dated_rows = [(row, offset_time(row["at"]).astimezone(HOUSEHOLD_TIME)) for row in state["ledger"]]
+    connection = ("서버 연결됨" if state["server_confirmed"] else
+                  "서버 연결 실패" if state["server_error"] else "서버 연결 확인 중")
+    dated_rows = [(row, offset_time(row["at"]).astimezone(HOUSEHOLD_TIME)) for row in reversed(state["ledger"])]
     multi_day = bool(dated_rows and dated_rows[0][1].date() != dated_rows[-1][1].date())
-    rows = []
-    for index, (row, at) in enumerate(dated_rows):
-        time_label = at.strftime("%m/%d %H:%M" if multi_day else "%H:%M")
-        by = row["by"]
-        reports = " ".join(report_badge(report) for report in row["reports"]) or "—"
-        recent = ' class="recent"' if index >= len(dated_rows) - 3 else ""
-        rows.append(
-            f'<tr{recent}><td><time datetime="{escape(row["at"])}" title="{at:%Y-%m-%d %H:%M:%S %Z}">'
-            f'{time_label}</time></td><td>{escape(row["label"])}</td><td>{escape(row["what"])}</td>'
-            f'<td class="by {by}">{BY_LABEL[by]}</td><td>{reports}</td></tr>'
-        )
-    body = "".join(rows) or '<tr><td class="empty" colspan="5">아직 기록된 일이 없어요.</td></tr>'
-    return f"""<section class="seen" aria-labelledby="seen-title">
-<header><h1 id="seen-title">Hub · 이 집이 본 것</h1>
-<p>{escape(state["household"])} · {plans} · Server {connection}</p>
-<a href="#detail">자세한 기록</a></header>
-<div class="ledger"><table aria-labelledby="seen-title"><thead>
-<tr><th scope="col">시각</th><th scope="col">기기</th><th scope="col">일</th>
-<th scope="col">누가</th><th scope="col">Server로</th></tr>
-</thead><tbody>{body}</tbody></table></div></section>"""
+    body = "".join(ledger_row(row, at, multi_day) for row, at in dated_rows)
+    if not body:
+        body = '<li class="subtext">기록을 기다리고 있어요.</li>'
+    return f"""<section class="ledger" aria-labelledby="seen-title">
+<header class="ledger-head"><h1 id="seen-title">Hub · 이 집이 본 것</h1>
+<a href="#detail">자세한 기록</a>
+<p id="ledger-summary">{escape(state["household"])} · {plans} · {connection}</p></header>
+<ol id="ledger" role="list" aria-label="이 집의 장부" aria-live="polite" tabindex="0">{body}</ol></section>"""
 
 
-def report_badge(report):
-    label = REPORT_LABEL[report["kind"]]
-    if report["delivered"]:
-        return f'<span class="sent">{label} {"204" if report["kind"] == "ack" else "보냄"}</span>'
-    if report["delivery_error"]:
-        return f'<span class="retry" title="{escape(report["delivery_error"])}">{label} 재전송 대기</span>'
-    return f'<span class="pending">{label} 전송 대기</span>'
+def ledger_row(row, at, multi_day):
+    label = f'{escape(row["label"])} · ' if row["label"] != "—" else ""
+    day = f'<span>{at:%m/%d}</span> ' if multi_day else ""
+    delivery = ""
+    if row["reports"]:
+        if all(report["delivered"] for report in row["reports"]):
+            delivery = '<p><span class="sent"><span aria-hidden="true">↗ </span>서버에 보냄</span></p>'
+        else:
+            delivery = '<p>보내는 중</p>'
+    return (
+        f'<li class="ledger-row"><div><time datetime="{escape(row["at"])}" title="{at:%Y-%m-%d %H:%M:%S %Z}">'
+        f'{day}{at:%H:%M}</time><strong>{label}{escape(row["what"])}</strong>'
+        f'<span class="pill actor">{BY_LABEL[row["by"]]}</span></div>{delivery}</li>'
+    )
 
 
 def render(state):
@@ -176,38 +173,12 @@ def render(state):
     )
     return f"""<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="5"><title>SPIRA Home Hub</title><style>
-:root {{ color-scheme: light; color: #15191b; background: #f4f4f2; font: 16px system-ui, sans-serif; }}
-body {{ margin: 0; }} main {{ max-width: 1120px; padding: clamp(.75rem, 3vw, 1.5rem); margin: auto; }}
-.seen {{ background: #fff; border: 1.5px solid #b9bebb; border-radius: 8px; padding: clamp(.65rem, 2vw, 1rem); }}
-.seen header {{ display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem 1rem; padding-bottom: .55rem; }}
-.seen h1 {{ margin: 0; font-size: 1.1rem; }} .seen header p {{ color: #6b7378; font-size: .875rem; }}
-.seen header a {{ color: #1f4fb8; font-size: .875rem; margin-left: auto; }}
-.ledger {{ overflow-x: auto; }}
-.ledger table {{ width: 100%; min-width: 350px; border-spacing: 0 .15rem; font-size: .9rem; }}
-.ledger th {{ border-bottom: 1px solid #dadedb; color: #6b7378; text-align: left; font-size: .8rem; font-weight: 500; }}
-.ledger th, .ledger td {{ padding: .3rem .45rem; vertical-align: baseline; }}
-.ledger time {{ color: #6b7378; font: .82rem ui-monospace, monospace; white-space: nowrap; }}
-.ledger td:nth-child(2), .ledger td:nth-child(4) {{ white-space: nowrap; }}
-.ledger .recent td {{ background: #fff8ec; font-weight: 600; }}
-.ledger .recent td:first-child {{ border-radius: 4px 0 0 4px; }}
-.ledger .recent td:last-child {{ border-radius: 0 4px 4px 0; }}
-.ledger .by {{ font-weight: 600; }} .by.spira {{ color: #1f4fb8; }} .by.user {{ color: #a84f0c; }}
-.by.unknown, .ledger .retry {{ color: #b42318; }} .by.hub, .ledger .sent {{ color: #0f6e66; }}
-.ledger span {{ font-size: .8rem; display: inline-block; }} .ledger .pending {{ color: #6b7378; }}
-#detail {{ margin-top: 1.5rem; }}
-.details-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: 1.25rem;
-                 align-items: start; }}
-.details-grid section {{ background: #e9efe8; padding: 1rem; border-radius: .75rem; min-width: 0; }}
-h2 {{ margin: .25rem 0 1rem; font-size: 1.15rem; }} h3, h4 {{ margin: 0 0 .4rem; }}
-article {{ padding: .85rem; margin: .5rem 0; border: 1px solid #cbdad2; border-radius: .5rem; background: white; }}
-p, dl {{ margin: .35rem 0; }} dt {{ font-weight: 600; }} dd {{ margin: .2rem 0 .6rem; }}
-.details-grid span {{ display: inline-block; font-size: .78rem; background: #dfefe7; padding: .16rem .4rem; border-radius: .25rem; }}
-.details-grid .assumption {{ background: #f9e7b8; }}
-pre, .mono {{ white-space: pre-wrap; overflow-wrap: anywhere; font: .82rem ui-monospace, monospace; }}
-pre {{ background: #f3f6f3; padding: .5rem; margin: .4rem 0 0; }} .empty {{ color: #43564e; }}
-</style></head><body><main>{seen(state)}
-<section id="detail"><h2>자세한 기록</h2><div lang="en"><p>{text(peer)}</p>
+<meta name="theme-color" content="#f6f5ee"><title>SPIRA Home Hub</title>
+<link rel="stylesheet" href="/assets/dashboard.css"><script src="/assets/dashboard.js" defer></script>
+</head><body><main>{seen(state)}
+<section id="detail" tabindex="-1" aria-labelledby="detail-title">
+<h2 id="detail-title">자세한 기록</h2><p><a href="#seen-title">장부로 돌아가기</a> · <a href="/state">JSON</a></p>
+<div id="detail-content" lang="en"><p>{text(peer)}</p>
 <p>Observation gap last marked at {text(state["observation_gap_at"])}</p>
 <div class="details-grid">{body}</div></div></section></main></body></html>"""
 
