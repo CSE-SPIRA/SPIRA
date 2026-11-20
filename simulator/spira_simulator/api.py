@@ -6,19 +6,32 @@ import os
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from secrets import compare_digest
+from urllib.parse import urlencode
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.templating import Jinja2Templates
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from .mqtt import Broker, DeviceProtocol
 from .profile import DEFAULT_PROFILE, Profile, load_profile
 from .sources import JsonSource, Source, judge, stage_overlay
+from .surfaces import (
+    ROOM_NAMES,
+    device_controls,
+    device_name,
+    display_time,
+    peer_viewers,
+    tiles,
+    viewer_plan,
+    viewer_world,
+)
 from .world import LOCAL_ACTORS, ActionPath, InvalidMutation, World
 
 UI = Path(__file__).with_name("ui")
+templates = Jinja2Templates(directory=UI)
 basic = HTTPBasic(auto_error=False)
 log = logging.getLogger(__name__)
 
@@ -119,6 +132,7 @@ def create_app(
             app.state.broker = broker
             app.state.protocol = protocol
             app.state.operator_token = token if enabled else None
+            app.state.peer_viewers = peer_viewers(os.getenv("WORLD_PEER_VIEWERS", ""))
             hub_state = env_source("WORLD_HUB_STATE_URL")
             app.state.evidence_from_hub = hub_state is not None
             app.state.received = hub_state or received_source or env_source(
@@ -180,8 +194,7 @@ def create_app(
 
     @application.get("/health")
     def health(request: Request):
-        broker = request.app.state.broker
-        return {"status": "ready", "mqtt": broker.status() if broker else None}
+        return {"status": "ready", "mqtt": mqtt_status(request)}
 
     @application.get("/sim/snapshot")
     def snapshot(request: Request):
@@ -198,8 +211,36 @@ def create_app(
         )
 
     @application.get("/sim/viewer")
-    def viewer():
-        return FileResponse(UI / "viewer.html")
+    async def viewer(request: Request, fragment: bool = False):
+        world = request.app.state.world
+        overlay_data = await overlay(request)
+        display = viewer_world(world)
+        names = {tile["id"]: tile["name"] for tile in display["tiles"]}
+        planned, restores = viewer_plan(overlay_data, names)
+        rooms = {}
+        for tile in display["tiles"]:
+            tile["planned"] = planned.pop(tile["id"], [])
+            rooms.setdefault(tile["room"], []).append(tile)
+        mqtt = mqtt_status(request) or {}
+        gap = mqtt.get("last_gap_at")
+        return templates.TemplateResponse(
+            request,
+            "home.html" if fragment else "viewer.html",
+            {
+                **display,
+                "home": world.profile.display_name or world.profile.household_id,
+                "household_id": world.profile.household_id,
+                "peers": request.app.state.peer_viewers,
+                "rooms": rooms,
+                "room_names": ROOM_NAMES,
+                "unplaced": planned,
+                "has_preparation": bool(overlay_data["preparation"]),
+                "overlay_errors": overlay_data["errors"],
+                "restores": restores,
+                "mqtt_online": mqtt.get("connected", False),
+                "mqtt_gap": display_time(gap) if gap else None,
+            },
+        )
 
     @application.get("/sim/stage.js")
     def stage_js():
@@ -210,8 +251,103 @@ def create_app(
         return FileResponse(UI / "style.css", media_type="text/css")
 
     @application.get("/operator", dependencies=[Depends(require_operator)])
-    def operator():
-        return FileResponse(UI / "operator.html", headers={"Cache-Control": "no-store"})
+    def operator(request: Request):
+        world = request.app.state.world
+        return templates.TemplateResponse(
+            request,
+            "operator.html",
+            {
+                "people": world.profile.demo_people,
+                "devices": [
+                    (
+                        device.target,
+                        device_name(device),
+                        device_controls(device, appliance=False),
+                    )
+                    for device in world.devices.values()
+                ],
+            },
+        )
+
+    @application.get("/app", dependencies=[Depends(require_operator)])
+    def appliance_app(request: Request, person: str = ""):
+        world = request.app.state.world
+        people = world.profile.demo_people
+        names = [entry.name for entry in people]
+        default = "아빠" if "아빠" in names else next(iter(names), "")
+        device_tiles = tiles(world, world.snapshot(for_display=True))
+        return templates.TemplateResponse(
+            request,
+            "appliance.html",
+            {
+                "home": world.profile.display_name or world.profile.household_id,
+                "tiles": device_tiles,
+                "room_names": ROOM_NAMES,
+                "people": names,
+                "selected": person if person in names else default,
+                "controls": {
+                    device.logical_id: (
+                        device.target,
+                        device_controls(device, appliance=True),
+                    )
+                    for device in world.devices.values()
+                },
+            },
+        )
+
+    @application.post(
+        "/operator/person",
+        name="panel_action",
+        dependencies=[Depends(require_operator)],
+    )
+    @application.post(
+        "/app/device", name="appliance_action", dependencies=[Depends(require_operator)]
+    )
+    def person_control(
+        request: Request,
+        target: str = Query(),
+        person: str = Form(),
+        control: str = Form(),
+    ):
+        origin = request.headers.get("origin")
+        if origin is not None and origin != str(request.base_url).rstrip("/"):
+            raise HTTPException(403, "이 화면에서 기기를 조작해 주세요")
+        world = request.app.state.world
+        appliance = request.scope["route"].name == "appliance_action"
+        profile_person = next(
+            (entry for entry in world.profile.demo_people if entry.name == person), None
+        )
+        device = world.devices.get(target)
+        action = (
+            next(
+                (
+                    entry
+                    for entry in device_controls(device, appliance=appliance)
+                    if entry.key == control
+                ),
+                None,
+            )
+            if device
+            else None
+        )
+        if profile_person is None or action is None:
+            raise HTTPException(400, "사용할 수 없는 기기 조작입니다")
+        apply(
+            request,
+            world.local_change,
+            target,
+            profile_person.role,
+            action.values,
+            start=action.start,
+            actor_name=profile_person.name,
+            action_path="other_app" if appliance else "device_panel",
+        )
+        destination = (
+            "/app?" + urlencode({"person": profile_person.name})
+            if appliance
+            else "/operator"
+        )
+        return RedirectResponse(destination, status_code=303)
 
     @application.get("/operator/ui.js", dependencies=[Depends(require_operator)])
     def operator_js():
@@ -320,12 +456,24 @@ def create_app(
     async def prevent_caching(request: Request, call_next):
         response = await call_next(request)
         if request.url.path.startswith(
-            ("/operator", "/sim/snapshot", "/sim/overlay", "/health")
+            (
+                "/operator",
+                "/app",
+                "/sim/viewer",
+                "/sim/snapshot",
+                "/sim/overlay",
+                "/health",
+            )
         ):
             response.headers["Cache-Control"] = "no-store"
         return response
 
     return application
+
+
+def mqtt_status(request: Request):
+    broker = request.app.state.broker
+    return broker.status() if broker else None
 
 
 def apply(request: Request, action, *args, **kwargs):

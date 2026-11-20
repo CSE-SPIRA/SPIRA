@@ -218,3 +218,20 @@ class WorldStorage:
                     (after, -1 if limit is None else limit),
                 )
             ]
+
+    def latest_truth(self) -> list[dict]:
+        """Latest value transition per device and latest fact per home sensor event."""
+        return [
+            json.loads(body)
+            for (body,) in self.db.execute(
+                """SELECT body FROM truth_journal
+                   WHERE sequence IN (
+                       SELECT MAX(sequence) FROM truth_journal
+                       WHERE json_extract(body, '$.event_type') NOT LIKE '%.availability'
+                       GROUP BY json_extract(body, '$.target'),
+                           CASE WHEN json_extract(body, '$.logical_id') IS NULL
+                           THEN json_extract(body, '$.event_type') END
+                   )
+                   ORDER BY sequence"""
+            )
+        ]

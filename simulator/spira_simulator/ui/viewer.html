@@ -1,32 +1,24 @@
 <!doctype html>
-<html lang="en">
+<html lang="ko">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>SPIRA household stage</title>
+  <title>테스트 홈 · {{ home }}</title>
   <link rel="stylesheet" href="/sim/style.css">
   <script defer src="/sim/stage.js"></script>
 </head>
-<body>
+<body class="test-home">
   <main>
-    <header>
-      <h1>Household stage</h1>
-      <p id="connection" role="status">Waiting for a World observation…</p>
+    <header class="home-heading">
+      <h1>테스트 홈 · {{ home }} <small>({{ household_id }})</small></h1>
+      {% if peers %}
+      <nav aria-label="집 바꾸기">
+        {% for label, url in peers %}<a href="{{ url }}">{{ label }}</a>{% endfor %}
+      </nav>
+      {% endif %}
     </header>
-    <section id="rooms" class="rooms" aria-label="Observed rooms"></section>
-    <section class="overlays" aria-label="Plan and restore overlays">
-      <section class="planned">
-        <h2>Planned preparation</h2>
-        <ul id="preparation"></ul>
-        <h3>Item notices</h3>
-        <ul id="notices"></ul>
-        <p id="plan-status" role="status"></p>
-      </section>
-      <section class="restore">
-        <h2>Hub restore reports</h2>
-        <ul id="restores"></ul>
-      </section>
-    </section>
+    <p id="connection-lost" class="observation-warning" role="status" hidden>연결 끊김 · 마지막 관찰값</p>
+    {% include "home.html" %}
   </main>
 </body>
 </html>

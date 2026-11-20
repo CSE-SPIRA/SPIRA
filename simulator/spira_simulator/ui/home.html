@@ -1,0 +1,60 @@
+<div id="home-state" data-live="">
+  <div class="home-meta">
+    <time class="wall-clock" datetime="{{ clock_at }}">{{ clock }}</time>
+    <span>MQTT {{ "연결됨" if mqtt_online else "연결 끊김" }}{% if mqtt_gap %} · 마지막 끊김 {{ mqtt_gap }}{% endif %}</span>
+  </div>
+  <div class="floor-plan">
+    <div class="floor-rooms">
+      {% for room, devices in rooms.items() %}
+      <section class="floor-room" data-room="{{ room }}">
+        <h2>{{ room_names.get(room, room) }}</h2>
+        <div class="room-devices">
+          {% for device in devices %}
+          <div class="device-position" data-device="{{ device.id }}">
+            <article class="home-device" data-observation="{{ device.observation }}"{% if device.change %} data-change="{{ device.change[0] }}"{% endif %}>
+              <h3>{{ device.name }} <span class="substrate{% if device.physical %} physical{% endif %}">{{ device.substrate }}</span></h3>
+              {% if device.content is not none %}<p class="device-value">{{ device.content }}</p>{% endif %}
+              {% if device.observation_label %}<p class="observation-warning">{{ device.observation_label }}{% if device.observation == "stale" %} · {{ device.observed_at }}{% endif %}</p>{% endif %}
+              {% if device.change %}<p class="change-marker">{{ device.change[1] }}</p>{% endif %}
+              {% if device.physical %}<p class="tile-note">미검증</p>{% endif %}
+              {% if device.class_a %}<p class="tile-note" title="{{ device.assumption }}">부류 A · 패널 조작 보고 가정</p>{% endif %}
+            </article>
+            {% for entry in device.planned %}
+            <p class="planned">{{ device.name }} · {{ entry.action }} · {{ entry.wait }}</p>
+            {% endfor %}
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+      {% endfor %}
+    </div>
+    <section class="entrance">
+      <h2>현관</h2>
+      {% if entrance %}
+      <ul>
+        {% for fact in entrance %}<li>{{ fact.label }} <span>{{ fact.at }}</span></li>{% endfor %}
+      </ul>
+      {% else %}
+      <p>관찰된 현관 사건 없음</p>
+      {% endif %}
+    </section>
+  </div>
+  {% for device, entries in unplaced.items() %}
+  {% for entry in entries %}<p class="planned">{{ device }} · {{ entry.action }} · {{ entry.wait }}</p>{% endfor %}
+  {% endfor %}
+  {% if overlay_errors %}
+  <p class="observation-warning">예정 또는 되돌림 정보를 읽을 수 없음</p>
+  {% elif not has_preparation %}
+  <p class="tile-note">예정된 집 준비 없음</p>
+  {% endif %}
+  {% if restores %}
+  <section class="home-restore">
+    <h2>Hub 되돌림 보고</h2>
+    <ul>
+      {% for row in restores %}
+      <li>{{ row.device }} · {{ row.outcome }} · {{ row.substrate }} · {{ row.at }}{% if row.pending %} · 전송 대기{% endif %}</li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+</div>

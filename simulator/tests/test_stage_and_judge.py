@@ -1,7 +1,9 @@
 import json
 from datetime import UTC, datetime
+from html.parser import HTMLParser
 from pathlib import Path
 from uuid import uuid4
+from xml.etree import ElementTree
 
 import httpx
 import pytest
@@ -9,7 +11,7 @@ from conftest import LIGHT, OVEN, PLUG, Wire, fixture_json
 from fastapi.testclient import TestClient
 from spira_contracts.plan import Plan
 from spira_simulator.api import create_app
-from spira_simulator.profile import Profile, load_profile, public_value
+from spira_simulator.profile import DEFAULT_PROFILE, Profile, load_profile, public_value
 from spira_simulator.sources import JsonSource
 from spira_simulator.world import DEVICE_SCHEMA, World
 
@@ -82,7 +84,7 @@ def test_overlay_reads_authenticated_plan_and_fixture_executions(
 
     assert overlay["errors"] == []
     assert overlay["preparation"] == []
-    assert len(overlay["item_notices"]) == 2
+    assert len(overlay["notices"]) == 2
     assert {
         (row["device"], row["status"], row["substrate"]) for row in overlay["restores"]
     } == {
@@ -223,7 +225,7 @@ def test_overlay_prefers_live_plans_and_uses_hub_task_stories_and_restoration(
 
     assert overlay["errors"] == []
     assert [row["device"] for row in overlay["preparation"]] == ["oven_01"]
-    assert len(overlay["item_notices"]) == 2
+    assert len(overlay["notices"]) == 2
     assert {
         (row["device"], row["status"], row["substrate"], row["delivery"])
         for row in overlay["restores"]
@@ -627,25 +629,29 @@ def test_sim_at10_read_only_faint_waiting_and_item_only_episode(tmp_path):
         viewer = client.get("/sim/viewer")
         assert viewer.status_code == 200 and "<button" not in viewer.text
         assert 'class="planned"' in viewer.text
-        script = client.get("/sim/stage.js").text
-        assert "Stale" in script and "Readback missing" in script
-        assert "border: 1px dashed #88998e" in client.get("/sim/style.css").text
+        assert "border: 1px dashed #9db3e3" in client.get("/sim/style.css").text
+        for mode, label in (
+            ("stale", "오래된 관찰값"),
+            ("missing", "관찰값 누락"),
+            ("unavailable", "관찰 불가"),
+        ):
+            post(client, "/operator/fault", target=LIGHT, fault="readback", mode=mode)
+            marked = client.get("/sim/viewer").text
+            assert f'data-observation="{mode}"' in marked and label in marked
+        post(client, "/operator/fault", target=LIGHT, fault="readback", mode="current")
         original = client.get("/sim/overlay").json()
-        assert any(row["task_id"] == "t_clean#1" for row in original["preparation"])
+        assert any(row["device"] == "cleaner_01" for row in original["preparation"])
         source.body = fixture_json("ep_9031/pull.json")
         overlay = client.get("/sim/overlay").json()
         assert overlay["errors"] == []
-        assert not any(row["task_id"] == "t_clean#1" for row in overlay["preparation"])
-        protective_devices = {
-            row["device"] for row in overlay["preparation"] if row["protective"]
+        assert not any(row["device"] == "cleaner_01" for row in overlay["preparation"])
+        assert {(row["device"], row["command"]) for row in overlay["preparation"]} >= {
+            ("cooktop_01", "child_lock"),
+            ("plug_kettle", "off"),
         }
-        assert protective_devices == {"cooktop_01", "plug_kettle"}
         assert any(
-            row["device"] == "light_01" and row["wait"] == "guest_arrived"
-            for row in overlay["preparation"]
-        )
-        assert not any(
-            row["device"] == "light_01" and row["target_value"] == {"kelvin": 3000}
+            row["device"] == "light_01" and row["command"] == "color"
+            and row["wait"] == "guest_arrived" and row["task_id"] == "t_mood#3"
             for row in overlay["preparation"]
         )
         source.body = fixture_json("ep_9150/plan.v1.json")
@@ -653,17 +659,17 @@ def test_sim_at10_read_only_faint_waiting_and_item_only_episode(tmp_path):
         assert grocery["errors"] == []
         assert grocery["preparation"] == []
         grocery_episode = fixture_json("ep_9150/episode.json")
-        assert {
-            row["task_id"]: row["target_value"] for row in grocery["item_notices"]
-        } == {task["task_id"]: task["text"] for task in grocery_episode["item_tasks"]}
-        assert len(grocery["item_notices"]) == len(grocery_episode["item_tasks"]) == 2
-        assert all(
-            row["device"] == "fridge_01"
-            and row["command"] == "show_notice"
-            and row["wait"] == "package.brought_in"
-            and not row["protective"]
-            for row in grocery["item_notices"]
+        assert len(grocery["notices"]) == len(grocery_episode["item_tasks"]) == 2
+        assert (
+            [
+                (row["device"], row["command"], row["wait"], row["target_value"])
+                for row in grocery["notices"]
+            ]
+            == [("fridge_01", "show_notice", "package.brought_in", None)] * 2
         )
+        grocery_page = client.get("/sim/viewer").text
+        assert "예정된 집 준비 없음" in grocery_page
+        assert all(task["text"] not in grocery_page for task in grocery_episode["item_tasks"])
         for path in ("/sim/snapshot", "/sim/viewer", "/sim/overlay"):
             assert client.post(path, json={}).status_code == 405
         after = client.get("/sim/snapshot").json()
@@ -811,3 +817,299 @@ def test_protective_fallback_overlay_preserves_observed_state(tmp_path):
             tile = tiles[target]
             assert all(tile["values"][key] == value for key, value in desired.items())
             assert tile["revisions"] == before[target]["revisions"]
+
+
+def test_sim_at19_live_floor_plans_and_household_content(tmp_path, monkeypatch, clock):
+    birthday_payload = fixture_json("ep_9031/plan.v3.json")
+    birthday = Plan.model_validate(birthday_payload)
+    mood = next(task.actions for task in birthday.tasks if task.task_id == "t_mood#3")
+    notice = next(
+        action.value
+        for task in birthday.tasks
+        for action in task.actions
+        if action.cmd == "show_notice"
+    )
+    other_home = "http://127.0.0.1:8731/sim/viewer"
+    monkeypatch.setenv(
+        "WORLD_PEER_VIEWERS", f"부모님 댁={other_home},잘못된 주소=javascript:alert(1)"
+    )
+    app = operator_app(tmp_path, plan_source=SourceStub(birthday_payload))
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.world, "clock", clock)
+        wire = Wire(app.state.world)
+        for action in mood:
+            wire.command(f"mqtt:{action.device}", {action.cmd: action.value})
+        wire.command(OVEN, {"preset": {"temp_c": 170, "minutes": 20}})
+        wire.command("mqtt:fridge_01", {"show_notice": notice})
+        post(
+            client,
+            "/operator/device",
+            target=OVEN,
+            actor="resident",
+            actor_name="엄마",
+            start=True,
+        )
+        for event in ("delivery", "guests_arrive"):
+            post(client, "/operator/home", action=event)
+        clock.advance(60)
+        page = client.get("/sim/viewer").raise_for_status().text
+        assert f'<a href="{other_home}">부모님 댁</a>' in page
+        assert "javascript:" not in page and "테스트 홈 · 지아네" in page
+        view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
+        clock_text = view.find(".//time")
+        assert clock_text.text == "10/17 토 14:01"
+        assert clock_text.get("datetime") == "2026-10-17T14:01:00+09:00"
+        rooms = {
+            room.findtext("h2"): {
+                tile.get("data-device") for tile in room.findall(".//div[@data-device]")
+            }
+            for room in view.findall(".//section[@data-room]")
+        }
+        assert rooms == {
+            "거실": {"cleaner_01", "light_01", "display_01"},
+            "주방": {"cooktop_01", "oven_01", "fridge_01", "plug_kettle"},
+        }
+        for device, content in {
+            "oven_01": "170° · 19분 남음 · 굽는 중",
+            "light_01": "분홍 330/45/70",
+            "display_01": "공주 화면",
+            "fridge_01": notice,
+        }.items():
+            assert (
+                view.findtext(
+                    f'.//div[@data-device="{device}"]/article/p[@class="device-value"]'
+                )
+                == content
+            )
+        assert "가상" in page and "패널 조작 보고 가정" in page
+        assert {
+            row.text.strip()
+            for row in view.findall('.//section[@class="entrance"]//li')
+        } == {
+            "택배 들임",
+            "초인종 울림",
+            "문 열림 감지",
+            "손님 있음",
+        }
+        post(
+            client,
+            "/operator/device",
+            target=LIGHT,
+            actor="resident",
+            actor_name="아빠",
+            values={"color": {"kelvin": 2700}},
+        )
+        post(client, "/operator/home", action="event_end")
+        page = client.get("/sim/viewer").text
+        assert "2700K" in page and "아빠 · 기기 패널" in page
+        assert "손님 나감" in page and "손님 있음" not in page
+
+    first_home = "http://127.0.0.1:8730/sim/viewer"
+    monkeypatch.setenv("WORLD_PEER_VIEWERS", f"지아네={first_home}")
+    profile = load_profile(DEFAULT_PROFILE.with_name("ep_9120.json"))
+    with TestClient(operator_app(tmp_path / "family", profile=profile)) as client:
+        wire = Wire(client.app.state.world)
+        wire.command("mqtt:speaker_01", {"play": {"playlist": "calm", "volume": 30}})
+        page = client.get("/sim/viewer").text
+        assert (
+            f'<a href="{first_home}">지아네</a>' in page
+            and "테스트 홈 · 부모님 댁" in page
+        )
+        view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
+        assert {
+            room.get("data-room"): {
+                tile.get("data-device") for tile in room.findall(".//div[@data-device]")
+            }
+            for room in view.findall(".//section[@data-room]")
+        } == {
+            "living_room": {"cleaner_01", "speaker_01"},
+            "kitchen": {"oven_01", "fridge_01"},
+        }
+        assert (
+            view.findtext(
+                './/div[@data-device="speaker_01"]/article/p[@class="device-value"]'
+            )
+            == "잔잔한 음악 · 볼륨 30"
+        )
+        assert view.findtext('.//section[@class="entrance"]/h2') == "현관"
+
+
+def test_sim_at20_viewer_projects_world_markers_and_no_reasoning(tmp_path, monkeypatch):
+    plan = fixture_json("ep_9031/plan.v3.json")
+    card = fixture_json("ep_9031/card.v1.json")
+    rationale = fixture_json("ep_9031/rationale.json")
+    episode = fixture_json("ep_9031/episode.json")
+    notices = [task["text"] for task in episode["item_tasks"]]
+    hub = {
+        "task_stories": [],
+        "restoration": [],
+        "events": fixture_json("ep_9031/events.json"),
+        "episode": episode,
+        "card": card,
+        "rationale": rationale,
+        "judge": {"verdict": "person-reported-unknown"},
+    }
+    monkeypatch.setenv("WORLD_HUB_STATE_URL", "http://hub.invalid/state")
+    mock_http_source(monkeypatch, lambda request: httpx.Response(200, json=hub))
+    app = operator_app(tmp_path, plan_source=SourceStub(plan))
+    with TestClient(app) as client:
+        Wire(app.state.world).command(
+            "mqtt:display_01", {"play_mood": {"scene": "kids_party"}}
+        )
+        post(
+            client,
+            "/operator/device",
+            target=LIGHT,
+            actor="resident",
+            actor_name="아빠",
+            action_path="other_app",
+            values={"color": {"kelvin": 2700}},
+        )
+        post(
+            client,
+            "/operator/device",
+            target=PLUG,
+            actor="external_automation",
+            values={"power": False},
+        )
+        page = client.get("/sim/viewer").raise_for_status().text
+        fragment = client.get("/sim/viewer?fragment=true").raise_for_status().text
+        overlay = client.get("/sim/overlay").raise_for_status().json()
+        public = client.get("/sim/snapshot").raise_for_status().json()
+        assert public_value(overlay) and public_value(public)
+        assert "아빠" not in json.dumps(public, ensure_ascii=False)
+        assert overlay["errors"] == []
+        for row in overlay["preparation"] + overlay["notices"]:
+            assert set(row) == {
+                "plan_id", "task_id", "device", "command", "target_value", "wait", "protective",
+            }
+        assert "오븐 · 굽기 설정 대기 170° 20분 · 10/17 토 14:00" in page
+        assert "냉장고 · 안내 표시 · 택배를 들이면" in page
+        view = ElementTree.fromstring(fragment)
+        for device, kind, expected in (
+            ("light_01", "person", "아빠 · 가전 앱"),
+            ("display_01", "spira", "SPIRA"),
+            ("plug_kettle", "unknown", "누가 바꿨는지 모름"),
+        ):
+            tile = view.find(f'.//div[@data-device="{device}"]/article')
+            assert tile.get("data-change") == kind
+            assert tile.findtext('p[@class="change-marker"]') == expected
+        forbidden = [
+            *notices,
+            *[item["name"] for item in episode["items"]],
+            card["text"],
+            *[line["text"] for line in card["lines"]],
+            card["intent_id"],
+            rationale["intents"][0]["intent_text"],
+            "person-reported-unknown",
+            '"verdict"',
+            '"by"',
+            '"items"',
+            '"intent_id"',
+            '"actor"',
+            '"actor_name"',
+            '"action_path"',
+            '"rationale"',
+            '"card_id"',
+        ]
+        for surface in (
+            page,
+            fragment,
+            json.dumps(overlay, ensure_ascii=False),
+            json.dumps(public, ensure_ascii=False),
+        ):
+            assert all(value not in surface for value in forbidden)
+
+
+class SurfaceForms(HTMLParser):
+    """Read the actual button payload and destination from server-rendered forms."""
+
+    def __init__(self, page):
+        super().__init__()
+        self.form = {}
+        self.person = None
+        self.buttons = []
+        self.feed(page)
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "form":
+            self.form = attrs
+        elif tag == "input" and attrs.get("name") == "person":
+            self.person = attrs["value"]
+        elif tag == "option" and "selected" in attrs:
+            self.person = attrs["value"]
+        elif tag == "button" and attrs.get("name") == "control":
+            url = attrs.get("formaction") or self.form["action"]
+            self.buttons.append(
+                (url, {"person": self.person, "control": attrs["value"]})
+            )
+
+
+@pytest.mark.provisional
+def test_sim_at21_named_panel_and_appliance_app_share_device_path(
+    tmp_path, monkeypatch
+):
+    app = operator_app(tmp_path)
+    with TestClient(app) as client:
+        assert client.get("/app").status_code == 401
+        assert client.get("/operator").status_code == 401
+        panel = client.get("/operator", auth=AUTH).raise_for_status().text
+        appliance = client.get("/app", auth=AUTH).raise_for_status().text
+        assert "엄마 · 기기 패널 · 조명 2700K로 변경" in panel
+        assert all(
+            f"<summary>{name}</summary>" in panel
+            for name in ("엄마", "아빠", "지아", "손님")
+        )
+        assert "Apply property values" in panel and "Open appliance app" in panel
+        assert "가전 앱 · 지아네" in appliance and "3000K" in appliance
+        assert "굽기 시작" in appliance and "굽기 중지" not in appliance
+        assert "공주 화면 켜기" in appliance
+        panel_url, panel_fields = next(
+            (url, fields)
+            for url, fields in SurfaceForms(panel).buttons
+            if fields == {"person": "엄마", "control": "kelvin_2700"}
+        )
+        app_url, app_fields = next(
+            (url, fields)
+            for url, fields in SurfaceForms(appliance).buttons
+            if fields["control"] == "kelvin_4000"
+        )
+        assert app_fields["person"] == "아빠"
+        assert client.post(app_url, data=app_fields).status_code == 401
+        assert client.post(panel_url, data=panel_fields).status_code == 401
+        cross_origin = client.post(
+            app_url,
+            data=app_fields,
+            auth=AUTH,
+            headers={"Origin": "http://elsewhere.invalid"},
+        )
+        assert cross_origin.status_code == 403
+        signals = []
+        monkeypatch.setattr(
+            app.state.protocol,
+            "publish",
+            lambda topic, payload, **kw: signals.append(json.loads(payload)),
+        )
+        for url, fields, flag in (
+            (panel_url, panel_fields, True),
+            (app_url, app_fields, False),
+        ):
+            response = client.post(
+                url, data=fields, auth=AUTH, follow_redirects=False,
+                headers={"Origin": str(client.base_url).rstrip("/")},
+            )
+            assert response.status_code == 303
+            assert signals[-1]["local_operation"] is flag
+            assert signals[-1]["operation_id"] is None
+            assert signals[-1]["target"] == LIGHT
+        current = client.get(response.headers["location"], auth=AUTH).text
+        assert "4000K" in current and '<option value="아빠" selected>' in current
+        truth = client.get("/operator/truth", auth=AUTH).json()
+        assert [
+            (row["actor"], row["actor_name"], row["action_path"]) for row in truth
+        ] == [
+            ("resident", "엄마", "device_panel"),
+            ("resident", "아빠", "other_app"),
+        ]
+        assert public_value(signals)

@@ -12,7 +12,26 @@
     <header>
       <h1>Household operator</h1>
       <a href="/sim/viewer">Open household stage</a>
+      <a href="/app">Open appliance app</a>
     </header>
+    {% if people %}
+    <section class="control person-controls" aria-label="Named person controls">
+      <h2>Person actions</h2>
+      {% for person in people %}
+      <details{% if loop.first %} open{% endif %}>
+        <summary>{{ person.name }}</summary>
+        {% for target, label, actions in devices if actions %}
+        <form method="post" action="/operator/person?target={{ target|urlencode }}">
+          <input type="hidden" name="person" value="{{ person.name }}">
+          {% for action in actions %}
+          <button name="control" value="{{ action.key }}">{{ person.name }} · 기기 패널 · {{ label }} {{ action.label }}</button>
+          {% endfor %}
+        </form>
+        {% endfor %}
+      </details>
+      {% endfor %}
+    </section>
+    {% endif %}
     <section class="controls" aria-label="Operator controls">
       <section class="control">
         <h2>Home events</h2>

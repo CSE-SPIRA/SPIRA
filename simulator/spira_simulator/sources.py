@@ -133,7 +133,7 @@ async def stage_overlay(
         if key not in runs or record.at > runs[key].at:
             runs[key] = record
     preparation = []
-    item_notices = []
+    notices = []
     for plan in stage_plans:
         if plan.household_id != household_id:
             continue
@@ -146,7 +146,7 @@ async def stage_overlay(
                 if isinstance(task.trigger, TimeTrigger)
                 else task.trigger.event.value
             )
-            overlay = item_notices if task.source.value == "item" else preparation
+            overlay = notices if task.source.value == "item" else preparation
             for action in task.actions:
                 if (
                     plan.plan_id,
@@ -159,7 +159,8 @@ async def stage_overlay(
                             "task_id": task.task_id,
                             "device": action.device,
                             "command": action.cmd,
-                            "target_value": action.value,
+                            # Item notice text stays out of the stage (E5-R6).
+                            "target_value": None if overlay is notices else action.value,
                             "wait": wait,
                             "protective": task.protective is True,
                         }
@@ -187,7 +188,7 @@ async def stage_overlay(
             restores.append(row)
     return {
         "preparation": preparation,
-        "item_notices": item_notices,
+        "notices": notices,
         "restores": restores,
         "errors": errors,
     }

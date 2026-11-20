@@ -1,5 +1,12 @@
 {
   "household_id": "h_042",
+  "display_name": "지아네",
+  "demo_people": [
+    {"name": "엄마", "role": "resident"},
+    {"name": "아빠", "role": "resident"},
+    {"name": "지아", "role": "child"},
+    {"name": "손님", "role": "guest"}
+  ],
   "devices": [
     {
       "target": "mqtt:cleaner_01",

@@ -118,6 +118,36 @@ show no planned or applied household preparation. Viewer controls MUST NOT creat
 execution success. Operator writes and judge output MUST remain on the operator
 side, not the household viewer.
 
+**E5-R4.** The household viewer MUST draw the household as a floor plan: the
+profile's rooms as areas, each device placed in its room, and the entrance as
+the place of home events (package, doorbell, door). A viewer MUST be able to
+link to the viewers of the other configured households, so the presenter can
+switch homes.
+
+**E5-R5.** Each device tile MUST state its observed value as household content,
+not raw fields: for example the oven's set temperature, remaining time and
+whether it is baking, the light's colour or colour temperature, the display's
+scene, and the fridge notice text. The same tile MUST still follow E5-R1 and
+E5-R2.
+
+**E5-R6.** The viewer MAY mark who made the latest change to a device from World
+truth (SPIRA, or a person's display name and path). It MUST NOT show the Hub's
+attribution, the judge's verdict, or anything from SPIRA's reasoning: no items,
+intents, rationale or card text. Planned overlays show the device, the action
+with its device-level target value, and its trigger or time; item notice text
+stays out of the stage until the device shows it.
+
+**E5-R7.** The viewer MUST show the wall-clock day of week and time (E9-R1).
+
+**E5-R8.** The operator MUST offer person actions as single controls that name
+the person, the path and the act (for example "resident · device panel · start
+oven"), built from the profile's people and device commands, never from a plan.
+
+**E5-R9.** The Simulator MUST provide an appliance-app page: a phone-sized page,
+openable on its own URL on another phone, that lists the household's devices and
+lets a person change their values. A change from it MUST travel the
+`other_app` path (no local-operation report), so it reads as Class B to the Hub.
+
 <a id="e6"></a>
 
 ### E6. Actor signals, Hub attribution, and judge (PC-5, PC-6)
@@ -212,6 +242,9 @@ passing claim until an implementation change supplies bounded evidence.
 | SIM-AT-14 | Send a multi-property command containing one invalid property | The command is rejected and every value and witness remains unchanged | E2-R3 | PC-4 | Required |
 | SIM-AT-16 | Compose physical Tapo, virtual Class A, and virtual Matter devices | Every tile/result shows physical or virtual per device; assumptions are labelled; Tapo and Matter report `local_operation=false`; no physical qualification is inferred | E5-R2, E6-R2, E8-R1, E8-R2 | PC-4, PC-5, PC-6 | **Provisional only for the Class A comparison, pending PQ-01** |
 | SIM-AT-18 | Run the demo with Server `DEMO_MODE=1` | App/Hub/Simulator observations use offset wall-clock timestamps; shortened waits come from Server data and no virtual demo-clock control is present | E9-R1 | PC-4 | Required |
+| SIM-AT-19 | Open both households' viewers during the birthday scene | Each shows a floor plan with devices in their rooms and the entrance; tiles read as content (oven temperature and time, light colour, display scene, fridge notice); weekday and wall-clock time are shown; a link reaches the other home | E5-R4, E5-R5, E5-R7 | PC-4 | Required |
+| SIM-AT-20 | Inspect the viewer page and its data during an active plan | No item, intent, rationale, card text, Hub `by` or judge verdict appears; overlays carry device, action and trigger or time only | E5-R6 | PC-4, PC-5 | Required |
+| SIM-AT-21 | Use a named person control, then change the same device from the appliance-app page | The control emits the panel path with the person's name; the appliance-app change uses `other_app` with `local_operation=false`; both are in the truth journal | E5-R8, E5-R9, E6-R2 | PC-5, PC-6 | **Provisional for the Class A panel signal, pending PQ-01** |
 
 ## 4. Open items
 
