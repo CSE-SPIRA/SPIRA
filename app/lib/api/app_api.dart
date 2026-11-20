@@ -62,7 +62,7 @@ class AppApi {
     request.followRedirects = false;
     request.headers['Accept'] = 'application/json';
     final bearer = token;
-    if (bearer != null && request.url.path != _uri('/health').path) {
+    if (bearer != null && request.url.path.startsWith(_uri('/v1/').path)) {
       request.headers['Authorization'] = 'Bearer $bearer';
     }
     final response = await _client
@@ -196,6 +196,24 @@ class AppApi {
         ),
       );
     }
+    return wire.orderAcceptedFromJson(await _send(request, {200, 202}));
+  }
+
+  Future<wire.OrderAccepted> shareExample() async {
+    // The demo shell route replays a recorded order and only needs a PNG part.
+    final image = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=',
+    );
+    final request = http.MultipartRequest('POST', _uri('/demo/api/order'))
+      ..fields['sample'] = 'birthday'
+      ..files.add(
+        http.MultipartFile.fromBytes(
+          'images',
+          image,
+          filename: 'example-order.png',
+          contentType: MediaType('image', 'png'),
+        ),
+      );
     return wire.orderAcceptedFromJson(await _send(request, {200, 202}));
   }
 }

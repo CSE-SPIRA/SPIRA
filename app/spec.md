@@ -27,7 +27,11 @@ PC-3, PC-5, PC-6)
 **P-R2.** The App MUST derive product state only from contract values received
 from the Server and MUST distinguish observed results from acknowledgements,
 unknown facts from success, and virtual, physical, fixture, and real-Server
-qualification. It MUST NOT read or control the Hub or Simulator directly.
+qualification. The Hub's home-key authenticated `GET /home/onboarding/devices`
+supplies the read-only inventory for 우리 집. The App MUST mark devices by the
+card's rationale tasks and show those devices alone with a note when the Hub
+list is unavailable. The App MUST NOT use the Hub or Simulator to control
+devices directly.
 (PC-4, PC-5)
 
 **P-R3.** Until the real Server implements the App contract, the local App peer
@@ -54,10 +58,12 @@ PC-5)
 
 ### A3. Shared orders
 
-**A3-R1.** The only order input MUST be an Android OS share containing one to
-three ordered screenshots. The App MUST NOT provide an image picker, form, or
-follow-up question. It MUST preserve one share identity so redelivery or retry
-does not create a second episode. (PC-1, PC-3, PC-4)
+**A3-R1.** The only production order input MUST be an Android OS share
+containing one to three ordered screenshots. The App MUST NOT provide an image
+picker, form, or follow-up question. It MUST preserve one share identity so
+redelivery or retry does not create a second episode. The browser fixture
+preview uses the demo shell's sample order and disables the Android share and
+calendar integrations. (PC-1, PC-3, PC-4)
 
 **A3-R2.** An HTTP 202 MUST be shown only as intake acceptance, never as a
 finished judgment or preparation. The App MUST use the episode contract to show
@@ -172,7 +178,7 @@ exits.
 | APP-AT-11 | Render the `ep_9031` and `ep_9150` evidence chains from contract fields. A line's WHY focuses its task and supporting situation. A second open uses the stored rationale. | PC-1, PC-2 | A6-R1 |
 | APP-AT-12 | Render the plain-groceries episode with `card_ids: []` and item guidance through unreleased, released, and closed states. No preparation card is fabricated, and the guidance lifecycle remains visible. | PC-1, PC-2 | A3-R2, A7-R1 |
 | APP-AT-13 | From settings, open memory, view Server rows, delete one case with a failed response and then a successful response/readback. No edit controls exist; failure remains visible; deletion is claimed only after Server confirmation. | PC-6 | A9-R1 |
-| APP-AT-14 | Run the same scene against the local fixture peer and against a qualified Server profile. Fixture qualification is visible and never presented as real-Server, physical-device, or native-lifecycle evidence; no App request reaches Hub or Simulator endpoints. | PC-4 | P-R2, P-R3 |
+| APP-AT-14 | Run the same scene against the local fixture peer and against a qualified Server profile. Fixture qualification is visible and never presented as real-Server, physical-device, or native-lifecycle evidence. Verify 우리 집 reads the Hub inventory and that browser sample sharing uses the demo shell route. | PC-4 | P-R2, P-R3 |
 | APP-AT-15 | With Android large text and a screen reader enabled, locate and operate card Stop, pre-start line off/on, and settings pause. Each scope and pending/confirmed result is identifiable without color alone. | PC-5 | A5-R1, A5-R2, A5-R3 |
 
 ## 4. Open items

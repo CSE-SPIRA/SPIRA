@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 // ignore: deprecated_member_use
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -12,6 +13,7 @@ import 'features/settings.dart';
 import 'features/setup.dart';
 import 'platform/android_bridge.dart';
 import 'platform/google_calendar.dart';
+import 'platform/home_hub_onboarding.dart';
 import 'theme.dart';
 
 void main() {
@@ -36,6 +38,7 @@ void main() {
   const discovery = String.fromEnvironment('SPIRA_DISCOVERY_JSON');
   const calendarClientId = String.fromEnvironment('SPIRA_GOOGLE_CLIENT_ID');
   const household = String.fromEnvironment('SPIRA_HOUSEHOLD_ID');
+  const hubUrl = String.fromEnvironment('SPIRA_HUB_URL');
   wire.Devices? discovered;
   if (discovery.isNotEmpty) {
     try {
@@ -44,15 +47,18 @@ void main() {
       // Setup displays device discovery as unavailable.
     }
   }
-  final reader = calendarClientId.isEmpty
+  final android = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+  final reader = !android || calendarClientId.isEmpty
       ? null
       : GoogleCalendarReader(calendarClientId).call;
   runApp(
     SpiraApp(
       app: AppController(
         api: AppApi(baseUrl),
-        platform: AndroidBridge(),
+        platform: android ? AndroidBridge() : null,
         store: PreferencesAppStore(),
+        homeHub: hubUrl.isEmpty ? null : HttpHomeHubOnboarding(hubUrl),
+        browserPreview: kIsWeb,
         fixture:
             const String.fromEnvironment(
               'SPIRA_PEER',
@@ -117,12 +123,20 @@ class _HomeState extends State<_Home> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  Future<void> _token() async {
+  Future<void> _token({bool hub = false}) async {
     final token = await showDialog<String>(
       context: context,
-      builder: (_) => const _TokenDialog(),
+      builder: (_) => _TokenDialog(
+        title: hub ? '우리 집 접속 키' : '서버 접속 토큰',
+        label: hub ? '접속 키' : '접속 토큰',
+      ),
     );
-    if (token != null && mounted) app.useToken(token);
+    if (token == null || !mounted) return;
+    if (hub) {
+      app.homeHub?.useApiKey(token);
+    } else {
+      app.useToken(token);
+    }
   }
 
   @override
@@ -143,6 +157,12 @@ class _HomeState extends State<_Home> with WidgetsBindingObserver {
               tooltip: '서버 접속 토큰 입력',
               onPressed: _token,
               icon: const Icon(Icons.key),
+            ),
+          if (app.step == SetupStep.ready && app.homeHub != null)
+            IconButton(
+              tooltip: '우리 집 접속 키 입력',
+              onPressed: () => _token(hub: true),
+              icon: const Icon(Icons.vpn_key_outlined),
             ),
           if (app.step == SetupStep.ready)
             IconButton(
@@ -182,7 +202,10 @@ class _HomeState extends State<_Home> with WidgetsBindingObserver {
 }
 
 class _TokenDialog extends StatefulWidget {
-  const _TokenDialog();
+  const _TokenDialog({required this.title, required this.label});
+
+  final String title;
+  final String label;
 
   @override
   State<_TokenDialog> createState() => _TokenDialogState();
@@ -199,13 +222,13 @@ class _TokenDialogState extends State<_TokenDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('서버 접속 토큰'),
+    title: Text(widget.title),
     content: TextField(
       controller: _text,
       obscureText: true,
       autocorrect: false,
       enableSuggestions: false,
-      decoration: const InputDecoration(labelText: '접속 토큰'),
+      decoration: InputDecoration(labelText: widget.label),
     ),
     actions: [
       TextButton(

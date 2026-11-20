@@ -9,6 +9,7 @@ import 'api/app_api.dart';
 import 'contracts.dart' as wire;
 import 'platform/android_bridge.dart';
 import 'platform/google_calendar.dart';
+import 'platform/home_hub_onboarding.dart';
 
 abstract interface class AppStore {
   Future<String?> read(String key);
@@ -38,15 +39,19 @@ class AppController extends ChangeNotifier {
     required this.platform,
     required this.store,
     required this.fixture,
+    this.browserPreview = false,
+    this.homeHub,
     this.readCalendar,
     this.discovered,
     this.configuredHousehold,
   });
 
   final AppApi api;
-  final AppPlatform platform;
+  final AppPlatform? platform;
   final AppStore store;
   final bool fixture;
+  final bool browserPreview;
+  final HttpHomeHubOnboarding? homeHub;
   final CalendarReader? readCalendar;
   final wire.Devices? discovered;
   final String? configuredHousehold;
@@ -67,10 +72,12 @@ class AppController extends ChangeNotifier {
   bool pausePending = false;
   bool needsToken = false;
   bool refreshed = false;
+  bool sharingExample = false;
   String? setupError;
   String? refreshError;
   String? uploadError;
   String? shareIssue;
+  String? exampleShareError;
   int queuedShares = 0;
 
   final householdTypes = <String>{};
@@ -116,7 +123,7 @@ class AppController extends ChangeNotifier {
   bool get canResendCalendar => _calendarConnected && readCalendar != null;
 
   Future<void> start() async {
-    _shareSubscription = platform.sharesChanged.listen((_) {
+    _shareSubscription = platform?.sharesChanged.listen((_) {
       _inboxChanged = true;
       unawaited(sync());
     });
@@ -259,7 +266,7 @@ class AppController extends ChangeNotifier {
           wire.HouseholdCreate(householdTypes: []),
         );
         household = created.householdId;
-        // The App API has no route to hand off the Hub key.
+        homeHub?.useApiKey(created.hubApiKey);
         await _saveSetup();
       }
       await api.profile(
@@ -349,7 +356,7 @@ class AppController extends ChangeNotifier {
 
   void _requestNotificationPermission() {
     unawaited(
-      platform.requestNotificationPermission().catchError((Object _) {}),
+      platform?.requestNotificationPermission().catchError((Object _) {}),
     );
   }
 
@@ -387,6 +394,8 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _upload() async {
+    final platform = this.platform;
+    if (platform == null) return;
     final id = household!;
     try {
       final inbox = await platform.inbox(_scope);
@@ -415,6 +424,26 @@ class AppController extends ChangeNotifier {
       }
     } catch (error) {
       uploadError = _error(error, '주문을 보내지 못했어요. 다시 시도해 주세요.');
+    }
+  }
+
+  Future<void> shareExample() async {
+    if (!browserPreview || !fixture || !canControl || sharingExample) return;
+    sharingExample = true;
+    exampleShareError = null;
+    _change();
+    try {
+      await _serialize(() async {
+        final receipt = await api.shareExample();
+        accepted.add(receipt.episodeId);
+        await _save();
+        await _refresh();
+      });
+    } catch (error) {
+      exampleShareError = _error(error, '예시 주문을 보내지 못했어요. 다시 시도해 주세요.');
+    } finally {
+      sharingExample = false;
+      _change();
     }
   }
 
@@ -459,7 +488,7 @@ class AppController extends ChangeNotifier {
           continue;
         }
         cards[card.cardId] = card;
-        if (card.notify) {
+        if (platform != null && card.notify) {
           _notifications[jsonEncode([card.cardId, card.updatedAt])] = [
             '준비 카드',
             card.text,
@@ -488,7 +517,8 @@ class AppController extends ChangeNotifier {
         }
         episodes[episode.episodeId] = episode;
         accepted.remove(episode.episodeId);
-        if (episode.status == wire.EpisodeStatus.READ_FAILED) {
+        if (platform != null &&
+            episode.status == wire.EpisodeStatus.READ_FAILED) {
           _notifications[jsonEncode(['read_failed', episode.episodeId])] = [
             '주문을 읽지 못했어요',
             '주문 화면을 캡처해서 다시 공유해 주세요.',
@@ -523,6 +553,8 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _deliverNotifications() async {
+    final platform = this.platform;
+    if (platform == null) return;
     final sent = <String>[];
     for (final entry in _notifications.entries) {
       try {
@@ -790,6 +822,7 @@ class AppController extends ChangeNotifier {
     _disposed = true;
     _timer?.cancel();
     unawaited(_shareSubscription?.cancel());
+    homeHub?.close();
     super.dispose();
   }
 }

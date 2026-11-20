@@ -13,6 +13,7 @@ import 'package:spira_app/contracts.dart' as wire;
 import 'package:spira_app/main.dart';
 import 'package:spira_app/platform/android_bridge.dart';
 import 'package:spira_app/platform/google_calendar.dart';
+import 'package:spira_app/platform/home_hub_onboarding.dart';
 import 'package:spira_app/theme.dart';
 
 Map<String, dynamic> fixture(String file, {String episode = 'ep_9031'}) =>
@@ -231,7 +232,10 @@ class Peer {
       ));
       return reaction!(request);
     }
-    if (method == 'POST' && path == '/v1/orders') return upload!(request);
+    if (method == 'POST' &&
+        (path == '/v1/orders' || path == '/demo/api/order')) {
+      return upload!(request);
+    }
     fail('Unexpected App API request $method $path');
   }
 }
@@ -250,6 +254,7 @@ AppController controller(
   TestPlatform? platform,
   TestStore? store,
   wire.Devices? discovered,
+  HttpHomeHubOnboarding? homeHub,
   CalendarReader? calendar,
   bool setup = false,
   bool fixture = true,
@@ -260,6 +265,7 @@ AppController controller(
   fixture: fixture,
   configuredHousehold: setup ? null : 'h_042',
   discovered: discovered,
+  homeHub: homeHub,
   readCalendar: calendar,
 );
 
@@ -1144,17 +1150,31 @@ void main() {
     },
   );
 
-  testWidgets('our home marks devices for the card that opened it', (
+  testWidgets('browser sample opens WHY and marks nine Hub devices by card', (
     tester,
   ) async {
     final peer = Peer();
-    peer.episodes['ep_9031'] = fixture('episode.json')
-      ..['card_ids'] = ['nc_331', 'nc_340'];
-    peer.cards = [
-      fixture('card.v1.json'),
-      fixture('card.found.json', episode: 'ep_9120')
-        ..['episode_id'] = 'ep_9031',
-    ];
+    peer.upload = (request) async {
+      expect(request.url.path, '/demo/api/order');
+      expect(request.headers['authorization'], isNull);
+      expect(latin1.decode(request.bodyBytes), contains('name="sample"'));
+      expect(latin1.decode(request.bodyBytes), contains('birthday'));
+      expect(
+        latin1.decode(request.bodyBytes),
+        contains('filename="example-order.png"'),
+      );
+      peer.episodes['ep_9031'] = fixture('episode.json')
+        ..['card_ids'] = ['nc_331', 'nc_340'];
+      peer.cards = [
+        fixture('card.v1.json'),
+        fixture('card.found.json', episode: 'ep_9120')
+          ..['episode_id'] = 'ep_9031',
+      ];
+      return Peer.response({
+        'episode_id': 'ep_9031',
+        'status': 'received',
+      }, 202);
+    };
     (peer.rationales['ep_9031']!['tasks'] as List).add({
       'task_id': 't_notice#7',
       'card_id': 'nc_340',
@@ -1166,11 +1186,52 @@ void main() {
         {'id': 'fridge_01', 'type': 'fridge', 'room': '주방'},
       ],
     });
-    final app = controller(
-      peer,
-      discovered: wire.Devices.fromJson(fixture('devices.json')),
+    final homeHub = HttpHomeHubOnboarding(
+      'http://hub.test',
+      client: MockClient((request) async {
+        expect(request.method, 'GET');
+        expect(request.url.path, '/home/onboarding/devices');
+        expect(request.headers['x-api-key'], 'test-home-key');
+        expect(request.headers['authorization'], isNull);
+        final inventory = fixture('devices.json');
+        (inventory['devices'] as List).addAll([
+          for (final (id, type, room) in [
+            ('purifier_01', 'purifier', '거실'),
+            ('styler_01', 'styler', '현관'),
+          ])
+            {
+              'id': id,
+              'type': type,
+              'room': room,
+              'substrate': 'virtual',
+              'commands': [],
+              'events': [],
+              'never': [],
+              'noisy': false,
+            },
+        ]);
+        return Peer.response(inventory);
+      }),
+    );
+    final app = AppController(
+      api: peer.client()..token = 'test-app-token',
+      platform: null,
+      store: TestStore(),
+      fixture: true,
+      browserPreview: true,
+      configuredHousehold: 'h_042',
+      homeHub: homeHub,
     );
     await openApp(tester, app, size: const Size(390, 760));
+    await tester.tap(find.byTooltip('우리 집 접속 키 입력'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'test-home-key');
+    await tapText(tester, '연결');
+    await tapText(tester, '예시 주문으로 공유');
+    await tapText(tester, '왜?');
+    expect(find.text('판단 근거'), findsOneWidget);
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
     await tapText(tester, '우리 집');
 
     Finder statusFor(String device, String status) => find.descendant(
@@ -1183,9 +1244,12 @@ void main() {
 
     expect(find.text('거실'), findsOneWidget);
     expect(find.text('주방'), findsOneWidget);
-    expect(find.text('확인한 기기 7대'), findsOneWidget);
+    expect(find.text('현관'), findsOneWidget);
+    expect(find.text('확인한 기기 9대'), findsOneWidget);
     expect(statusFor('로봇청소기', '준비에 선택됨'), findsOneWidget);
     expect(statusFor('냉장고', '쉬는 중'), findsOneWidget);
+    expect(statusFor('공기청정기', '쉬는 중'), findsOneWidget);
+    expect(statusFor('스타일러', '쉬는 중'), findsOneWidget);
     expect(find.text('준비에 선택됨'), findsNWidgets(6));
 
     await tester.tap(find.byType(BackButton));
@@ -1198,13 +1262,27 @@ void main() {
     expect(peer.rationaleReads, 1);
   });
 
-  testWidgets('our home shows only selected devices without an inventory', (
+  testWidgets('our home shows only selected devices when the Hub is offline', (
     tester,
   ) async {
     final peer = Peer();
     peer.episodes['ep_9031'] = fixture('episode.json');
     peer.cards = [fixture('card.v1.json')];
-    await openApp(tester, controller(peer), size: const Size(390, 760));
+    final homeHub = HttpHomeHubOnboarding(
+      'http://hub.test',
+      client: MockClient(
+        (request) async => throw http.ClientException('offline'),
+      ),
+    )..useApiKey('test-home-key');
+    await openApp(
+      tester,
+      controller(
+        peer,
+        homeHub: homeHub,
+        discovered: wire.Devices.fromJson(fixture('devices.json')),
+      ),
+      size: const Size(390, 760),
+    );
     await tapText(tester, '우리 집');
 
     expect(find.text('거실'), findsOneWidget);

@@ -24,6 +24,17 @@ class Preparations extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
         children: [
           Text('우리 집 준비', style: Theme.of(context).textTheme.headlineMedium),
+          if (app.browserPreview && app.fixture)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton(
+                onPressed: app.canControl && !app.sharingExample
+                    ? app.shareExample
+                    : null,
+                child: Text(app.sharingExample ? '주문을 보내는 중…' : '예시 주문으로 공유'),
+              ),
+            ),
+          if (app.exampleShareError case final error?) StatusMessage(error),
           if (app.refreshError case final error?) StatusMessage(error),
           if (app.stale && known.isNotEmpty)
             const StatusMessage('마지막으로 확인한 정보예요. 현재 상태를 확인하는 중이에요.'),
@@ -50,7 +61,8 @@ class Preparations extends StatelessWidget {
               app.refreshError == null &&
               app.accepted.isEmpty)
             const StatusMessage('준비를 불러오는 중이에요…'),
-          if (known.isEmpty &&
+          if (app.platform != null &&
+              known.isEmpty &&
               app.refreshed &&
               app.accepted.isEmpty &&
               app.queuedShares == 0)

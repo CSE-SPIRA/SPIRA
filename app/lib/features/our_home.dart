@@ -1,3 +1,5 @@
+import 'dart:async';
+
 // ignore: deprecated_member_use
 import 'package:flutter/material.dart';
 
@@ -9,66 +11,64 @@ import 'settings.dart';
 import 'setup.dart';
 
 void openOurHome(BuildContext context, AppController app, wire.Card card) {
-  late final rationale = app.rationale(card.episodeId);
+  final home = (
+    app
+        .rationale(card.episodeId)
+        .then<wire.Rationale?>((result) => result, onError: (Object _) => null),
+    app.homeHub?.fetchDevices(app.household!) ?? Future<wire.Devices?>.value(),
+  ).wait;
   Navigator.push<void>(
     context,
     MaterialPageRoute(
-      builder: (_) => _OurHome(app: app, card: card, rationale: rationale),
+      builder: (_) => _OurHome(app: app, card: card, home: home),
     ),
   );
 }
 
 class _OurHome extends StatelessWidget {
-  const _OurHome({
-    required this.app,
-    required this.card,
-    required this.rationale,
-  });
+  const _OurHome({required this.app, required this.card, required this.home});
 
   final AppController app;
   final wire.Card card;
-  final Future<wire.Rationale> rationale;
+  final Future<(wire.Rationale?, wire.Devices?)> home;
 
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('우리 집')),
     body: SafeArea(
       top: false,
-      child: FutureBuilder<wire.Rationale>(
-        future: rationale,
+      child: FutureBuilder<(wire.Rationale?, wire.Devices?)>(
+        future: home,
         builder: (context, snapshot) {
-          final result = snapshot.data;
+          final (result, inventory) = snapshot.data ?? (null, null);
           final selected = <String, wire.Device>{
             for (final task in result?.tasks ?? const <wire.Task>[])
               if (task.cardId == card.cardId)
                 for (final device in task.devices) device.id: device,
           };
-          final inventory = app.discovered;
-          final hasInventory =
-              inventory != null && inventory.householdId == app.household;
-          final known = hasInventory
-              ? inventory.devices
-              : const <wire.DeviceElement>[];
-          final devices = {
-            for (final device in known)
-              device.id: (
-                type: device.type,
-                name: device.label,
-                room: device.room ?? selected[device.id]?.room,
-              ),
-          };
-          for (final device in selected.values) {
-            devices.putIfAbsent(
-              device.id,
-              () => (type: device.type, name: null, room: device.room),
-            );
-          }
+          final devices = [
+            if (inventory == null)
+              for (final device in selected.values)
+                (
+                  id: device.id,
+                  type: device.type,
+                  room: device.room,
+                  label: null,
+                )
+            else
+              for (final device in inventory.devices)
+                (
+                  id: device.id,
+                  type: device.type,
+                  room: device.room,
+                  label: device.label,
+                ),
+          ];
 
           final rooms = <String, List<Widget>>{};
-          for (final entry in devices.entries) {
-            final (:name, :type, :room) = entry.value;
+          for (final (:id, :type, :room, :label) in devices) {
             final roomName = room?.trim();
-            final label = name?.trim();
+            final name = label?.trim();
             rooms
                 .putIfAbsent(
                   roomName == null || roomName.isEmpty ? '방 미확인' : roomName,
@@ -76,13 +76,11 @@ class _OurHome extends StatelessWidget {
                 )
                 .add(
                   _HomeDevice(
-                    name: label == null || label.isEmpty
+                    name: name == null || name.isEmpty
                         ? _homeDeviceLabel(type)
-                        : label,
+                        : name,
                     type: type,
-                    selected: result == null
-                        ? null
-                        : selected.containsKey(entry.key),
+                    selected: result == null ? null : selected.containsKey(id),
                   ),
                 );
           }
@@ -117,13 +115,15 @@ class _OurHome extends StatelessWidget {
                 const LinearProgressIndicator(semanticsLabel: '준비 기기 확인 중')
               else if (result == null)
                 const StatusMessage('이번 준비에 선택된 기기를 확인할 수 없어요.')
-              else if (!hasInventory && devices.isNotEmpty)
+              else if (inventory == null && devices.isNotEmpty)
                 const StatusMessage('집 기기 목록을 받지 못해 이번 준비에 선택된 기기만 보여 드려요.'),
               if (devices.isNotEmpty) ...[
                 Text('확인한 기기 ${devices.length}대'),
                 const SizedBox(height: 12),
                 _RoomMap(roomNames: roomNames, rooms: rooms),
-              ] else if (result != null)
+              ] else if (inventory != null)
+                const Text('집에 등록된 기기가 없어요.')
+              else if (result != null)
                 const Text('이번 준비에 선택된 기기가 없어요.'),
             ],
           );
