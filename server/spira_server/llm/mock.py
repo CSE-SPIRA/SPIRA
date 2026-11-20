@@ -65,7 +65,7 @@ class MockProvider:
         self.seen: list[tuple[str, str]] = []   # (stage, key) of every call, for tests
 
     def complete(self, *, stage: str, system: str, user: str, json_schema: dict, schema_name: str,
-                 images: Sequence[bytes], timeout_s: int) -> RawReply:
+                 images: Sequence[bytes], timeout_s: int, enforce_schema: bool = True) -> RawReply:
         key = key_for(system, user, images)
         self.seen.append((stage, key))
         path = self.folder / stage / f"{key}.json"

@@ -547,7 +547,7 @@ def generate(episode_id: str, *, now: datetime | None = None) -> S4Result:
 
     call = call_with_retry(get_llm(), stage="s4", system=prompts.system("s4"), user=p.message, schema=p.schema,
                            retry_template=prompts.text("s4_retry.txt"), default=None, episode_id=episode_id,
-                           raw=True, check=check)
+                           raw=True, check=check, enforce_schema=False)   # schema grows with the devices (§6.1)
     result.llm_called = True
     plan, bad = None, set()
     if call.ok:
