@@ -115,10 +115,12 @@ class _OrderSection extends StatelessWidget {
               seoulDateTime(episode.sharedAt),
               style: theme.textTheme.titleMedium,
             ),
-          StatusMessage(status),
           OrderExtraction(
             episode: episode,
             images: app.orderImages(episodeId),
+            status: status,
+            awaitingEpisode: app.accepted.contains(episodeId),
+            onComplete: (images) => app.finishOrderCapture(episodeId, images),
             rationale: app.requestedRationale(episodeId),
             child: episode == null
                 ? const SizedBox.shrink()

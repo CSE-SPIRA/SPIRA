@@ -71,9 +71,11 @@ For a manually started stack, save its printed output and pass `--stack-log`
 with that file. Use `--demo-port`, `--proxy-port`, and `--web-port` to change
 the defaults of 8730, 8731, and 8732.
 
-Click **예시 주문으로 공유** and wait for fixture processing and the next card
-poll. Open **왜?** or **우리 집** on the preparation card. This preview uses the
-demo shell's sample order and skips Android sharing and Google Calendar.
+Click **예시 주문으로 공유** to see the screenshot scan, extracted items, and
+preparation card. Open **왜?** or **우리 집** on the card. This preview uses the
+demo shell's sample order and skips Android sharing and Google Calendar. It
+displays the same bundled PNG it uploads to the demo route. The web build
+serves it at `/assets/assets/example-order.png`.
 
 ### Manual fallback
 

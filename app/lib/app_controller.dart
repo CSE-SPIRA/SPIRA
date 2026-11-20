@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
@@ -87,7 +88,8 @@ class AppController extends ChangeNotifier {
   final episodes = <String, wire.Episode>{};
   final cards = <String, wire.Card>{};
   final accepted = <String>{};
-  final _orderImages = <String, List<Uint8List>>{};
+  // Keep captures in memory until their extraction sequence has been shown.
+  final _orderCaptures = <String, Queue<List<Uint8List>>>{};
   final _startedTasks = <String, Set<String>>{};
   final _pendingStops = <String, Set<String>>{};
   final _uncertainStops = <String>{};
@@ -121,7 +123,20 @@ class AppController extends ChangeNotifier {
   ];
 
   List<Uint8List> orderImages(String episodeId) =>
-      _orderImages[episodeId] ?? [];
+      _orderCaptures[episodeId]?.first ?? const [];
+
+  void _queueCapture(String episodeId, List<Uint8List> images) {
+    if (images.isEmpty) return;
+    _orderCaptures.putIfAbsent(episodeId, Queue.new).addLast(images);
+  }
+
+  void finishOrderCapture(String episodeId, List<Uint8List> images) {
+    final captures = _orderCaptures[episodeId];
+    if (captures == null || !identical(captures.first, images)) return;
+    captures.removeFirst();
+    if (captures.isEmpty) _orderCaptures.remove(episodeId);
+    _change();
+  }
 
   bool stopPending(String cardId) => _pendingStops.containsKey(cardId);
   bool stopUncertain(String cardId) => _uncertainStops.contains(cardId);
@@ -432,8 +447,8 @@ class AppController extends ChangeNotifier {
             // The upload is already accepted even if its local preview is gone.
           }
         }
-        _orderImages[receipt.episodeId] = images;
         await platform.acknowledge(_scope, order.sourceId, receipt.episodeId);
+        _queueCapture(receipt.episodeId, images);
         queuedShares--;
         _change();
       }
@@ -453,7 +468,7 @@ class AppController extends ChangeNotifier {
         final asset = await rootBundle.load('assets/example-order.png');
         final image = Uint8List.sublistView(asset);
         final receipt = await api.shareExample(image);
-        _orderImages[receipt.episodeId] = [image];
+        _queueCapture(receipt.episodeId, [image]);
         accepted.add(receipt.episodeId);
         _change();
         await _save();
@@ -469,17 +484,6 @@ class AppController extends ChangeNotifier {
 
   Future<void> _refresh() async {
     final id = household!;
-    // Keep the capture through the refresh that delivers the read items.
-    // Captures are session-only and are never included in the saved snapshot.
-    _orderImages.removeWhere((episodeId, _) {
-      if (accepted.contains(episodeId)) return false;
-      final episode = episodes[episodeId];
-      return episode != null &&
-          (episode.items.isNotEmpty ||
-              episode.maskedCount > 0 ||
-              (episode.status != wire.EpisodeStatus.RECEIVED &&
-                  episode.status != wire.EpisodeStatus.READING));
-    });
     try {
       final poll = await api.cards(id, since: _cursor);
       final list = await api.episodes(id);
@@ -548,10 +552,6 @@ class AppController extends ChangeNotifier {
         }
         episodes[episode.episodeId] = episode;
         accepted.remove(episode.episodeId);
-        if (episode.status == wire.EpisodeStatus.READ_FAILED ||
-            episode.status == wire.EpisodeStatus.PAUSED_SKIP) {
-          _orderImages.remove(episode.episodeId);
-        }
         if (platform != null &&
             episode.status == wire.EpisodeStatus.READ_FAILED) {
           _notifications[jsonEncode(['read_failed', episode.episodeId])] = [
@@ -574,7 +574,7 @@ class AppController extends ChangeNotifier {
       // Card themes and set-aside items come from the stored rationale.
       for (final episode in episodes.values) {
         final justRead =
-            _orderImages.containsKey(episode.episodeId) &&
+            _orderCaptures.containsKey(episode.episodeId) &&
             (episode.items.isNotEmpty || episode.maskedCount > 0);
         if (_disposed || (!justRead && cardsFor(episode).isEmpty)) continue;
         unawaited(

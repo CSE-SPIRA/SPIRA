@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -6,162 +7,214 @@ import 'package:flutter/material.dart';
 
 import '../contracts.dart' as wire;
 import '../theme.dart';
+import 'setup.dart';
+
+const _scanDuration = Duration(milliseconds: 2400);
 
 class OrderExtraction extends StatefulWidget {
   const OrderExtraction({
     super.key,
     required this.episode,
     required this.images,
+    required this.status,
+    required this.awaitingEpisode,
+    required this.onComplete,
     required this.rationale,
     required this.child,
   });
 
   final wire.Episode? episode;
   final List<Uint8List> images;
+  final String status;
+  final bool awaitingEpisode;
+  final ValueChanged<List<Uint8List>> onComplete;
   final Future<wire.Rationale>? rationale;
   final Widget child;
 
   bool get hasRows =>
       (episode?.items.isNotEmpty ?? false) || (episode?.maskedCount ?? 0) > 0;
 
-  bool get reading =>
-      !hasRows &&
-      (episode == null ||
-          episode!.status == wire.EpisodeStatus.RECEIVED ||
-          episode!.status == wire.EpisodeStatus.READING);
+  bool get hasResult =>
+      !awaitingEpisode &&
+      episode != null &&
+      (hasRows ||
+          (episode!.status != wire.EpisodeStatus.RECEIVED &&
+              episode!.status != wire.EpisodeStatus.READING));
 
   @override
   State<OrderExtraction> createState() => _OrderExtractionState();
 }
 
 class _OrderExtractionState extends State<OrderExtraction>
-    with SingleTickerProviderStateMixin {
-  late final _reveal = AnimationController(vsync: this, value: 1)
+    with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+  late final _reveal = AnimationController(vsync: this, duration: appSettle)
     ..addStatusListener((status) {
-      if (status == AnimationStatus.completed) _revealingImages = const [];
+      if (status != AnimationStatus.completed) return;
+      final images = widget.images;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && identical(widget.images, images)) {
+          widget.onComplete(images);
+        }
+      });
     });
 
+  Timer? _scanWindow;
   bool _expanded = false;
-  bool _initialized = false;
   bool _reduceMotion = false;
-  bool _previewFirst = false;
-  List<Uint8List> _revealingImages = const [];
+
+  @override
+  bool get wantKeepAlive => widget.images.isNotEmpty;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _reduceMotion = MediaQuery.disableAnimationsOf(context);
-    if (!_initialized) {
-      _initialized = true;
-      if (widget.hasRows && widget.images.isNotEmpty) {
-        _showItems(previewFirst: true);
-      }
-    } else if (_reduceMotion && _reveal.isAnimating) {
-      _reveal.value = 1;
-    }
+    if (_reduceMotion && _reveal.isAnimating) _reveal.value = 1;
   }
 
   @override
   void didUpdateWidget(OrderExtraction oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.hasRows && !oldWidget.hasRows) {
-      _showItems(previewFirst: oldWidget.images.isEmpty);
-    } else if (!widget.hasRows && oldWidget.hasRows) {
-      _expanded = false;
-      _reveal.value = 1;
+    if (!identical(widget.images, oldWidget.images)) {
+      updateKeepAlive();
+      _scanWindow?.cancel();
+      _scanWindow = null;
+      if (widget.images.isNotEmpty) _reveal.reset();
     }
+    if (!widget.hasRows) {
+      _expanded = false;
+    } else if (!oldWidget.hasRows && widget.images.isEmpty) {
+      _expanded = true;
+    }
+    _advance();
   }
 
-  void _showItems({required bool previewFirst}) {
-    _expanded = true;
-    if (_reduceMotion || widget.images.isEmpty) return;
-    _previewFirst = previewFirst;
-    _revealingImages = widget.images;
-    _reveal.duration = previewFirst ? appSettle * 2 : appSettle;
-    _reveal.forward(from: 0);
+  void _previewFrame() {
+    if (_scanWindow != null) return;
+    final images = widget.images;
+    // Start the scan window after the decoded preview has had a frame to paint.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          !identical(widget.images, images) ||
+          _scanWindow != null) {
+        return;
+      }
+      setState(() {
+        _scanWindow = Timer(_scanDuration, () => setState(_advance));
+      });
+    });
+  }
+
+  void _advance() {
+    if (widget.images.isEmpty ||
+        _scanWindow == null ||
+        _scanWindow!.isActive ||
+        !widget.hasResult ||
+        _reveal.isAnimating ||
+        _reveal.isCompleted) {
+      return;
+    }
+    _expanded = widget.hasRows;
+    if (_reduceMotion || !widget.hasRows) {
+      _reveal.value = 1;
+    } else {
+      _reveal.forward();
+    }
   }
 
   @override
   void dispose() {
+    _scanWindow?.cancel();
     _reveal.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => FutureBuilder<wire.Rationale>(
-    future: widget.rationale,
-    builder: (context, snapshot) => AnimatedBuilder(
-      animation: _reveal,
-      child: widget.child,
-      builder: (context, following) {
-        final episode = widget.episode;
-        final revealing = _reveal.value < 1;
-        final progress = appEase.transform(
-          revealing && _previewFirst
-              ? const Interval(.5, 1).transform(_reveal.value)
-              : _reveal.value,
-        );
-        final images = widget.reading ? widget.images : _revealingImages;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (images.isNotEmpty)
-              ClipRect(
-                child: Align(
-                  alignment: Alignment.topCenter,
-                  heightFactor: 1 - (revealing ? progress : 0),
-                  child: Opacity(
-                    opacity: 1 - (revealing ? progress : 0),
-                    child: _CapturePreview(
-                      images: images,
-                      animate: !_reduceMotion,
-                    ),
-                  ),
-                ),
+  Widget build(BuildContext context) {
+    super.build(context);
+    return FutureBuilder<wire.Rationale>(
+      future: widget.rationale,
+      builder: (context, snapshot) => AnimatedBuilder(
+        animation: _reveal,
+        child: widget.child,
+        builder: (context, following) {
+          final episode = widget.episode;
+          final previewing = widget.images.isNotEmpty && !_reveal.isCompleted;
+          final revealing = previewing && _reveal.isAnimating;
+          final progress = revealing ? appEase.transform(_reveal.value) : 1.0;
+          final preview = revealing ? 1 - progress : 1.0;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              StatusMessage(
+                previewing && episode != null ? '주문을 읽고 있어요.' : widget.status,
               ),
-            if (episode != null && widget.hasRows) ...[
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Semantics(
-                  expanded: _expanded,
-                  child: TextButton.icon(
-                    onPressed: revealing
-                        ? null
-                        : () => setState(() => _expanded = !_expanded),
-                    icon: Icon(
-                      _expanded ? Icons.expand_less : Icons.expand_more,
-                    ),
-                    label: Text('읽은 품목 ${episode.itemCount}개'),
-                  ),
-                ),
-              ),
-              if (_expanded)
+              if (previewing)
                 ClipRect(
                   child: Align(
                     alignment: Alignment.topCenter,
-                    heightFactor: progress,
-                    child: OrderItemList(
-                      episode: episode,
-                      unbundled: snapshot.data?.unbundled ?? const [],
-                      reveal: progress,
+                    heightFactor: preview,
+                    child: Opacity(
+                      opacity: preview,
+                      child: _CapturePreview(
+                        images: widget.images,
+                        animate:
+                            _scanWindow != null && !revealing && !_reduceMotion,
+                        onFrame: _previewFrame,
+                      ),
                     ),
                   ),
                 ),
-            ] else if (episode != null && episode.itemCount > 0)
-              Text('읽은 품목 ${episode.itemCount}개'),
-            if (!revealing) following!,
-          ],
-        );
-      },
-    ),
-  );
+              if ((!previewing || revealing) && episode != null)
+                if (widget.hasRows) ...[
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Semantics(
+                      expanded: _expanded,
+                      child: TextButton.icon(
+                        onPressed: revealing
+                            ? null
+                            : () => setState(() => _expanded = !_expanded),
+                        icon: Icon(
+                          _expanded ? Icons.expand_less : Icons.expand_more,
+                        ),
+                        label: Text('읽은 품목 ${episode.itemCount}개'),
+                      ),
+                    ),
+                  ),
+                  if (_expanded)
+                    ClipRect(
+                      child: Align(
+                        alignment: Alignment.topCenter,
+                        heightFactor: progress,
+                        child: OrderItemList(
+                          episode: episode,
+                          unbundled: snapshot.data?.unbundled ?? const [],
+                          reveal: progress,
+                        ),
+                      ),
+                    ),
+                ] else if (episode.itemCount > 0)
+                  Text('읽은 품목 ${episode.itemCount}개'),
+              if (!previewing) following!,
+            ],
+          );
+        },
+      ),
+    );
+  }
 }
 
 class _CapturePreview extends StatelessWidget {
-  const _CapturePreview({required this.images, required this.animate});
+  const _CapturePreview({
+    required this.images,
+    required this.animate,
+    required this.onFrame,
+  });
 
   final List<Uint8List> images;
   final bool animate;
+  final VoidCallback onFrame;
 
   @override
   Widget build(BuildContext context) {
@@ -183,7 +236,14 @@ class _CapturePreview extends StatelessWidget {
                 semanticLabel: images.length == 1
                     ? '공유한 주문 화면'
                     : '공유한 주문 화면 ${index + 1}',
-                errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                frameBuilder: (_, child, frame, _) {
+                  if (frame != null) onFrame();
+                  return child;
+                },
+                errorBuilder: (_, _, _) {
+                  onFrame();
+                  return const SizedBox.shrink();
+                },
               ),
             ),
           ),
@@ -215,10 +275,8 @@ class _ScanningCapture extends StatefulWidget {
 
 class _ScanningCaptureState extends State<_ScanningCapture>
     with SingleTickerProviderStateMixin {
-  late final _scan = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1600),
-  )..repeat();
+  late final _scan = AnimationController(vsync: this, duration: _scanDuration)
+    ..repeat();
 
   @override
   void dispose() {
@@ -236,10 +294,7 @@ class _ScanningCaptureState extends State<_ScanningCapture>
       return Stack(
         fit: StackFit.expand,
         children: [
-          Transform.rotate(
-            angle: .025 * math.sin(_scan.value * 2 * math.pi),
-            child: pictures,
-          ),
+          pictures!,
           Align(
             alignment: Alignment(0, 2 * _scan.value - 1),
             child: FractionallySizedBox(
