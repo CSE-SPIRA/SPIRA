@@ -349,7 +349,8 @@ def build_task_message(*, bundles: list[dict], whens: dict[int, When | None], it
         lines = [nb["header"]]
         for it in dict.fromkeys(notice_items):
             owner = next((k for k, bd in enumerate(bundles, start=1) if it.type in bd["items"]), None)
-            lines.append(prompts.fill(nb["line"], TYPE=it.type, QTY=it.qty if it.qty is not None else unknown,
+            lines.append(prompts.fill(nb["line"], ITEM=_item_text({"type": it.type, "qty": it.qty,
+                                                                    "attributes": it.attributes}),
                                       GROUP=it.grp or unknown, BUNDLE=f" · 의도 {owner}의 물건" if owner else ""))
         parts.append("\n".join(lines))
     home = b["home"]

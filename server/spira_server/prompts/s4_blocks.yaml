@@ -13,7 +13,7 @@ intent:
   time_unknown: "모름 (일정이 아직 없음)"
 notice_items:
   header: "[관리법 문구가 필요한 물건]"
-  line: "- {TYPE} × {QTY} · {GROUP}{BUNDLE}"      # BUNDLE = " · 의도 {N}의 물건" or ""
+  line: "- {ITEM} · {GROUP}{BUNDLE}"      # ITEM = "{type} × {qty} [{key}: {value}, …]"; BUNDLE = " · 의도 {N}의 물건" or ""
 home:
   header: "[이 집]"
   types: "가구 유형: {TYPES}"

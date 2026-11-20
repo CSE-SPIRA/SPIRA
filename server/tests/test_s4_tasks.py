@@ -32,7 +32,7 @@ def test_t17_ep9031_drafts_equal_plan_v1(mock_llm):
     assert "시각: 토요일 14:00~17:00 (2일 뒤)" in message
     assert ("- light_01 · 조명 · 거실 · color(hue 0~360, brightness 0~100, saturation 0~100), "   # jsonb key order
             "color_temp(kelvin 2700~6500)") in message
-    assert "- 딸기 × 2 · 농축수산물 · 의도 1의 물건" in message
+    assert "- 딸기 × 2 [보관: 냉장] · 농축수산물 · 의도 1의 물건" in message   # R47 attributes
     assert "- 컵케이크 믹스 × 모름 · 음·식료품 · 의도 1의 물건" in message
     assert "- fridge_01 · 냉장고 · 주방 · show_notice(글자)" in message
     assert "- cooktop_01 · 인덕션 · 주방 · child_lock" in message      # heat is in never: left out
