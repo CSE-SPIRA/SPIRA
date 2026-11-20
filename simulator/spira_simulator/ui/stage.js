@@ -26,7 +26,7 @@ async function openHouse() {
   try {
     const { createHouse, replaceHouseMarkers } = await import("/sim/assets/house/house.js");
     replaceMarkers = replaceHouseMarkers;
-    house = createHouse(world, view);
+    house = createHouse(world);
     house.focus();
     renderHouse();
     view.classList.add("ready");

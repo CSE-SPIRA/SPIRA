@@ -2,6 +2,10 @@ import * as THREE from "./three.module.min.js";
 
 export const TV_SCENES = { kids_party: "어린이 파티", party: "파티", calm: "차분한 분위기", cinema: "영화" };
 const OVERVIEW = { eye: [8.5, 10.6, 17.4], aim: [-0.10, 0.76, 0], zoom: 1 };
+const WARM_WHITE = new THREE.Color("#ffa85f");
+const NEUTRAL_WHITE = new THREE.Color("#ffd8b7");
+const COOL_WHITE = new THREE.Color("#fff9fb");
+const LAMP_SHADE = new THREE.Color("#ffe4b4");
 
 export function hsvColor({ hue, saturation, brightness } = {}) {
   if (![hue, saturation, brightness].every(Number.isFinite)) return null;
@@ -15,6 +19,55 @@ export function hsvColor({ hue, saturation, brightness } = {}) {
     .map((channel) => Math.round((channel + value - chroma) * 255).toString(16).padStart(2, "0"))
     .join("");
 }
+
+export function createLivingLight(lamp, source, glowLevel) {
+  const fromTint = lamp.color.clone();
+  const targetTint = lamp.color.clone();
+  let fromLevel = 0, targetLevel = 0, changedAt = 0;
+
+  return {
+    update({ power, color }, now) {
+      fromTint.copy(lamp.color);
+      targetTint.copy(fromTint);
+      fromLevel = glowLevel.value;
+      changedAt = now;
+      targetLevel = 0;
+      if (power !== true || !color) return false;
+
+      const tint = hsvColor({ ...color, brightness: 100 });
+      if (tint && Number.isFinite(color.brightness)) {
+        targetTint.set(tint);
+        targetLevel = THREE.MathUtils.clamp(color.brightness / 100, 0, 1);
+        return targetLevel > 0;
+      }
+      if (Number.isFinite(color.kelvin)) {
+        const kelvin = THREE.MathUtils.clamp(color.kelvin, 2700, 6500);
+        if (kelvin < 4000) targetTint.lerpColors(WARM_WHITE, NEUTRAL_WHITE, (kelvin - 2700) / 1300);
+        else targetTint.lerpColors(NEUTRAL_WHITE, COOL_WHITE, (kelvin - 4000) / 2500);
+        // The temperature reading carries no brightness.
+        targetLevel = .26;
+      }
+      return false;
+    },
+    render(now, instant = false) {
+      const mix = instant ? 1 : THREE.MathUtils.smoothstep(now - changedAt, 0, 1000);
+      const level = THREE.MathUtils.lerp(fromLevel, targetLevel, mix);
+      lamp.color.lerpColors(fromTint, targetTint, mix);
+      lamp.intensity = 84 * level;
+      source.color.copy(LAMP_SHADE).lerp(lamp.color, level);
+      source.emissive.copy(lamp.color);
+      source.emissiveIntensity = 2.4 * level;
+      glowLevel.value = level;
+    },
+  };
+}
+
+const TV_LOOKS = {
+  kids_party: { sky: ["#9669bd", "#e997ac"], spill: ["#ffb47f", "#db8fde"] },
+  party: { sky: ["#5a204b", "#c35777"], spill: ["#fba46d", "#ec679e"] },
+  calm: { sky: ["#314f5e", "#b3cdab"], spill: ["#66a29c", "#b3cdab"] },
+  cinema: { sky: ["#13162d", "#545b93"], spill: ["#7776ba", "#a0a7ef"] },
+};
 
 export function layoutHouseLabels(markers, viewWidth, viewHeight) {
   const gap = 8;
@@ -68,7 +121,7 @@ export function replaceHouseMarkers(current, next) {
 }
 
 // The fixed I1 cutaway. View direction and entrance cues are separate from device values.
-export function createHouse(stage, view, { decorateLabel } = {}) {
+export function createHouse(stage, { decorateLabel } = {}) {
   const motion = matchMedia("(prefers-reduced-motion: reduce)");
   const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
   renderer.shadowMap.enabled = true;
@@ -81,9 +134,53 @@ export function createHouse(stage, view, { decorateLabel } = {}) {
 
   const scene = new THREE.Scene();
   const camera = new THREE.OrthographicCamera();
-  const floorGlow = new THREE.Color();
-  const reflectedWhite = new THREE.Color("#fff4ea");
-  const restingGlow = new THREE.Color("#e6e2df");
+  const lamp = new THREE.PointLight(WARM_WHITE, 0, 4.0, 2);
+  lamp.position.set(-1.42, 2.44, -.23);
+  const kitchenLight = new THREE.PointLight("#fff7ec", 14, 4.3, 2);
+  kitchenLight.position.set(4.18, 3.05, -.76);
+  scene.add(lamp, kitchenLight);
+
+  const roomLighting = {
+    livingTint: { value: lamp.color },
+    livingLevel: { value: 0 },
+    tvFloorTint: { value: new THREE.Color() },
+    tvWallTint: { value: new THREE.Color() },
+    tvLevel: { value: 0 },
+  };
+
+  function addRoomLighting(shader) {
+    Object.assign(shader.uniforms, roomLighting);
+    shader.vertexShader = `varying vec3 housePosition;\n${shader.vertexShader}`.replace(
+      "#include <worldpos_vertex>",
+      "#include <worldpos_vertex>\nhousePosition = (modelMatrix * vec4(transformed, 1.0)).xyz;",
+    );
+    shader.fragmentShader = `
+      varying vec3 housePosition;
+      uniform vec3 livingTint, tvFloorTint, tvWallTint;
+      uniform float livingLevel, tvLevel;
+      ${shader.fragmentShader}
+    `.replace("#include <opaque_fragment>", `
+      // Bounce falls across the actual surfaces and fades at the room boundaries.
+      if (housePosition.x > -5.05 && housePosition.x < 1.48) {
+        vec3 lampOffset = (housePosition - vec3(-1.48, 0.55, -0.20)) / vec3(4.0, 3.0, 5.4);
+        float roomEdge = smoothstep(-5.05, -4.24, housePosition.x)
+                        * (1.0 - smoothstep(0.52, 1.48, housePosition.x));
+        float bounce = livingLevel * roomEdge * (1.0 - smoothstep(0.10, 1.12, length(lampOffset)));
+        vec3 litSurface = outgoingLight * mix(vec3(1.0), livingTint, 0.9);
+        litSurface += (0.18 + 0.55 * diffuseColor.rgb) * livingTint;
+        outgoingLight = mix(outgoingLight, litSurface, bounce);
+
+        if (tvLevel > 0.0) {
+          vec3 tvOffset = (housePosition - vec3(-0.70, 1.24, -3.45)) / vec3(1.92, 2.4, 2.36);
+          float reflection = tvLevel * roomEdge * (1.0 - smoothstep(0.18, 1.0, length(tvOffset)));
+          vec3 screenTint = mix(tvFloorTint, tvWallTint, smoothstep(0.10, 2.22, housePosition.y));
+          outgoingLight += (0.13 + 0.32 * diffuseColor.rgb) * screenTint * reflection;
+        }
+      }
+      #include <opaque_fragment>
+    `);
+  }
+
   const mainLight = new THREE.DirectionalLight("#fff0d8", 2.4);
   mainLight.position.set(-5,12,7); mainLight.castShadow = true;
   Object.assign(mainLight.shadow.camera,{left:-11,right:11,top:9,bottom:-9,near:.5,far:35});
@@ -93,7 +190,11 @@ export function createHouse(stage, view, { decorateLabel } = {}) {
   const fill = new THREE.DirectionalLight("#eee6ff", .75);
   fill.position.set(5,5,-7); scene.add(fill);
 
-  const material = (color, props={}) => new THREE.MeshStandardMaterial({color,roughness:.78,...props});
+  function material(color, props = {}) {
+    const surface = new THREE.MeshStandardMaterial({ color, roughness: .78, ...props });
+    surface.onBeforeCompile = addRoomLighting;
+    return surface;
+  }
   const oak=material("#b98f65"), wood=material("#936d51"), stone=material("#efe4ca"), wall=material("#e9dfca");
   const sage=material("#777d68"), cream=material("#e5c8a5"), dark=material("#403936"), glass=material("#292334",{roughness:.29});
   const brass=material("#ad7544",{metalness:.5,roughness:.31}), linen=material("#b18b72"), ivory=material("#eee0c5");
@@ -273,10 +374,15 @@ export function createHouse(stage, view, { decorateLabel } = {}) {
   const tvMaterial=new THREE.MeshBasicMaterial({map:tvTexture.texture,color:"#ffffff",toneMapped:false});
   const display=group(0,0,0);
   box(2.25,1.28,.10,dark,-.70,1.52,-3.48,.057,display);
-  plane(2.12,1.16,tvMaterial,-.70,1.52,-3.419,display);
-  const tvReflect = new THREE.PointLight("#df83bd",0,4,2);
-  const tvTint = tvReflect.color.clone();
-  tvReflect.position.set(-.72,1.53,-3.17);scene.add(tvReflect);
+  const tvScreen = plane(2.12,1.16,tvMaterial,-.70,1.52,-3.419,display);
+  const musicAnchor = new THREE.Vector3(.18, 1.10, -3.419);
+  const musicPosition = new THREE.Vector3();
+  const musicCue = document.createElement("span");
+  musicCue.className = "tv-music";
+  musicCue.setAttribute("aria-hidden", "true");
+  musicCue.hidden = true;
+  musicCue.append(document.createElement("i"), document.createElement("i"), document.createElement("i"));
+  stage.append(musicCue);
 
   const pendant = group(-1.42,2.73,-.23);
   mesh(new THREE.LatheGeometry([
@@ -284,27 +390,11 @@ export function createHouse(stage, view, { decorateLabel } = {}) {
     new THREE.Vector2(.49,-.17),new THREE.Vector2(.49,-.22),new THREE.Vector2(.46,-.23),
     new THREE.Vector2(.16,.08),new THREE.Vector2(.10,.10)
   ],48),material("#f3d6af",{side:THREE.DoubleSide}),0,0,0,pendant);
-  const lampSource=material("#ffe4b4",{emissive:"#ffe4b4",emissiveIntensity:0});
-  disk(.43,.016,lampSource,0,-.22,0,pendant);
+  const lampSource=material(LAMP_SHADE,{emissive:WARM_WHITE,emissiveIntensity:0});
+  const lampFace = disk(.43,.016,lampSource,0,-.22,0,pendant);
   disk(.053,.47,brass,0,.37,0,pendant);
   disk(.15,.061,brass,0,.61,0,pendant);
-  const lamp=new THREE.PointLight("#ffcf99",0,9,2);
-  lamp.position.set(-1.42,2.44,-.23);scene.add(lamp);
-
-  const spillTexture=canvasTexture(256,256,(ctx,w,h)=>{
-    const grad=ctx.createRadialGradient(w/2,h/2,1,w/2,h/2,w/2);
-    grad.addColorStop(0,"rgba(255,255,255,.92)");grad.addColorStop(.44,"rgba(255,255,255,.42)");grad.addColorStop(1,"rgba(255,255,255,0)");
-    ctx.fillStyle=grad;ctx.fillRect(0,0,w,h);
-  });
-  spillTexture.paint();
-  function lightPatch(w,h,x,y,z,flat) {
-    const surface=new THREE.MeshBasicMaterial({map:spillTexture.texture,transparent:true,depthWrite:false,opacity:0,polygonOffset:true,polygonOffsetFactor:-2,toneMapped:false});
-    const patch=plane(w,h,surface,x,y,z);
-    if(flat) patch.rotation.x=-Math.PI/2;
-    return surface;
-  }
-  const floorSpill=lightPatch(6.0,5.8,-1.55,.145,-.17,true);
-  const wallSpill=lightPatch(4.8,3.1,-1.28,1.45,-3.726,false);
+  const livingLight = createLivingLight(lamp, lampSource, roomLighting.livingLevel);
 
   const cleanerModel=group(0,0,0);
   box(.53,.19,.30,dark,.82,.16,-2.82,.055,cleanerModel);
@@ -353,12 +443,27 @@ export function createHouse(stage, view, { decorateLabel } = {}) {
   const oven=group(0,0,0);
   box(1.05,.73,.14,dark,3.73,.59,-2.569,.052,oven);
   box(.93,.47,.053,glass,3.73,.49,-2.477,.036,oven);
-  const ovenWindow=material("#392f42",{roughness:.29,emissive:"#f3bd69",emissiveIntensity:0});
-  box(.82,.35,.015,ovenWindow,3.73,.49,-2.447,.048,oven);
+  box(.82,.35,.015,dark,3.73,.49,-2.447,.048,oven);
+  const ovenInterior = canvasTexture(128, 64, (ctx, w, h) => {
+    const heat = ctx.createRadialGradient(w * .62, h * .21, 2, w * .54, h * .42, w * .52);
+    heat.addColorStop(0, "#ffe0a7");
+    heat.addColorStop(.43, "#b55726");
+    heat.addColorStop(1, "#210e0a");
+    ctx.fillStyle = heat;
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = "#62321f";
+    ctx.fillRect(13, 39, w - 26, 2);
+    ctx.fillRect(11, 49, w - 22, 2);
+  });
+  ovenInterior.paint();
+  const ovenWindow=material("#292332",{
+    roughness:.29, emissive:"#fff2dc", emissiveMap:ovenInterior.texture, emissiveIntensity:0,
+  });
+  const ovenDoor = plane(.74,.28,ovenWindow,3.73,.49,-2.437,oven);
   box(.76,.039,.064,steel,3.73,.711,-2.42,.012,oven);
   const ovenTexture=canvasTexture(600,150);
-  const ovenScreen=new THREE.MeshBasicMaterial({map:ovenTexture.texture,toneMapped:false});
-  plane(.65,.14,ovenScreen,3.73,.846,-2.488,oven);
+  const ovenScreenMaterial=new THREE.MeshBasicMaterial({map:ovenTexture.texture,toneMapped:false});
+  const ovenScreen = plane(.77,.17,ovenScreenMaterial,3.73,.846,-2.488,oven);
 
   const kettle=group(0,0,0);
   box(.21,.27,.12,ivory,5.14,1.27,-3.53,.027,kettle);
@@ -406,8 +511,6 @@ export function createHouse(stage, view, { decorateLabel } = {}) {
   const goalTarget = new THREE.Vector3();
   const currentCamera = new THREE.Vector3();
   const currentTarget = new THREE.Vector3();
-  const targetLamp = new THREE.Color("#ffd29a");
-  const currentLamp = targetLamp.clone();
   const models = {
     cleaner_01: cleanerModel, light_01: pendant, display_01: display, cooktop_01: cooktop,
     oven_01: oven, fridge_01: fridge, plug_kettle: kettle,
@@ -415,10 +518,10 @@ export function createHouse(stage, view, { decorateLabel } = {}) {
   };
   const normalMaterials = new Map();
   const restingMaterials = new Map();
+  const observedSurfaces = new Set([lampFace, tvScreen, ovenDoor, ovenScreen, noticeScreen]);
   const readings = new Map();
   let labels = new Map();
   let presentation = new Map();
-  let spill = 0, targetSpill = 0, targetIntensity = 0;
   let jobRunning = false, cleanSince = 0, tvScene;
   let entranceSignal;
   let zoom = 1, targetZoom = 1, hasDirection = false;
@@ -436,42 +539,88 @@ export function createHouse(stage, view, { decorateLabel } = {}) {
   };
   castle.src = new URL("./castle.jpg", import.meta.url).href;
 
-  const tvColors = {
-    kids_party: ["#dec2de", "#795184"], party: ["#e7a4ad", "#ad496e"],
-    calm: ["#c6e0c7", "#587c78"], cinema: ["#b0add6", "#444076"],
-  };
-
   function paintTv() {
     tvTexture.paint((ctx, w, h) => {
-      const gradient = ctx.createLinearGradient(0, 0, w, h);
-      const [start, end] = tvColors[tvScene] || ["#292633", "#191822"];
-      gradient.addColorStop(0, start);
-      gradient.addColorStop(1, end);
-      ctx.fillStyle = gradient;
+      const look = TV_LOOKS[tvScene];
+      ctx.fillStyle = "#17151f";
       ctx.fillRect(0, 0, w, h);
+      if (!look) return;
       if (tvScene === "kids_party" && castle.naturalWidth) {
         const scale = Math.max(w / castle.naturalWidth, h / castle.naturalHeight);
         const width = castle.naturalWidth * scale, height = castle.naturalHeight * scale;
         ctx.drawImage(castle, (w - width) / 2, (h - height) / 2, width, height);
-      } else if (tvScene) {
-        ctx.fillStyle = "#fff9ed";
-        ctx.font = '600 80px "IBM Plex Sans KR", sans-serif';
-        ctx.textAlign = "center";
-        ctx.fillText(TV_SCENES[tvScene] || tvScene, w / 2, h / 2, w - 80);
+        return;
+      }
+
+      const sky = ctx.createLinearGradient(0, 0, 0, h);
+      sky.addColorStop(0, look.sky[0]);
+      sky.addColorStop(1, look.sky[1]);
+      ctx.fillStyle = sky;
+      ctx.fillRect(0, 0, w, h);
+      if (tvScene === "party") {
+        for (const [x, y, radius, color] of [
+          [.23, .34, 103, "rgba(255,183,128,.63)"],
+          [.51, .65, 158, "rgba(253,142,188,.64)"],
+          [.78, .32, 134, "rgba(255,210,150,.59)"],
+        ]) {
+          const bokeh = ctx.createRadialGradient(w * x, h * y, 6, w * x, h * y, radius);
+          bokeh.addColorStop(0, color);
+          bokeh.addColorStop(1, "transparent");
+          ctx.fillStyle = bokeh;
+          ctx.fillRect(w * x - radius, h * y - radius, 2 * radius, 2 * radius);
+        }
+      } else if (tvScene === "calm") {
+        ctx.fillStyle = "#dce5c7";
+        ctx.beginPath();
+        ctx.arc(.73 * w, .31 * h, .084 * h, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.fillStyle = "#456d69";
+        ctx.beginPath();
+        ctx.moveTo(0, .68 * h);
+        ctx.bezierCurveTo(.28 * w, .23 * h, .48 * w, 1.06 * h, w, .55 * h);
+        ctx.lineTo(w, h);
+        ctx.lineTo(0, h);
+        ctx.fill();
+      } else if (tvScene === "cinema") {
+        ctx.fillStyle = "#c3c5f2";
+        ctx.beginPath();
+        ctx.arc(.39 * w, .46 * h, .19 * h, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.fillStyle = "#191b37";
+        ctx.beginPath();
+        ctx.moveTo(0, .79 * h);
+        ctx.lineTo(.24 * w, .48 * h);
+        ctx.lineTo(.45 * w, .75 * h);
+        ctx.lineTo(.66 * w, .53 * h);
+        ctx.lineTo(w, .77 * h);
+        ctx.lineTo(w, h);
+        ctx.lineTo(0, h);
+        ctx.fill();
+        ctx.fillStyle = "#141220";
+        ctx.fillRect(0, 0, w, .12 * h);
+        ctx.fillRect(0, .88 * h, w, .12 * h);
       }
     });
   }
 
   function paintOven({ preset, in_use }) {
-    ovenWindow.emissiveIntensity = in_use ? .65 : 0;
+    const baking = in_use === true;
+    ovenWindow.emissiveIntensity = baking ? 1.55 : 0;
     ovenTexture.paint((ctx, w, h) => {
-      ctx.fillStyle = "#282632";
+      ctx.fillStyle = "#201e29";
       ctx.fillRect(0, 0, w, h);
       if (!preset) return;
-      ctx.fillStyle = "#ffdfaa";
+
+      const glow = ctx.createRadialGradient(55, h / 2, 3, 55, h / 2, 50);
+      glow.addColorStop(0, baking ? "#ffbb73" : "#e8aa58");
+      glow.addColorStop(.21, baking ? "#cf732f" : "#996036");
+      glow.addColorStop(1, "transparent");
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 20, 110, h - 40);
+      ctx.fillStyle = "#ffe3b5";
       ctx.font = '600 75px "IBM Plex Sans KR", sans-serif';
       ctx.textAlign = "center";
-      ctx.fillText(`${preset.temp_c}°  ${preset.minutes}m`, w / 2, 101);
+      ctx.fillText(`${preset.temp_c}° · ${preset.minutes}분`, w / 2 + 28, 101, w - 132);
     });
   }
 
@@ -498,22 +647,22 @@ export function createHouse(stage, view, { decorateLabel } = {}) {
     });
   }
 
-  function paintLight({ power, color }) {
-    const hsv = power && hsvColor(color || {});
-    const warmHue = Math.min(44, 27 + ((color?.kelvin ?? 3000) - 2700) / 38);
-    const tint = hsv || `hsl(${warmHue}, 90%, 76%)`;
-    targetLamp.set(tint);
-    targetIntensity = power ? (hsv ? 87 * color.brightness / 70 : 26) : 0;
-    targetSpill = hsv ? color.brightness / 100 : 0;
-    view.classList.toggle("has-color", targetSpill > 0);
-    view.style.setProperty("--glow-tint", tint);
-  }
-
   const painters = {
-    light_01: paintLight,
+    light_01(values) {
+      return livingLight.update(values, performance.now());
+    },
     display_01({ play_mood }) {
-      tvScene = play_mood?.scene ?? null;
+      const scene = play_mood?.scene;
+      tvScene = Object.hasOwn(TV_LOOKS, scene) ? scene : null;
+      musicCue.hidden = !tvScene;
+      roomLighting.tvLevel.value = tvScene ? .72 : 0;
+      if (tvScene) {
+        const [floorTint, wallTint] = TV_LOOKS[tvScene].spill;
+        roomLighting.tvFloorTint.value.set(floorTint);
+        roomLighting.tvWallTint.value.set(wallTint);
+      }
       paintTv();
+      return tvScene === "kids_party";
     },
     oven_01: paintOven,
     fridge_01({ show_notice }) {
@@ -544,9 +693,8 @@ export function createHouse(stage, view, { decorateLabel } = {}) {
   paintFridge(null);
   Promise.all([
     document.fonts.load('500 25px "IBM Plex Sans KR"', "냉장고 안내"),
-    document.fonts.load('600 80px "IBM Plex Sans KR"', "어린이 파티 170°"),
+    document.fonts.load('600 75px "IBM Plex Sans KR"', "170° · 20분"),
   ]).then(() => {
-    paintTv();
     paintOven(readings.get("oven_01")?.values ?? {});
     paintFridge(readings.get("fridge_01")?.values.show_notice);
     queue();
@@ -556,6 +704,7 @@ export function createHouse(stage, view, { decorateLabel } = {}) {
     if (!restingMaterials.has(normal)) {
       const muted = normal.clone();
       muted.onBeforeCompile = (shader) => {
+        normal.onBeforeCompile(shader);
         // Apply after lighting so textures and emissive surfaces also rest.
         shader.fragmentShader = shader.fragmentShader.replace("#include <opaque_fragment>", `
           float luma = dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722));
@@ -575,7 +724,7 @@ export function createHouse(stage, view, { decorateLabel } = {}) {
       const previous = presentation.get(id);
       if (Boolean(current.resting) !== Boolean(previous?.resting)) {
         model.traverse((object) => {
-          if (!object.isMesh || object === noticeScreen) return;
+          if (!object.isMesh || observedSurfaces.has(object)) return;
           if (!normalMaterials.has(object)) normalMaterials.set(object, object.material);
           const normal = normalMaterials.get(object);
           object.material = current.resting ? restingMaterial(normal) : normal;
@@ -587,7 +736,6 @@ export function createHouse(stage, view, { decorateLabel } = {}) {
       }
     }
     presentation = next;
-    view.classList.toggle("resting-light", presentation.get("light_01")?.resting === true);
     if (changed) queue();
   }
 
@@ -613,11 +761,8 @@ export function createHouse(stage, view, { decorateLabel } = {}) {
       if (previous?.key === key) continue;
       changed = true;
 
-      paint(values);
-      readings.set(id, {
-        key, values,
-        theme: Boolean(id === "light_01" && targetSpill || id === "display_01" && tvScene === "kids_party"),
-      });
+      const theme = paint(values) === true;
+      readings.set(id, { key, values, theme });
     }
     if (changed) {
       renderer.shadowMap.needsUpdate = true;
@@ -743,23 +888,12 @@ export function createHouse(stage, view, { decorateLabel } = {}) {
     currentTarget.lerp(goalTarget, amount);
     zoom = THREE.MathUtils.lerp(zoom, targetZoom, amount);
     orient();
-    const idleLamp = presentation.get("light_01")?.resting;
-    const idleTv = presentation.get("display_01")?.resting;
-    tvReflect.color.copy(idleTv ? restingGlow : tvTint);
-    tvReflect.intensity = tvScene === "kids_party" ? (idleTv ? 3 : 12) : 0;
-    currentLamp.lerp(targetLamp, amount);
-    lamp.color.copy(currentLamp);
-    if (idleLamp) lamp.color.lerp(restingGlow, .85);
-    lamp.intensity = THREE.MathUtils.lerp(lamp.intensity, targetIntensity * (idleLamp ? .28 : 1), amount);
-    lampSource.color.copy(currentLamp).lerp(reflectedWhite, .45);
-    lampSource.emissive.copy(currentLamp);
-    lampSource.emissiveIntensity = lamp.intensity / 26;
-    spill = THREE.MathUtils.lerp(spill, targetSpill * (idleLamp ? .25 : 1), amount);
-    floorGlow.copy(lamp.color).lerp(reflectedWhite, .18);
-    floorSpill.color.copy(floorGlow);
-    floorSpill.opacity = spill * .46;
-    wallSpill.color.copy(floorGlow);
-    wallSpill.opacity = spill * .33;
+    livingLight.render(now, motion.matches);
+    if (!musicCue.hidden) {
+      musicPosition.copy(musicAnchor).project(camera);
+      musicCue.style.left = `${(musicPosition.x + 1) * 50}%`;
+      musicCue.style.top = `${(1 - musicPosition.y) * 50}%`;
+    }
     if (jobRunning) {
       const progress = motion.matches ? .30 : ((now - cleanSince) % 6800) / 3400;
       const distance = 1 - Math.abs(1 - progress);

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { buildChain, houseDevicePresentation } from "../spira_simulator/ui/demo/chain.js";
-import { layoutHouseLabels } from "../spira_simulator/ui/house/house.js";
+import { createLivingLight, layoutHouseLabels } from "../spira_simulator/ui/house/house.js";
+import { MeshStandardMaterial, PointLight } from "../spira_simulator/ui/house/three.module.min.js";
 
 const { house: scenes } = JSON.parse(readFileSync(
   new URL("../spira_simulator/ui/demo/scenes.json", import.meta.url)));
@@ -18,6 +19,62 @@ function birthday() {
   const hubPlan = fixture("ep_9031", "plan.v1");
   return { episode, rationale, card, hubPlan };
 }
+
+test("observed light values drive the pendant, point light, and room glow", () => {
+  const lamp = new PointLight("#ffffff", 0);
+  const material = new MeshStandardMaterial();
+  const glow = { value: 0 };
+  const livingLight = createLivingLight(lamp, material, glow);
+  function observe(color, power, at) {
+    const snapshot = { devices: [{ logical_id: "light_01", values: { power, color } }] };
+    livingLight.update(snapshot.devices[0].values, at);
+  }
+
+  const pink = { hue: 330, saturation: 45, brightness: 70 };
+  observe(pink, true, 0);
+  livingLight.render(0);
+  assert.equal(lamp.intensity, 0);
+  livingLight.render(500);
+  assert.equal(glow.value, .35);
+  livingLight.render(1000);
+  assert.equal(glow.value, .7);
+  assert.equal(lamp.color.getHexString(), "ff8cc6");
+  assert.ok(material.emissive.equals(lamp.color));
+  const brightIntensity = lamp.intensity;
+  const brightEmissive = material.emissiveIntensity;
+
+  observe({ ...pink, brightness: 35 }, true, 1100);
+  livingLight.render(2100);
+  assert.equal(lamp.intensity, brightIntensity / 2);
+  assert.equal(material.emissiveIntensity, brightEmissive / 2);
+  assert.equal(lamp.color.getHexString(), "ff8cc6");
+
+  observe({ ...pink, hue: 120 }, true, 2200);
+  livingLight.render(3200);
+  assert.equal(material.emissive.getHexString(), "8cff8c");
+  observe({ ...pink, saturation: 0 }, true, 3300);
+  livingLight.render(4300);
+  assert.equal(material.emissive.getHexString(), "ffffff");
+
+  observe({ kelvin: 2700 }, true, 4400);
+  livingLight.render(5400);
+  const warm = lamp.color.clone();
+  const whiteIntensity = lamp.intensity;
+  observe({ kelvin: 6500 }, true, 5500);
+  livingLight.render(6000);
+  assert.ok(warm.b < lamp.color.b);
+  const midwayBlue = lamp.color.b;
+  livingLight.render(6500);
+  assert.ok(midwayBlue < lamp.color.b);
+  assert.ok(material.emissive.equals(lamp.color));
+  assert.equal(lamp.intensity, whiteIntensity);
+
+  observe(pink, false, 6600);
+  livingLight.render(7600);
+  assert.equal(lamp.intensity, 0);
+  assert.equal(material.emissiveIntensity, 0);
+  assert.equal(glow.value, 0);
+});
 
 test("birthday evidence can be followed from a topper to the light and back", () => {
   const input = birthday();

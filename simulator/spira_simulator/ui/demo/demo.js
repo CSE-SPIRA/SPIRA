@@ -700,7 +700,7 @@ function openHouseView() {
   $("home").hidden = false;
   if (!state.house && !$("world").hasChildNodes()) {
     try {
-      state.house = createHouse($("world"), $("view"), { decorateLabel: decorateHouseLabel });
+      state.house = createHouse($("world"), { decorateLabel: decorateHouseLabel });
       state.house.setMarkers($("viewer-markers"));
     } catch (error) {
       const message = document.createElement("p");
