@@ -326,6 +326,7 @@ def viewer_plan(data: dict, device_names: dict) -> tuple[dict, list[dict]]:
                     ) if part
                 ),
                 "wait": TRIGGER_NAMES.get(wait) or display_time(wait),
+                "timed": wait not in TRIGGER_NAMES,
             }
         )
     restores = [

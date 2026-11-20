@@ -259,7 +259,7 @@ export function houseDevicePresentation(chain, focusDevices = []) {
     if (chain.hasHubPlan && focused) {
       if (device.logicalId === "fridge_01" && device.state?.show_notice) {
         const notices = chain.item_tasks.filter(({ text }) => text === device.state.show_notice);
-        if (notices.length === 1) evidence = `${notices[0].text} ← ${notices[0].item}`;
+        if (notices.length === 1) evidence = `← ${notices[0].item}`;
       } else if (device.chosen) {
         evidence = traceLabel(chain, device);
       }

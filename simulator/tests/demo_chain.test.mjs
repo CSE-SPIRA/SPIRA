@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { buildChain, houseDevicePresentation } from "../spira_simulator/ui/demo/chain.js";
-import { createLivingLight, layoutHouseLabels } from "../spira_simulator/ui/house/house.js";
-import { MeshStandardMaterial, PointLight } from "../spira_simulator/ui/house/three.module.min.js";
+import { createLivingLight, layoutHouseLabels, orientHouseCamera, projectHouseLabels } from "../spira_simulator/ui/house/house.js";
+import { MeshStandardMaterial, OrthographicCamera, PointLight, Vector3 } from "../spira_simulator/ui/house/three.module.min.js";
 
-const { house: scenes } = JSON.parse(readFileSync(
+const { house: scenes, cameras } = JSON.parse(readFileSync(
   new URL("../spira_simulator/ui/demo/scenes.json", import.meta.url)));
 
 function fixture(episode, name) {
@@ -162,7 +162,7 @@ test("birthday house traces follow the current timeline step", () => {
   const safety = "아이 안전 모드 (인덕션 잠금·전기포트 차단)";
   const expected = {
     plan: {},
-    delivery: { fridge_01: `${notice.text} ← 딸기` },
+    delivery: { fridge_01: "← 딸기" },
     clean: { cleaner_01: "손님 오기 전 거실 청소 ← 손님: 손님 여러 명 ← 고깔모자" },
     before: { cooktop_01: safety, plug_kettle: safety },
     guests: { light_01: mood, display_01: mood },
@@ -268,6 +268,42 @@ test("viewer fits entrance, planned and changed labels ahead of resting tags at 
     assert.ok(placed.has("styler_01"));
     assert.ok(!placed.has("purifier_01"));
     assertNoLabelOverlap(labels, width, height);
+  }
+});
+
+test("guest-step labels leave the projected TV, pendant and lit floor clear at 1920×1080 and 1440×900", () => {
+  const width = 1256, height = 653;
+  const guest = scenes.find(({ id }) => id === "guests");
+  const { eye, aim, zoom } = cameras[guest.camera];
+  const camera = new OrthographicCamera();
+  orientHouseCamera(camera, new Vector3(...eye), new Vector3(...aim), zoom, width / height);
+  const { anchors, ...clearance } = projectHouseLabels(camera, width, height);
+  // Label dimensions in the demo's fixed stage before scaling to the viewport.
+  const sizes = {
+    entrance: [133, 28], display_01: [400, 54], light_01: [400, 54], cleaner_01: [112, 28],
+    cooktop_01: [92, 28], oven_01: [208, 27], fridge_01: [208, 28], plug_kettle: [137, 28],
+    purifier_01: [77, 17], styler_01: [57, 17],
+  };
+  const markers = Object.entries(sizes).map(([id, [width, height]]) => ({
+    id, ...anchors[id], width, height, focused: guest.focusDevices.includes(id),
+    required: !["purifier_01", "styler_01"].includes(id),
+  }));
+  const labels = layoutHouseLabels(markers, width, height, clearance);
+  for (const marker of markers.filter(({ required }) => required)) {
+    assert.ok(labels.some(({ id }) => id === marker.id), `${marker.id} was not placed`);
+  }
+  assert.ok(labels.find(({ id }) => id === "light_01").right < clearance.pendant.left);
+  for (const [screenWidth, screenHeight] of [[1920, 1080], [1440, 900]]) {
+    const scale = Math.min(screenWidth / 1920, screenHeight / 1080);
+    const px = (position) => Math.round(position * scale);
+    assertNoLabelOverlap(labels, width, height, scale);
+    for (const label of labels) {
+      for (const [name, region] of Object.entries(clearance)) {
+        assert.ok(px(label.right) <= px(region.left) || px(region.right) <= px(label.left) ||
+          px(label.bottom) <= px(region.top) || px(region.bottom) <= px(label.top),
+        `${label.id} overlaps the ${name} at ${screenWidth}×${screenHeight}`);
+      }
+    }
   }
 });
 

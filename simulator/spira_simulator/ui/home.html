@@ -1,6 +1,6 @@
 {% macro device_marker(device) %}
   {% set full = device.changed or device.planned %}
-  <div class="viewer-marker" data-device="{{ device.id }}" data-values="{{ device.visual_values | tojson | forceescape }}"{% if not full %} data-resting=""{% endif %}{% if full or device.observation_label or device.substrate_exception or device.class_exception %} data-required=""{% endif %}>
+  <div class="viewer-marker" data-device="{{ device.id }}" data-values="{{ device.visual_values | tojson | forceescape }}"{% if device.changed %} data-changed=""{% endif %}{% if not full %} data-resting=""{% endif %}{% if full or device.observation_label or device.substrate_exception or device.class_exception %} data-required=""{% endif %}>
     <article class="home-device" aria-describedby="device-legend" data-observation="{{ device.observation }}"{% if device.change %} data-change="{{ device.change[0] }}"{% endif %}>
       <h3{% if not full and device.content is not none %} title="{{ device.content }}"{% endif %}>{{ device.name }}
         {% if device.substrate_exception %}<small class="substrate{% if device.physical %} physical{% endif %}">{{ device.substrate }}{% if device.physical %} · 미검증{% endif %}</small>{% endif %}
@@ -11,7 +11,7 @@
       {% if device.change %}<p class="change-marker">{{ device.change[1] }}</p>{% endif %}
     </article>
     {% for entry in device.planned %}
-    <p class="planned">{{ device.name }} · {{ entry.action }} · {{ entry.wait }}</p>
+    <p class="planned">{{ device.name }} · {{ entry.action }}{% if entry.timed %}<span class="planned-clock"> · {{ entry.wait }}</span>{% else %} · {{ entry.wait }}{% endif %}</p>
     {% endfor %}
   </div>
 {% endmacro %}

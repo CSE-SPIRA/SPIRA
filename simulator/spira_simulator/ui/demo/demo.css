@@ -209,10 +209,18 @@ h1{font-size:var(--size-heading);line-height:1.11;letter-spacing:-.065em;font-we
 .house-head h1{font-size:54px}
 .house-head .lead{max-width:666px;font-size:24px;text-align:right;line-height:1.42;margin:0 0 3px}
 .house-view #viewer-markers{padding:52px 12px 0}
-.house-view .viewer-marker.focused{max-width:min(100%,23rem);font-size:1rem}
+.house-view .viewer-marker.focused{max-width:min(100%,25rem);font-size:1rem}
+.house-view .viewer-marker[data-device]:not([data-resting]) .home-device{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:6px;align-items:baseline}
+.house-view .viewer-marker[data-device] h3{white-space:nowrap}
+.house-view .viewer-marker[data-device] .device-value{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.house-view .viewer-marker[data-device] .observation-warning,.marker-trace{grid-column:1/-1}
+.house-view .change-marker,
+.house-view .viewer-marker[data-device]:not([data-resting]) .planned,
+.house-view .viewer-marker[data-device][data-resting]:has(.planned) .home-device:not(:has(.observation-warning,.substrate)){display:none}
+.house-view .planned{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .house-view .device-legend{position:absolute;bottom:12px;left:17px;right:17px;font-size:16px;pointer-events:none}
 .house-view .entrance-history{padding:var(--space-xs)}
-.marker-trace{display:block;overflow:hidden;text-overflow:ellipsis;margin-top:2px;color:var(--muted);font-size:15px;font-weight:400}
+.marker-trace{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;color:var(--muted);font-size:15px;font-weight:400}
 .ledger{display:flex;flex-direction:column;grid-column:2;grid-row:2;padding:20px 20px 12px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);overflow:hidden}
 .ledger-head{flex:none;display:flex;justify-content:space-between;align-items:center;margin-bottom:13px}
 .ledger-head h2{font-size:30px;letter-spacing:-.04em;line-height:1.13}

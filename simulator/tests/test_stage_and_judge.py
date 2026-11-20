@@ -1041,9 +1041,13 @@ def test_sim_at20_viewer_projects_world_markers_and_no_reasoning(tmp_path, monke
             assert set(row) == {
                 "plan_id", "task_id", "device", "command", "target_value", "wait", "protective",
             }
-        assert "오븐 · 굽기 설정 대기 170° 20분 · 10/17 토 14:00" in page
+        assert "오븐 · 굽기 설정 대기 170° 20분" in page
+        assert '<span class="planned-clock"> · 10/17 토 14:00</span>' in page
         assert "냉장고 · 안내 표시 · 택배를 들이면" in page
         view = ElementTree.fromstring(fragment)
+        oven_plan = view.find('.//div[@data-device="oven_01"]/p[@class="planned"]')
+        assert "".join(oven_plan.itertext()) == "오븐 · 굽기 설정 대기 170° 20분 · 10/17 토 14:00"
+        assert oven_plan.findtext('span[@class="planned-clock"]') == " · 10/17 토 14:00"
         visual_values = {
             marker.get("data-device"): json.loads(marker.get("data-values"))
             for marker in view.findall(".//div[@data-device]")

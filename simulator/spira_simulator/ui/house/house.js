@@ -69,47 +69,95 @@ const TV_LOOKS = {
   cinema: { sky: ["#13162d", "#545b93"], spill: ["#7776ba", "#a0a7ef"] },
 };
 
-export function layoutHouseLabels(markers, viewWidth, viewHeight) {
+const TV_SCREEN = { width: 2.12, height: 1.16, center: [-.70, 1.52, -3.419] };
+const PENDANT = [-1.42, 2.73, -.23];
+const LABEL_ANCHORS = {
+  cleaner_01: [.82, .52, -2.50], light_01: [-1.42, 2.51, -.23], display_01: [-.70, 2.17, -3.41],
+  cooktop_01: [2.28, 1.43, -2.79], oven_01: [3.74, 1.00, -2.40],
+  fridge_01: [6.13, 2.14, -2.55], plug_kettle: [5.25, 1.72, -3.00],
+  purifier_01: [-3.95, .84, -2.16], styler_01: [-6.14, 2.14, .88],
+  speaker_01: [-2.46, .91, -2.95], entrance: [-5.45, 1.14, -2.48],
+};
+
+export function orientHouseCamera(camera, eye, aim, zoom, viewport) {
+  const extent = Math.max(5.35, 7.56 / viewport) / zoom;
+  Object.assign(camera, { left: -extent * viewport, right: extent * viewport,
+    top: extent, bottom: -extent, near: .1, far: 100 });
+  camera.updateProjectionMatrix();
+  camera.position.copy(eye);
+  camera.lookAt(aim);
+  camera.updateMatrixWorld();
+}
+
+export function projectHouseLabels(camera, width, height, cleanerPosition) {
+  const point = new THREE.Vector3();
+  const project = (position) => {
+    point.fromArray(position).project(camera);
+    return { x: (point.x + 1) * width / 2, y: (1 - point.y) * height / 2 };
+  };
+  const bounds = (min, max) => {
+    const corners = [min[0], max[0]].flatMap((x) =>
+      [min[1], max[1]].flatMap((y) => [min[2], max[2]].map((z) => project([x, y, z]))));
+    return {
+      left: Math.min(...corners.map(({ x }) => x)), right: Math.max(...corners.map(({ x }) => x)),
+      top: Math.min(...corners.map(({ y }) => y)), bottom: Math.max(...corners.map(({ y }) => y)),
+    };
+  };
+  const anchors = Object.fromEntries(Object.entries(LABEL_ANCHORS).map(([id, position]) => [id, project(position)]));
+  if (cleanerPosition) anchors.cleaner_01 = project([cleanerPosition.x, .50, cleanerPosition.z]);
+  const { width: w, height: h, center: [x, y, z] } = TV_SCREEN;
+  const [px, py, pz] = PENDANT;
+  return {
+    anchors,
+    screen: bounds([x - w / 2, y - h / 2, z], [x + w / 2, y + h / 2, z]),
+    pendant: bounds([px - .49, py - .24, pz - .49], [px + .49, py + .65, pz + .49]),
+    floor: bounds([-4.96, .08, -3.54], [1.46, .08, 3.72]),
+  };
+}
+
+export function layoutHouseLabels(markers, viewWidth, viewHeight, { screen, pendant, floor } = {}) {
   const gap = 8;
   const minTop = 46;
   const bottom = viewHeight - 44;
-  const preferredTop = (box) => box.y - box.height - 12;
+  const clamp = THREE.MathUtils.clamp;
+  const obstacles = [screen, pendant, floor].filter(Boolean);
+  const priority = ({ focused, required }) => focused ? 2 : required ? 1 : 0;
   const boxes = markers.filter(({ width, height }) => width <= viewWidth - 2 * gap && height <= bottom - minTop)
-    .map(({ x, y, width, height, ...marker }) => {
-      const left = Math.max(gap, Math.min(x - width / 2, viewWidth - width - gap));
-      return { ...marker, x, y, left, right: left + width, height };
-    }).sort((a, b) => a.y - b.y);
-  const shareColumn = (a, b) => a.left < b.right + gap && a.right + gap > b.left;
-
-  const focused = boxes.filter((box) => box.focused);
-  // Reserve room below each focused label for the others in its column.
-  for (let index = focused.length - 1; index >= 0; index--) {
-    const box = focused[index];
-    const lower = focused.slice(index + 1).filter((other) => shareColumn(box, other));
-    box.latestTop = Math.min(bottom, ...lower.map((other) => other.latestTop - gap)) - box.height;
-  }
+    .sort((a, b) => priority(b) - priority(a) || a.y - b.y);
   const placed = [];
-  for (const box of focused) {
-    const upper = placed.filter((other) => shareColumn(box, other));
-    const earliestTop = Math.max(minTop, ...upper.map((other) => other.top + other.height + gap));
-    box.top = Math.max(earliestTop, Math.min(preferredTop(box), box.latestTop));
-    if (box.top + box.height <= bottom) placed.push(box);
-  }
-  const unfocused = boxes.filter((box) => !box.focused)
-    .sort((a, b) => Number(Boolean(b.required)) - Number(Boolean(a.required)));
-  for (const box of unfocused) {
-    const preferred = Math.max(minTop, Math.min(preferredTop(box), bottom - box.height));
-    const column = placed.filter((other) => shareColumn(box, other));
-    const candidates = [preferred];
-    if (box.required) {
-      for (const other of column) {
-        candidates.push(other.top - box.height - gap, other.top + other.height + gap);
-      }
-      candidates.sort((a, b) => Math.abs(a - preferred) - Math.abs(b - preferred));
+  for (const box of boxes) {
+    const { id, x, y, width, height } = box;
+    const toSide = id === "light_01" && pendant;
+    const preferredLeft = clamp(toSide ? pendant.left - width - 12 : x - width / 2, gap, viewWidth - width - gap);
+    const preferredTop = clamp(y - (toSide ? height / 2 : height + 12), minTop, bottom - height);
+    const blockers = [...obstacles, ...placed];
+    const columns = [preferredLeft];
+    if (priority(box)) {
+      columns.push(...blockers.flatMap((other) => [other.left - width - gap, other.right + gap]));
+      columns.sort((a, b) => Math.abs(a - preferredLeft) - Math.abs(b - preferredLeft));
     }
-    const top = candidates.find((y) => y >= minTop && y + box.height <= bottom &&
-      column.every((other) => y >= other.top + other.height + gap || y + box.height + gap <= other.top));
-    if (top !== undefined) placed.push({ ...box, top });
+    let best, distance = Infinity;
+    for (const left of columns) {
+      const horizontal = (left - preferredLeft) ** 2;
+      if (horizontal >= distance) break;
+      const right = left + width;
+      if (left < gap || right > viewWidth - gap) continue;
+      const column = blockers.filter((other) => left < other.right + gap && right > other.left - gap);
+      const rows = [preferredTop];
+      if (priority(box)) {
+        rows.push(...column.flatMap((other) => [other.top - height - gap, other.bottom + gap]));
+        rows.sort((a, b) => Math.abs(a - preferredTop) - Math.abs(b - preferredTop));
+      }
+      const top = rows.find((row) => row >= minTop && row + height <= bottom &&
+        column.every((other) => row >= other.bottom + gap || row + height + gap <= other.top));
+      if (top === undefined) continue;
+      const score = horizontal + (top - preferredTop) ** 2;
+      if (score < distance) {
+        best = { ...box, left, right, top, bottom: top + height };
+        distance = score;
+      }
+    }
+    if (best) placed.push(best);
   }
   return placed;
 }
@@ -374,7 +422,7 @@ export function createHouse(stage, { decorateLabel } = {}) {
   const tvMaterial=new THREE.MeshBasicMaterial({map:tvTexture.texture,color:"#ffffff",toneMapped:false});
   const display=group(0,0,0);
   box(2.25,1.28,.10,dark,-.70,1.52,-3.48,.057,display);
-  const tvScreen = plane(2.12,1.16,tvMaterial,-.70,1.52,-3.419,display);
+  const tvScreen = plane(TV_SCREEN.width, TV_SCREEN.height, tvMaterial, ...TV_SCREEN.center, display);
   const musicAnchor = new THREE.Vector3(.18, 1.10, -3.419);
   const musicPosition = new THREE.Vector3();
   const musicCue = document.createElement("span");
@@ -384,7 +432,7 @@ export function createHouse(stage, { decorateLabel } = {}) {
   musicCue.append(document.createElement("i"), document.createElement("i"), document.createElement("i"));
   stage.append(musicCue);
 
-  const pendant = group(-1.42,2.73,-.23);
+  const pendant = group(...PENDANT);
   mesh(new THREE.LatheGeometry([
     new THREE.Vector2(.10,.16),new THREE.Vector2(.16,.16),new THREE.Vector2(.19,.09),
     new THREE.Vector2(.49,-.17),new THREE.Vector2(.49,-.22),new THREE.Vector2(.46,-.23),
@@ -498,13 +546,6 @@ export function createHouse(stage, { decorateLabel } = {}) {
     for(const a of [-.23,.23])for(const b of [-.21,.21])disk(.038,b > 0 ? .76 : .45,wood,a,b > 0 ? .38 : .23,b,chair,.031);
   }
 
-  const anchors = {
-    cleaner_01: [.82, .52, -2.50], light_01: [-1.42, 2.51, -.23], display_01: [-.70, 2.17, -3.41],
-    cooktop_01: [2.28, 1.43, -2.79], oven_01: [3.74, 1.00, -2.40],
-    fridge_01: [6.13, 2.14, -2.55], plug_kettle: [5.25, 1.72, -3.00],
-    purifier_01: [-3.95, .84, -2.16], styler_01: [-6.14, 2.14, .88],
-    speaker_01: [-2.46, .91, -2.95], entrance: [-5.45, 1.14, -2.48],
-  };
   const projected = new THREE.Vector3();
   const cleanPosition = new THREE.Vector3();
   const goalCamera = new THREE.Vector3();
@@ -525,7 +566,7 @@ export function createHouse(stage, { decorateLabel } = {}) {
   let jobRunning = false, cleanSince = 0, tvScene;
   let entranceSignal;
   let zoom = 1, targetZoom = 1, hasDirection = false;
-  let viewport = 1, viewWidth = 0, viewHeight = 0, request = 0, readyAt = 0;
+  let viewWidth = 0, viewHeight = 0, request = 0, readyAt = 0;
 
   parcel.visible = false;
   lockIcon.visible = lockShackle.visible = false;
@@ -743,7 +784,7 @@ export function createHouse(stage, { decorateLabel } = {}) {
     const label = labels.get(id);
     if (!label) return;
     label.classList.toggle("focused", appearance.focused === true);
-    if (!label.hasAttribute("data-resting")) decorateLabel?.(label.firstElementChild, appearance);
+    decorateLabel?.(label, appearance);
   }
 
   function update(valuesById) {
@@ -772,7 +813,7 @@ export function createHouse(stage, { decorateLabel } = {}) {
 
   function project(id) {
     if (id === "cleaner_01" && jobRunning) projected.set(cleaner.position.x, .50, cleaner.position.z);
-    else projected.fromArray(anchors[id]);
+    else projected.fromArray(LABEL_ANCHORS[id]);
     projected.project(camera);
     return { x: (projected.x + 1) / 2, y: (1 - projected.y) / 2 };
   }
@@ -780,29 +821,38 @@ export function createHouse(stage, { decorateLabel } = {}) {
   function placeLabels() {
     // Measure in stage pixels, before the outer frame scales to the screen.
     const inline = viewWidth >= 720;
+    const { anchors, screen, pendant: shade, floor } = projectHouseLabels(camera, viewWidth, viewHeight,
+      jobRunning ? cleaner.position : null);
+    const clearance = {
+      screen: display.visible ? screen : null,
+      pendant: pendant.visible ? shade : null,
+      floor: roomLighting.livingLevel.value > 0 || roomLighting.tvLevel.value > 0 ? floor : null,
+    };
     for (const [id, label] of labels) {
       if (Object.hasOwn(anchors, id)) label.classList.toggle("anchored", inline);
     }
     const markers = Array.from(labels).flatMap(([id, label]) => {
       if (!Object.hasOwn(anchors, id)) return [];
-      const { x, y } = project(id);
-      return [{ id, label, focused: presentation.get(id)?.focused, required: label.hasAttribute("data-required"),
-        x: x * viewWidth, y: y * viewHeight,
-        width: label.offsetWidth, height: label.offsetHeight }];
+      const focused = presentation.get(id)?.focused;
+      return [{ id, label, focused, required: focused || label.hasAttribute("data-required"),
+        ...anchors[id], width: label.offsetWidth, height: label.offsetHeight }];
     });
-    const placements = inline ? layoutHouseLabels(markers, viewWidth, viewHeight) : [];
+    const placements = inline ? layoutHouseLabels(markers, viewWidth, viewHeight, clearance) : [];
     const placed = new Set(placements.map(({ label }) => label));
     for (const { id, label, required } of markers) {
       label.classList.toggle("anchored", placed.has(label));
       label.classList.toggle("unplaced", inline && !required && !placed.has(label));
       label.classList.toggle("theme", readings.get(id)?.theme === true);
     }
-    for (const { label, x, y, left, top, height } of placements) {
+    for (const { label, x, y, left, right, top, bottom, height } of placements) {
       label.style.left = `${left}px`;
       label.style.top = `${top}px`;
+      const crosses = Object.values(clearance).some((area) => area && x >= area.left && x <= area.right &&
+        Math.min(top, y) < area.bottom && Math.max(bottom, y) > area.top);
+      const length = x < left || x > right || crosses ? 0 : Math.max(top - y, y - bottom, 0);
       label.style.setProperty("--leader-x", `${x - left}px`);
       label.style.setProperty("--leader-top", `${Math.min(y - top, height)}px`);
-      label.style.setProperty("--leader-height", `${Math.max(top - y, y - top - height, 0)}px`);
+      label.style.setProperty("--leader-height", `${length}px`);
     }
   }
 
@@ -816,13 +866,6 @@ export function createHouse(stage, { decorateLabel } = {}) {
     queue();
   }
 
-  function projection() {
-    const extent = Math.max(5.35, 7.56 / viewport) / zoom;
-    Object.assign(camera, { left: -extent * viewport, right: extent * viewport,
-      top: extent, bottom: -extent, near: .1, far: 100 });
-    camera.updateProjectionMatrix();
-  }
-
   function syncViewport() {
     const width = stage.clientWidth, height = stage.clientHeight;
     if (!width || !height) return false;
@@ -833,8 +876,6 @@ export function createHouse(stage, { decorateLabel } = {}) {
     viewHeight = height;
     renderer.setPixelRatio(ratio);
     renderer.setSize(width, height, false);
-    viewport = width / height;
-    projection();
     return true;
   }
 
@@ -873,10 +914,7 @@ export function createHouse(stage, { decorateLabel } = {}) {
   }
 
   function orient() {
-    projection();
-    camera.position.copy(currentCamera);
-    camera.lookAt(currentTarget);
-    camera.updateMatrixWorld();
+    orientHouseCamera(camera, currentCamera, currentTarget, zoom, viewHeight ? viewWidth / viewHeight : 1);
   }
 
   function frame(now) {

@@ -551,7 +551,14 @@ function updateHousePresentation(scene) {
   state.house?.setPresentation(houseDevicePresentation(state.chain, scene?.focusDevices));
 }
 
-function decorateHouseLabel(label, { evidence }) {
+function decorateHouseLabel(marker, { focused, evidence }) {
+  const label = marker.firstElementChild;
+  const resting = !focused && !marker.hasAttribute("data-changed");
+  marker.toggleAttribute("data-resting", resting);
+  const value = label.querySelector(".device-value");
+  value?.classList.toggle("visually-hidden", resting);
+  if (value && marker.dataset.device === "fridge_01") value.title = value.textContent;
+
   let trace = label.querySelector(".marker-trace");
   if (!trace && evidence) {
     trace = document.createElement("span");
@@ -560,6 +567,7 @@ function decorateHouseLabel(label, { evidence }) {
   }
   if (trace) {
     trace.textContent = evidence ?? "";
+    trace.title = trace.textContent;
     trace.hidden = !evidence;
   }
 }
@@ -669,6 +677,7 @@ async function refreshHouseMarkers() {
   if (!response.ok) throw new Error(response.status);
   const fragment = new DOMParser().parseFromString(await response.text(), "text/html");
   const markers = fragment.getElementById("viewer-markers");
+  for (const clock of markers.querySelectorAll(".planned-clock")) clock.remove();
   if (markers.outerHTML !== state.houseMarkup) {
     state.houseMarkup = markers.outerHTML;
     replaceHouseMarkers($("viewer-markers"), markers);
