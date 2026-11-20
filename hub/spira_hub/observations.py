@@ -81,7 +81,7 @@ class Observations:
             for attempt in self.store.attempts(target=target):
                 if attempt["epoch"] != epoch:
                     continue
-                self.reconcile(attempt, observation, operation)
+                self.reconcile(attempt, observation, operation, by)
             if operation and pushed and observation["available"]:
                 operation = self.store.operation(operation["op"])
                 update = operation.get("effect")
@@ -107,7 +107,7 @@ class Observations:
         if observation["values"].get("in_use") is False:
             self.job_starts.pop(target, None)
 
-    def reconcile(self, attempt, observation, operation):
+    def reconcile(self, attempt, observation, operation, by):
         if not observation["available"] or not attempt.get("claims"):
             return
         if operation and operation["op"] == attempt["op"]:
@@ -119,6 +119,7 @@ class Observations:
                          or prop in observation["values"]
                          and observation["values"][prop] != claim["desired"])):
                 claim["owned"] = False
+                claim["released_by"] = by
                 released = True
         if released:
             self.store.save_attempt(attempt)
@@ -127,9 +128,10 @@ class Observations:
         kind = observation["event_type"]
         if not kind or not re.fullmatch(rf"{re.escape(device.type)}\.[a-z][a-z0-9_]*", kind):
             return
+        operation_id = operation["op"] if by == "spira" else None
         if not kind.endswith(".changed"):
             self.emit(kind, device.id, observation["target"], observation["occurred_at"], {"by": by},
-                      epoch=epoch)
+                      epoch=epoch, operation_id=operation_id)
             return
         before = previous
         if operation and (not before or before["world_revision"] >= observation["world_revision"]):
@@ -140,7 +142,7 @@ class Observations:
             self.emit(kind, device.id, observation["target"], observation["occurred_at"], {
                 "by": by, "property": prop, "from": before["values"].get(prop) if before else None,
                 "to": values.get(prop),
-            }, epoch=epoch)
+            }, epoch=epoch, operation_id=operation_id)
 
     def home_event(self, target, event_type, occurred_at, payload, installation):
         at = offset_time(occurred_at)
@@ -188,7 +190,7 @@ class Observations:
                     self.store.save_attempt(attempt)
         self.emit(raw["event_type"], device.id, raw["target"], raw["occurred_at"], {**payload, "by": "unknown"})
 
-    def emit(self, kind, source, target, occurred_at, payload, *, evidence_from=None, epoch=None):
+    def emit(self, kind, source, target, occurred_at, payload, *, evidence_from=None, epoch=None, operation_id=None):
         at = offset_time(occurred_at)
         event = Event(
             event_id=identity("ev"), household_id=self.household, type=kind, source=source,
@@ -199,6 +201,8 @@ class Observations:
             body["evidence_from"] = evidence_from
         if epoch is not None:
             body["epoch"] = epoch
+        if operation_id is not None:
+            body["operation_id"] = operation_id
         data = packet(EventBatch([event]), "event_batch.json")
         self.store.fact(target, at.timestamp(), body)
         self.store.queue(event.event_id, "event", "/v1/hub/events", at.timestamp(), data)
