@@ -7,7 +7,7 @@ from pathlib import Path
 from spira_contracts.ack import Ack
 from spira_contracts.calendar import Calendar
 from spira_contracts.card import Card, Line, Summary
-from spira_contracts.common import AckStatus, EpisodeStatus, ExecutionStatus, LineState, TriggerEvent
+from spira_contracts.common import AckStatus, EpisodeStatus, ExecutionStatus, HomeEvent, LineState, TriggerEvent
 from spira_contracts.devices import Devices
 from spira_contracts.episode import Episode
 from spira_contracts.event import Event
@@ -15,8 +15,10 @@ from spira_contracts.execution_result import ExecutionResult, RestoreResult, Run
 from spira_contracts.household_created import HouseholdCreated
 from spira_contracts.memory import Memory
 from spira_contracts.plan import Cancelled, EventTrigger, Plan
+from spira_contracts.rationale import Execution, Observation
 from spira_contracts.reaction import Reaction
 
+from .observation import ObservationWindow
 from .projection import action_results, line_end, matching_trigger, run_state, task_end, user_changed
 
 CONTRACTS = Path(__file__).resolve().parents[3] / "contracts"
@@ -93,6 +95,9 @@ class Replay:
         ).model_copy(update={"household_id": self.household_id})
         self.memory = Memory(household_id=self.household_id, intents=[])
         self.live = False
+        self.observation_window = ObservationWindow()
+        self.observation: Observation | None = None
+        self.checked_changed_at: dict[str, datetime] = {}
         self.acks: dict[int, Ack] = {}
         self.profile: list[str] = []
 
@@ -128,6 +133,34 @@ class Replay:
             return model.model_validate(self.files[name])
         return None
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if "observation_window" in state:
+            return
+        # The demo launcher's --keep can resume a checkpoint made before S7.
+        self.observation_window = ObservationWindow()
+        self.observation = None
+        self.checked_changed_at = {}
+        if not self.live or self.card is None:
+            return
+        for plan in self.plans.values():
+            for entry in plan.cancelled:
+                self.checked_changed_at.setdefault(entry.task_id, datetime.fromisoformat(plan.sent_at))
+        if self.card.starts_at:
+            from .scene_support import server_numbers
+
+            filename = "plan.v2.json" if self.calendar_applied else "plan.v1.json"
+            template = self.load(Plan, filename)
+            end_due = min(
+                datetime.fromisoformat(task.end.or_time) for task in template.tasks
+                if task.end.on == HomeEvent.EVENT_END and task.end.or_time is not None
+            )
+            guest_lead = timedelta(minutes=server_numbers()["demo"]["guest_window_before_min"])
+            self.observation_window = ObservationWindow(
+                scheduled_start=datetime.fromisoformat(self.card.starts_at),
+                end_due=end_due, guest_lead=guest_lead,
+            )
+
     def now(self):
         return max(self.clock, datetime.now(timezone.utc)) if self.live else self.clock
 
@@ -151,14 +184,34 @@ class Replay:
             )
         )
 
-    def started(self, task_id: str):
-        return any(
-            isinstance(result.root, RunResult)
-            and result.root.task_id == task_id
-            and result.root.status
-            in (ExecutionStatus.RUNNING, ExecutionStatus.COMPLETED)
-            for result in self.results.values()
+    def started_at(self, task_id: str, *, by: datetime | None = None):
+        times = (
+            datetime.fromisoformat(packet.at) for result in self.results.values()
+            if isinstance(packet := result.root, RunResult)
+            and packet.task_id == task_id
+            and packet.status in (ExecutionStatus.RUNNING, ExecutionStatus.COMPLETED)
         )
+        return min((at for at in times if by is None or at <= by), default=None)
+
+    def started(self, task_id: str):
+        return self.started_at(task_id) is not None
+
+    def rationale_executions(self) -> list[Execution]:
+        finals = (
+            packet for result in self.results.values()
+            if isinstance(packet := result.root, RunResult)
+            and packet.status != ExecutionStatus.RUNNING
+        )
+        latest: dict[tuple[str, str], RunResult] = {}
+        for packet in sorted(finals, key=lambda packet: datetime.fromisoformat(packet.at)):
+            latest[packet.task_id, packet.device] = packet
+        return [
+            Execution(
+                task_id=packet.task_id, device=packet.device, status=packet.status,
+                substrate=packet.substrate, at=packet.at,
+            )
+            for packet in latest.values()
+        ]
 
     def cancel_tasks(self, task_ids: set[str], *, restore_started: bool):
         cancelled = [
@@ -180,13 +233,19 @@ class Replay:
     def update_card(
         self, lines: list[Line], *, stopped: bool = False, updated_at: str | None = None
     ):
+        updated_at = updated_at or self.tick()
+        if self.live:
+            checked = {line.task_id: line.checked for line in self.card.lines}
+            for line in lines:
+                if not line.checked and checked.get(line.task_id):
+                    self.checked_changed_at[line.task_id] = datetime.fromisoformat(updated_at)
         self.card = self.card.model_copy(
             update={
                 "lines": lines,
                 "stopped": stopped,
                 "buttons": [] if stopped else self.card.buttons,
                 "notify": False,
-                "updated_at": updated_at or self.tick(),
+                "updated_at": updated_at,
                 "summary": Summary(
                     done=sum(
                         line.state

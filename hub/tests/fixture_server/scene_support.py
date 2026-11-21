@@ -9,7 +9,10 @@ from spira_contracts.calendar import Calendar
 from spira_contracts.card import Card
 from spira_contracts.plan import Plan
 
+from .observation import SEOUL
 from .replay import CONTRACTS, Replay
+
+WEEKDAYS = "월화수목금토일"
 
 
 class NextOrder(BaseModel):
@@ -39,10 +42,13 @@ def substitute(value, replacements: dict[str, str]):
 
 def schedule_templates(
     replay: Replay, plan_name: str, card_name: str,
-    starts: datetime, ends: datetime, *, demo_mode: bool,
+    starts: datetime, ends: datetime, *, demo_mode: bool, guest_window: int | None = None,
 ):
     numbers = server_numbers()
     offsets = numbers["demo"] if demo_mode else numbers
+    replay.observation_window.scheduled_start = starts
+    replay.observation_window.end_due = ends + timedelta(minutes=offsets["end_fallback_min"])
+    replay.observation_window.guest_lead = timedelta(minutes=offsets["guest_window_before_min"])
     card = replay.load(Card, card_name)
     source_start = datetime.fromisoformat(card.starts_at)
     source_end = next(
@@ -64,9 +70,62 @@ def schedule_templates(
     replacements = {old.isoformat(): new.isoformat() for old, new in timestamps.items()}
     for name in (plan_name, card_name):
         replay.files[name] = substitute(replay.files[name], replacements)
+    if demo_mode and guest_window is not None:
+        # Only the window's end is widened for the demo; it opens as the Server's S5 writes it
+        # (schedule start - guest_window_before_min).
+        closes = starts + timedelta(seconds=guest_window)
+        opens = starts - timedelta(minutes=offsets["guest_window_before_min"])
+        window = {"from": opens.isoformat(), "to": closes.isoformat()}
+        for task in replay.files[plan_name]["tasks"]:
+            if task["trigger"].get("event") != "guest_arrived":
+                continue
+            task["trigger"]["window"] = window
+            fallback = task["end"].get("or_time")
+            if fallback and datetime.fromisoformat(fallback) <= closes:
+                task["end"]["or_time"] = (closes + (ends - starts)).isoformat()
 
 
-def live_replay(order: NextOrder, *, demo_mode: bool, now: datetime | None = None, sequence: int = 1):
+def rebase_linked_calendar(replay: Replay, starts: datetime, ends: datetime, shared: datetime):
+    starts, ends, shared = (value.astimezone(SEOUL) for value in (starts, ends, shared))
+    source_start = datetime.fromisoformat(replay.card.starts_at).astimezone(SEOUL)
+    weekday = WEEKDAYS[starts.weekday()]
+    original_day = f"{WEEKDAYS[source_start.weekday()]}요일"
+    new_day = f"{weekday}요일"
+    rationale = replay.files.get("rationale.json", {})
+    for event in replay.files["calendar.json"]["events"]:
+        if datetime.fromisoformat(event["start"]) != source_start:
+            continue
+        # Sub-minute rehearsal windows are too short for minute-level calendar evidence.
+        calendar_end = ends if ends - starts >= timedelta(minutes=1) else (
+            starts + (datetime.fromisoformat(event["end"]) - source_start)
+        )
+        event.update(start=starts.isoformat(), end=calendar_end.isoformat())
+        for evidence in rationale.get("evidence", {}).get("calendar", []):
+            if evidence["id"] == event["id"]:
+                evidence.update(
+                    days_after=(starts.date() - shared.date()).days, day=weekday,
+                    start=starts.strftime("%H:%M"), end=calendar_end.strftime("%H:%M"),
+                )
+        break
+    replay.calendar = replay.load(Calendar, "calendar.json")
+    card = replay.files["card.v1.json"]
+    card["text"] = card["text"].replace(original_day, new_day)
+    for item in replay.episode.item_tasks:
+        if item.text:
+            item.text = item.text.replace(original_day, new_day)
+    for item in rationale.get("item_tasks", []):
+        if item.get("text"):
+            item["text"] = item["text"].replace(original_day, new_day)
+    for task in replay.files["plan.v1.json"]["tasks"]:
+        for action in task["actions"]:
+            if action["cmd"] == "show_notice" and isinstance(action.get("value"), str):
+                action["value"] = action["value"].replace(original_day, new_day)
+
+
+def live_replay(
+    order: NextOrder, *, demo_mode: bool, now: datetime | None = None,
+    sequence: int = 1, guest_window: int | None = None,
+):
     now = now if now is not None else datetime.now(timezone.utc)
     replay = Replay(order.episode_id)
     if sequence > 1:
@@ -81,10 +140,13 @@ def live_replay(order: NextOrder, *, demo_mode: bool, now: datetime | None = Non
             "card_ids": [identifiers[card_id] for card_id in replay.episode.card_ids],
         })
     if replay.card and replay.card.starts_at:
+        starts, ends = scene_times(order, now)
         schedule_templates(
-            replay, "plan.v1.json", "card.v1.json", *scene_times(order, now),
-            demo_mode=demo_mode,
+            replay, "plan.v1.json", "card.v1.json", starts, ends,
+            demo_mode=demo_mode, guest_window=guest_window,
         )
+        if demo_mode:
+            rebase_linked_calendar(replay, starts, ends, now)
     plan = replay.files["plan.v1.json"]
     plan["sent_at"] = now.isoformat()
     if demo_mode:
@@ -123,6 +185,7 @@ def scene_calendar(replay: Replay, order: NextOrder, now: datetime):
 
 def apply_scene_calendar(
     replay: Replay, order: NextOrder, calendar: Calendar, *, demo_mode: bool, now: datetime | None,
+    guest_window: int | None = None,
 ):
     if order.episode_id != "ep_9120" or replay.calendar_applied or replay.paused:
         return
@@ -139,7 +202,7 @@ def apply_scene_calendar(
     schedule_templates(
         replay, "plan.v2.json", "card.found.json",
         datetime.fromisoformat(event.start), datetime.fromisoformat(event.end),
-        demo_mode=demo_mode,
+        demo_mode=demo_mode, guest_window=guest_window,
     )
     replay.files["plan.v2.json"]["sent_at"] = now.isoformat()
     replay.find_calendar_time()

@@ -21,6 +21,7 @@ from spira_contracts.execution_response import ExecutionResponse
 from spira_contracts.execution_result import ExecutionResult
 from spira_contracts.health import Health
 from spira_contracts.household_create import HouseholdCreate
+from spira_contracts.memory import Memory
 from spira_contracts.order_accepted import OrderAccepted
 from spira_contracts.order_edit import OrderEdit
 from spira_contracts.pause import Pause
@@ -32,8 +33,9 @@ from spira_contracts.validate import ContractError, validate
 from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException
 
-from .replay import Replay, valid_household_types, wire
-from .scene_support import NextOrder, apply_scene_calendar, live_replay, scene_calendar
+from .observation import close_observation, record_memory
+from .replay import CONTRACTS, Replay, read_json, valid_household_types, wire
+from .scene_support import NextOrder, apply_scene_calendar, live_replay, scene_calendar, server_numbers
 
 LABEL = "SPIRA fixture - non-inference test support"
 LABEL_HEADER = "X-SPIRA-Fixture"
@@ -76,10 +78,14 @@ def timestamp(value: str | None):
 
 
 def create_app(
-    episode_id: str = "ep_9031", *, scene_controls: bool = False, demo_mode: bool = False
+    episode_id: str = "ep_9031", *, scene_controls: bool = False, demo_mode: bool = False,
+    default_scene: NextOrder | None = None, guest_window: int | None = None,
 ) -> FastAPI:
     replay = Replay(episode_id)
-    snapshots: dict[str, Replay] = {} if scene_controls else {episode_id: replay}
+    if default_scene and Replay(default_scene.episode_id).household_id != replay.household_id:
+        raise ValueError("The default scene must belong to the fixture household")
+    live_scenes = scene_controls or default_scene is not None
+    snapshots: dict[str, Replay] = {} if live_scenes else {episode_id: replay}
     historical_package_replays: dict[str, Replay] = {}
     scene_counts: dict[str, int] = {}
     pending_order: NextOrder | None = None
@@ -133,8 +139,11 @@ def create_app(
             timestamp(event.start)
             timestamp(event.end)
         if active_order:
-            apply_scene_calendar(replay, active_order, calendar, demo_mode=demo_mode, now=now)
-        elif not scene_controls and calendar == replay.calendar:
+            apply_scene_calendar(
+                replay, active_order, calendar, demo_mode=demo_mode, now=now,
+                guest_window=guest_window,
+            )
+        elif not live_scenes and calendar == replay.calendar:
             replay.find_calendar_time()
         return response(CalendarResponse(accepted=len(calendar.events)), 202)
 
@@ -142,6 +151,24 @@ def create_app(
         snapshot.clock = max(snapshot.clock, replay.clock)
         snapshot.project()
         replay.clock = max(snapshot.clock, replay.clock)
+
+    def refresh_observations():
+        if not replay.live:
+            return
+        now = replay.now()
+        active = [snapshot for snapshot in snapshots.values() if snapshot.card and snapshot.observation is None]
+        if not active:
+            return
+        events = sorted(
+            (event for snapshot in snapshots.values() for event in snapshot.events.values()),
+            key=lambda event: datetime.fromisoformat(event.at),
+        )
+        windows = [snapshot.observation_window for snapshot in snapshots.values()]
+        for snapshot in active:
+            start_at = close_observation(snapshot, events, windows, now)
+            if start_at is not None:
+                intent_names = {entry["id"]: entry["name"] for entry in read_json(CONTRACTS / "kb/intents.json")["intents"]}
+                record_memory(snapshot, start_at, intent_names, server_numbers()["line_off_d"])
 
     def release_package(event: Event) -> bool:
         newest_first = sorted(
@@ -291,26 +318,42 @@ def create_app(
     @app.get("/v1/households/{household_id}/memory", dependencies=app_auth)
     async def get_memory(household_id: str):
         require_household(household_id)
-        return response(replay.memory)
+        if not replay.live:
+            return response(replay.memory)
+        refresh_observations()
+        groups = {}
+        for snapshot in reversed(snapshots.values()):
+            for intent in snapshot.memory.intents:
+                key = (intent.intent_id, frozenset(intent.calendar_tags))
+                if key in groups:
+                    group = groups[key]
+                    group.episodes.extend(intent.episodes)
+                    group.off_lines.extend(intent.off_lines)
+                    group.changed.extend(intent.changed)
+                else:
+                    groups[key] = intent.model_copy(deep=True)
+        return response(Memory(household_id=household_id, intents=list(groups.values())))
 
     @app.delete("/v1/households/{household_id}/memory/{case_id}", dependencies=app_auth)
     async def forget_case(household_id: str, case_id: str):
         require_household(household_id)
-        for intent in replay.memory.intents:
-            if any(episode.case_id == case_id for episode in intent.episodes):
-                intent.episodes = [
-                    episode for episode in intent.episodes if episode.case_id != case_id
-                ]
-                intent.off_lines = [
-                    line for line in intent.off_lines if line.case_id != case_id
-                ]
-                intent.changed = [
-                    change for change in intent.changed if change.case_id != case_id
-                ]
-                replay.memory.intents = [
-                    entry for entry in replay.memory.intents if entry.episodes
-                ]
-                return Response(status_code=204)
+        refresh_observations()
+        for snapshot in snapshots.values() or (replay,):
+            for intent in snapshot.memory.intents:
+                if any(episode.case_id == case_id for episode in intent.episodes):
+                    intent.episodes = [
+                        episode for episode in intent.episodes if episode.case_id != case_id
+                    ]
+                    intent.off_lines = [
+                        line for line in intent.off_lines if line.case_id != case_id
+                    ]
+                    intent.changed = [
+                        change for change in intent.changed if change.case_id != case_id
+                    ]
+                    snapshot.memory.intents = [
+                        entry for entry in snapshot.memory.intents if entry.episodes
+                    ]
+                    return Response(status_code=204)
         raise FixtureError(404, "not_found", "No such case in the replayed memory")
 
     @app.post("/v1/orders", dependencies=app_auth)
@@ -342,23 +385,25 @@ def create_app(
                 400, "invalid_request", "Invalid multipart order"
             ) from exc
         duplicate = source_id in orders
-        if not duplicate and scene_controls and not replay.paused:
-            if pending_order is None and not snapshots:
+        if not duplicate and live_scenes and not replay.paused:
+            scene = pending_order or default_scene
+            if scene is None and not snapshots:
                 raise FixtureError(409, "invalid_request", "Select a scene episode before upload")
-            if pending_order is not None:
-                template = pending_order.episode_id
+            if scene is not None:
+                template = scene.episode_id
                 scene_counts[template] = scene_counts.get(template, 0) + 1
                 now = datetime.now(timezone.utc)
                 if replay.live:
                     now = max(now, replay.clock + timedelta(microseconds=1))
                 upcoming = live_replay(
-                    pending_order, demo_mode=demo_mode, now=now, sequence=scene_counts[template],
+                    scene, demo_mode=demo_mode, now=now, sequence=scene_counts[template],
+                    guest_window=guest_window,
                 )
                 upcoming.devices = replay.devices
                 upcoming.profile = replay.profile
                 upcoming.receipts = replay.receipts
                 snapshots[upcoming.episode.episode_id] = upcoming
-                replay, active_order, pending_order = upcoming, pending_order, None
+                replay, active_order, pending_order = upcoming, scene, None
         selected_id = orders[source_id] if duplicate else replay.episode.episode_id
         if source_id is not None:
             orders[source_id] = selected_id
@@ -390,6 +435,10 @@ def create_app(
             raise FixtureError(
                 404, "not_found", "No rationale snapshot at this fixture step"
             )
+        if snapshot.live:
+            refresh_observations()
+            rationale.executions = snapshot.rationale_executions()
+            rationale.observations = [snapshot.observation] if snapshot.observation else []
         return response(rationale)
 
     @app.post("/v1/cards/{card_id}/reactions", dependencies=app_auth)
@@ -400,9 +449,11 @@ def create_app(
                 404, "not_found", "No open card with this ID in the fixture"
             )
         try:
+            refresh_observations()
             replay.react(reaction)
             if replay.live:
                 replay.project()
+                refresh_observations()
             return response(replay.card)
         except LookupError as exc:
             raise FixtureError(404, "not_found", str(exc)) from exc
@@ -503,6 +554,7 @@ def create_app(
                 )
         if replay.live:
             replay.project()
+            refresh_observations()
         changed = replay.finish_if_replayed() or changed
         return response(
             EventResponse(accepted=accepted, rejected=rejected, plans_changed=changed)
@@ -522,6 +574,7 @@ def create_app(
             snapshot.result_bodies[result_id] = receipts[-1]
             if not snapshot.finished:
                 project(snapshot)
+                refresh_observations()
             snapshot.finish_if_replayed()
         return response(ExecutionResponse(duplicate=duplicate))
 
