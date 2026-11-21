@@ -1,10 +1,12 @@
 """HTTP checks for opt-in, wall-clock scene replay."""
 
+import pickle
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
+from spira_contracts.reaction import Reaction
 
 from . import create_app
 from .scene_support import NextOrder, live_replay
@@ -145,6 +147,19 @@ def test_demo_guest_window_and_calendar_agree_across_seoul_midnight(duration, ca
     original_window = next(task.trigger.window for task in ordinary.plan.tasks if task.task_id == "t_mood#3")
     assert datetime.fromisoformat(original_window.from_) == starts - timedelta(minutes=30)
     assert datetime.fromisoformat(original_window.to) == ends
+
+
+def test_demo_checkpoint_from_before_observation_tracking_restores_window():
+    now = datetime.now(timezone.utc)
+    replay = live_replay(NextOrder(episode_id="ep_9031"), demo_mode=True, now=now)
+    replay.react(Reaction(reaction="line_off", task_id="t_clean#1"))
+    window = replay.observation_window
+    del replay.observation_window, replay.observation, replay.checked_changed_at
+
+    restored = pickle.loads(pickle.dumps(replay))
+    assert restored.observation_window == window
+    assert restored.observation is None
+    assert restored.checked_changed_at["t_clean#1"] == datetime.fromisoformat(restored.plan.sent_at)
 
 
 def test_scene_demo_wall_times_and_live_revisions():
