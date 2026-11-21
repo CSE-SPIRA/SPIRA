@@ -90,8 +90,10 @@ up to four lines, `done / total`, the awaited event, and for every line its
 contract state and `when`. Show the schedule as the Seoul weekday and event
 name when available. On the card and in 우리 집, show a line's trigger or its
 relation to the schedule start from the supplied times. Show exact times in
-판단 근거. After a line ends, it MUST show the supplied `end_state` and Server
-display `note`.
+판단 근거. After a line ends, show the supplied restore outcome when
+`end_state` is other than `none`, and preserve the Server display `note`.
+Keep cards from closed orders under the collapsed 지난 준비 section, with WHY
+still reachable.
 (PC-1, PC-3, PC-4, PC-5)
 
 **A4-R2.** A line's planned end condition MUST be shown only when a future
@@ -99,9 +101,11 @@ contract field explicitly supplies it. The App MUST NOT infer one from `when`,
 `end_state`, `note`, a timer, or fixture knowledge. The missing field remains
 Open item O-04/SP-09. (PC-4, PC-5)
 
-**A4-R3.** The App MUST follow the contract's card polling and `notify` rules and
-show at most one local notification for each (`card_id`, `updated_at`) for which
-`notify` is true. Other card updates MUST be silent. (PC-3, PC-4)
+**A4-R3.** The App MUST use the contract's 30 s card polling cadence, with a
+foreground exception of 3 s while a preparation or share is active so home
+changes are visible promptly. Preserve the contract's cursor and `notify`
+rules. Show at most one local notification for each (`card_id`, `updated_at`)
+for which `notify` is true. Other card updates MUST be silent. (PC-3, PC-4)
 
 ### A5. Interventions
 

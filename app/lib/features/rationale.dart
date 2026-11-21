@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
 import '../contracts.dart' as wire;
+import '../design_vocabulary.g.dart';
 import '../theme.dart';
 import '../korean_text.dart';
 import 'labels.dart';
@@ -28,7 +29,7 @@ _BasisLabels _basisLabelsFor(
       if (calendar[source] case final event?)
         _calendarLabel(event)
       else if (source == '가구 유형')
-        source
+        stateWords['household_profile']!
       else if (itemsByType[source] case final item?)
         if (productName && item.name.trim().isNotEmpty)
           item.name
@@ -181,8 +182,11 @@ class _RationaleScreen extends StatelessWidget {
           }
           return ListenableBuilder(
             listenable: app,
-            builder: (context, _) =>
-                _RationaleContent(result: result, app: app, focus: focus),
+            builder: (context, _) => _RationaleContent(
+              result: app.rationaleFor(result.episodeId) ?? result,
+              app: app,
+              focus: focus,
+            ),
           );
         },
       ),
@@ -255,16 +259,53 @@ class _RationaleContentState extends State<_RationaleContent> {
         .where((line) => line.taskId == taskId)
         .firstOrNull;
 
+    final taskLinks = {
+      for (final task in result.tasks)
+        (cardId: task.cardId, taskId: task.taskId),
+    };
+    // Re-enabling a line assigns a new task number. Reuse the basis only
+    // when the task name and displayed line still agree within this card.
+    String taskName(String id) => id.split('#').first;
+    wire.LineElement? liveLine(wire.Task task) {
+      final exact = cardLine(task.cardId, task.taskId);
+      if (exact != null) return exact;
+      final matchingBasis = result.tasks.where(
+        (other) =>
+            other.cardId == task.cardId &&
+            other.line == task.line &&
+            taskName(other.taskId) == taskName(task.taskId),
+      );
+      if (matchingBasis.singleOrNull == null) return null;
+      return app.cards[task.cardId]?.lines
+          .where(
+            (line) =>
+                !taskLinks.contains((
+                  cardId: task.cardId,
+                  taskId: line.taskId,
+                )) &&
+                line.text == task.line &&
+                taskName(line.taskId) == taskName(task.taskId),
+          )
+          .singleOrNull;
+    }
+
+    final liveLines = {for (final task in result.tasks) task: liveLine(task)};
     final focus = widget.focus;
-    final focusedTask = result.tasks
-        .where((task) => (cardId: task.cardId, taskId: task.taskId) == focus)
-        .firstOrNull;
-    // A replacement card line can arrive before the stored rationale shows it.
-    final replacement = focus != null && focusedTask == null
+    final focusedTask = focus == null
+        ? null
+        : result.tasks
+              .where(
+                (task) =>
+                    task.cardId == focus.cardId &&
+                    (task.taskId == focus.taskId ||
+                        liveLines[task]?.taskId == focus.taskId),
+              )
+              .firstOrNull;
+    final unmatchedLine = focus != null && focusedTask == null
         ? cardLine(focus.cardId, focus.taskId)
         : null;
     // The card links the task to its intent and the intent's situation.
-    final focusedIntent = focusedTask != null || replacement != null
+    final focusedIntent = focusedTask != null || unmatchedLine != null
         ? result.intents
               .where((intent) => intent.cardId == focus?.cardId)
               .firstOrNull
@@ -301,10 +342,10 @@ class _RationaleContentState extends State<_RationaleContent> {
     final tasks = _ChainSection(
       title: '그래서 집이 할 일',
       children: [
-        if (replacement != null)
+        if (unmatchedLine != null)
           _TaskPanel(
             key: _taskAnchor,
-            current: replacement,
+            current: unmatchedLine,
             scheduleStart: scheduleStarts[focus?.cardId],
             selected: true,
             showSituation: showSituation,
@@ -313,7 +354,7 @@ class _RationaleContentState extends State<_RationaleContent> {
           _TaskPanel(
             key: task == focusedTask ? _taskAnchor : null,
             task: task,
-            current: cardLine(task.cardId, task.taskId),
+            current: liveLines[task],
             scheduleStart: scheduleStarts[task.cardId],
             selected: task == focusedTask,
             showSituation: task == focusedTask ? showSituation : null,
@@ -367,13 +408,23 @@ class _ContextSection extends StatelessWidget {
   final wire.Evidence evidence;
   final Set<wire.CalendarElement> linkedEvents;
 
+  static final _rarePurchase = RegExp(r'^(\d+)일에 (\d+)번 산 드문 물건$');
+
+  String _unusualReason(String reason) {
+    final match = _rarePurchase.firstMatch(reason);
+    return match == null ? reason : '지난 ${match[1]}일 동안 ${match[2]}번 샀어요';
+  }
+
   @override
   Widget build(BuildContext context) {
     final counts = evidence.kbCounts ?? const [];
     final examples = evidence.kbExamples;
     final unusual = evidence.unusualItems?.items ?? const [];
     final intentNames = {
-      for (final count in counts) count.intentId: count.name,
+      for (final count in counts)
+        count.intentId: count.intentId == 'none'
+            ? stateWords['order_without_preparation']!
+            : count.name,
     };
     return _ChainSection(
       title: '이 집과 함께 본 것',
@@ -395,7 +446,10 @@ class _ContextSection extends StatelessWidget {
             title: '평소와 달랐던 물건',
             rows: [
               for (final entry in unusual)
-                _EvidenceRow(title: entry.item, detail: entry.why),
+                _EvidenceRow(
+                  title: entry.item,
+                  detail: _unusualReason(entry.why),
+                ),
             ],
           ),
         if (counts.isNotEmpty || examples.isNotEmpty)
@@ -404,7 +458,8 @@ class _ContextSection extends StatelessWidget {
             rows: [
               if (counts.isNotEmpty)
                 _Chips([
-                  for (final count in counts) '${count.name} ${count.n}건',
+                  for (final count in counts)
+                    '${intentNames[count.intentId]} ${count.n}건',
                 ]),
               for (final example in examples)
                 _EvidenceRow(
@@ -413,7 +468,7 @@ class _ContextSection extends StatelessWidget {
                       intentNames[example.intentId] ??
                       '비슷한 주문',
                   detail: [
-                    '${example.overlap.k}/${example.overlap.n}개 겹침',
+                    '${example.overlap.n}개 중 ${example.overlap.k}개가 같아요',
                     ...example.overlap.items,
                   ].join(' · '),
                 ),
@@ -895,8 +950,10 @@ class _TaskPanel extends StatelessWidget {
     };
     final timing =
         lineTimeDerivation(current, scheduleStart) ?? lineTimeLabel(current);
-    final state = current?.state ?? task?.state;
-    final status = state == null ? null : visibleLineLabel(state);
+    final status = switch (current?.state) {
+      null || wire.LineState.HELD || wire.LineState.SCHEDULED => null,
+      final state => lineLabel(state),
+    };
 
     return _Panel(
       selected: selected,
@@ -923,7 +980,7 @@ class _TaskPanel extends StatelessWidget {
             ),
           ],
           KoreanText(
-            task?.line ?? current!.text,
+            current?.text ?? task!.line,
             style: theme.textTheme.titleMedium,
           ),
           if (timing != null)
@@ -949,7 +1006,7 @@ class _TaskPanel extends StatelessWidget {
           ],
           if (task == null) const KoreanText('이 할 일의 자세한 근거를 볼 수 없어요.'),
           if (current?.endState == wire.EndState.WITHHELD)
-            KoreanText(endLabel(wire.EndState.WITHHELD)),
+            KoreanText(endLabel(wire.EndState.WITHHELD)!),
           if (showSituation != null)
             Align(
               alignment: Alignment.centerLeft,

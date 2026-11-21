@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
 import '../contracts.dart' as wire;
+import '../design_vocabulary.g.dart';
 import '../korean_text.dart';
 import 'labels.dart';
 
@@ -76,7 +77,7 @@ class _SetupScreenState extends State<SetupScreen> {
           style: Theme.of(context).textTheme.headlineMedium,
         ),
         const SizedBox(height: 8),
-        const KoreanText('해당하는 가구 유형을 선택해 주세요.'),
+        KoreanText('${stateWords['household_profile']}에 해당하는 항목을 골라 주세요.'),
         for (final group in _groups.entries) ...[
           const SizedBox(height: 18),
           KoreanText(group.key, style: Theme.of(context).textTheme.titleMedium),
@@ -105,7 +106,10 @@ class _SetupScreenState extends State<SetupScreen> {
             ],
           ),
         ],
-        if (!_validTypes) const StatusMessage('선택한 가구 유형을 함께 사용할 수 없어요.'),
+        if (!_validTypes)
+          StatusMessage(
+            '선택한 ${stateWords['household_profile']} 항목을 함께 사용할 수 없어요.',
+          ),
         const SizedBox(height: 24),
         FilledButton(
           onPressed: app.busy || _types.isEmpty || !_validTypes

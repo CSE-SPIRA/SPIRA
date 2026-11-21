@@ -21,6 +21,10 @@ class Preparations extends StatelessWidget {
     final known = app.orderedEpisodes.toList();
     final latest = known.firstOrNull;
     final current = app.currentPreparationOrder;
+    bool hasFinishedPreparation(wire.Episode episode) =>
+        episode.status == wire.EpisodeStatus.CLOSED &&
+        episode.cardIds.isNotEmpty &&
+        app.orderImages(episode.episodeId).isEmpty;
     final pending = app.accepted.where((id) => !app.episodes.containsKey(id));
     final reading = known.where(
       (episode) =>
@@ -30,9 +34,12 @@ class Preparations extends StatelessWidget {
               episode.status == wire.EpisodeStatus.READING ||
               episode.status == wire.EpisodeStatus.RECEIVED),
     );
-    final visible = app.demoPreview
+    final candidates = app.demoPreview
         ? {if (pending.isEmpty || app.serverUnavailable) ?latest}
         : {...reading, ?current, ?latest};
+    final visible = candidates.where(
+      (episode) => !hasFinishedPreparation(episode),
+    );
     final previous = known.where((episode) => !visible.contains(episode));
     final showEmpty =
         known.isEmpty &&
@@ -90,7 +97,7 @@ class Preparations extends StatelessWidget {
           expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             for (final episode in previous)
-              if (app.demoPreview)
+              if (app.demoPreview && !hasFinishedPreparation(episode))
                 ListTile(
                   key: ValueKey(episode.episodeId),
                   contentPadding: EdgeInsets.zero,
@@ -440,6 +447,8 @@ class _PreparationCard extends StatelessWidget {
                   ),
                 ),
                 if (!card.stopped &&
+                    app.episodes[card.episodeId]?.status !=
+                        wire.EpisodeStatus.CLOSED &&
                     card.buttons.contains(wire.CardButton.STOP))
                   PopupMenuButton<bool>(
                     tooltip: '준비 더보기 · ${card.text}',
@@ -513,6 +522,25 @@ class _PreparationLine extends StatelessWidget {
   final wire.Card card;
   final wire.LineElement line;
 
+  Future<void> _toggle(BuildContext context, bool on) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final switched = await app.switchLine(card, line);
+    if (on || !switched || !messenger.mounted) return;
+    messenger
+      ..removeCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: KoreanText(lineLabel(wire.LineState.OFF)),
+          duration: const Duration(seconds: 5),
+          persist: false,
+          action: SnackBarAction(
+            label: '되돌리기',
+            onPressed: () => app.undoLineOff(card.cardId, line.taskId),
+          ),
+        ),
+      );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -526,7 +554,7 @@ class _PreparationLine extends StatelessWidget {
     final canSwitch = app.canSwitch(card, line);
     final on = line.state != wire.LineState.OFF;
     final end = line.endState;
-    final outcome = end == null ? null : endLabel(end);
+    final outcome = endLabel(end);
     final note = line.note;
     return Row(
       children: [
@@ -551,9 +579,9 @@ class _PreparationLine extends StatelessWidget {
                         // A check means the line finished, not that it is selected.
                         Icon(
                           const {
-                            wire.LineState.DONE,
-                            wire.LineState.PARTIAL,
-                          }.contains(line.state)
+                                wire.LineState.DONE,
+                                wire.LineState.PARTIAL,
+                              }.contains(line.state)
                               ? Icons.check
                               : line.checked
                               ? Icons.radio_button_unchecked
@@ -609,26 +637,25 @@ class _PreparationLine extends StatelessWidget {
             ),
           ),
         ),
-        if (canSwitch)
+        if (canSwitch) ...[
+          const SizedBox(width: 12),
           Semantics(
             label: '${line.text} ${on ? '끄기' : '켜기'}',
-            child: Transform.scale(
-              scale: .65,
-              transformHitTests: false,
-              child: Switch(
-                value: on,
-                trackColor: const WidgetStateProperty.fromMap({
-                  WidgetState.disabled: null,
-                  WidgetState.selected: DesignTokens.greenSoft,
-                }),
-                thumbColor: const WidgetStateProperty.fromMap({
-                  WidgetState.disabled: null,
-                  WidgetState.selected: DesignTokens.greenDeep,
-                }),
-                onChanged: pending ? null : (_) => app.switchLine(card, line),
-              ),
+            child: Switch(
+              value: on,
+              padding: EdgeInsets.zero,
+              trackColor: const WidgetStateProperty.fromMap({
+                WidgetState.disabled: null,
+                WidgetState.selected: DesignTokens.greenSoft,
+              }),
+              thumbColor: const WidgetStateProperty.fromMap({
+                WidgetState.disabled: null,
+                WidgetState.selected: DesignTokens.greenDeep,
+              }),
+              onChanged: pending ? null : (on) => _toggle(context, on),
             ),
           ),
+        ],
       ],
     );
   }

@@ -204,7 +204,7 @@ class _OrderExtractionState extends State<OrderExtraction>
                 alignment: Alignment.centerRight,
                 child: TextButton(
                   onPressed: () => setState(_finish),
-                  child: const KoreanText('건너뛰기'),
+                  child: const KoreanText('바로 보기'),
                 ),
               ),
             if (previewing)

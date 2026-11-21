@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
 import '../contracts.dart' as wire;
+import '../design_vocabulary.g.dart';
 import '../korean_text.dart';
 import 'labels.dart';
 import 'setup.dart';
@@ -55,7 +56,7 @@ class SettingsScreen extends StatelessWidget {
             : switch (app.paused) {
                 true => '자동 준비 일시정지됨',
                 false => '자동 준비 켜짐',
-                null => '자동 준비 상태 미확인',
+                null => stateWords['preparation_status_unknown']!,
               },
       ),
       if (app.controlErrors['pause'] case final error?) StatusMessage(error),

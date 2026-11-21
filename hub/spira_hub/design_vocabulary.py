@@ -44,5 +44,8 @@ STATE_WORDS = {
     "light_blue": "파랑 빛",
     "light_purple": "보라 빛",
     "light_white": "흰 빛",
-    "light_warm": "따뜻한 빛"
+    "light_warm": "따뜻한 빛",
+    "household_profile": "우리 집 구성",
+    "preparation_status_unknown": "자동 준비가 켜져 있는지 아직 알 수 없어요.",
+    "order_without_preparation": "준비할 일 없는 주문"
 }

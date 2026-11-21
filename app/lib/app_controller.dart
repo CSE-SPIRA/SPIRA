@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api/app_api.dart';
 import 'contracts.dart' as wire;
+import 'design_vocabulary.g.dart';
 import 'platform/android_bridge.dart';
 import 'platform/google_calendar.dart';
 import 'platform/home_hub_onboarding.dart';
@@ -35,7 +36,8 @@ enum SetupStep { household, calendar, devices, ready }
 
 enum DeviceChoice { undecided, delegated, never }
 
-const _pollInterval = Duration(seconds: 30);
+const _idlePollInterval = Duration(seconds: 30);
+const _activePollInterval = Duration(seconds: 3);
 
 class AppController extends ChangeNotifier {
   AppController({
@@ -101,6 +103,7 @@ class AppController extends ChangeNotifier {
   final _startedTasks = <String, Set<String>>{};
   final _pendingStops = <String, Set<String>>{};
   final _uncertainStops = <String>{};
+  final _historyChecked = <String>{};
   final pendingLines = <String>{};
   final controlErrors = <String, String>{};
   final _notifications = <String, List<String>>{};
@@ -113,6 +116,8 @@ class AppController extends ChangeNotifier {
   String? _cursor;
   String? get lastServerCheck => _cursor;
   Timer? _timer;
+  Duration? _pollInterval;
+  bool _foreground = true;
   StreamSubscription<void>? _shareSubscription;
   Future<void> _queue = Future<void>.value();
   Future<void> _calendarQueue = Future<void>.value();
@@ -138,9 +143,8 @@ class AppController extends ChangeNotifier {
   wire.Episode? get currentPreparationOrder {
     final ordered = orderedEpisodes;
     final candidates = demoPreview ? ordered.take(1) : ordered;
-    for (final (index, episode) in candidates.indexed) {
-      // Keep the latest order's card visible after its work ends.
-      if (index > 0 && episode.status == wire.EpisodeStatus.CLOSED) continue;
+    for (final episode in candidates) {
+      if (episode.status == wire.EpisodeStatus.CLOSED) continue;
       if (cardsFor(episode).isNotEmpty) return episode;
     }
     return null;
@@ -181,23 +185,62 @@ class AppController extends ChangeNotifier {
     starting = false;
     if (step == SetupStep.ready) _requestNotificationPermission();
     _change();
-    _startTimer();
     await Future.wait([resendCalendar(), sync()]);
   }
 
-  void _startTimer() {
-    _timer ??= Timer.periodic(_pollInterval, (_) => unawaited(sync()));
+  bool get _hasActiveWork =>
+      sharingExample ||
+      queuedShares > 0 ||
+      accepted.isNotEmpty ||
+      episodes.values.any(
+        (episode) =>
+            episode.status == wire.EpisodeStatus.RECEIVED ||
+            episode.status == wire.EpisodeStatus.READING ||
+            (episode.status != wire.EpisodeStatus.CLOSED &&
+                cardsFor(episode).length < episode.cardIds.length),
+      ) ||
+      cards.values.any(_cardIsActive);
+
+  bool _cardIsActive(wire.Card card) {
+    if (stopPending(card.cardId)) return true;
+    final episode = episodes[card.episodeId];
+    if (episode != null &&
+        (episode.status == wire.EpisodeStatus.CLOSED ||
+            !episode.cardIds.contains(card.cardId))) {
+      return false;
+    }
+    return card.lines.any(
+      (line) => switch (line.state) {
+        wire.LineState.HELD ||
+        wire.LineState.SCHEDULED ||
+        wire.LineState.RUNNING => true,
+        wire.LineState.OFF ||
+        wire.LineState.CANCELLED ||
+        wire.LineState.DROPPED ||
+        wire.LineState.STOPPED => false,
+        _ => line.endState == null,
+      },
+    );
+  }
+
+  void _schedulePoll() {
+    if (starting || step != SetupStep.ready) return;
+    final interval = _foreground && _hasActiveWork
+        ? _activePollInterval
+        : _idlePollInterval;
+    if (_pollInterval == interval) return;
+    _timer?.cancel();
+    _pollInterval = interval;
+    _timer = Timer.periodic(interval, (_) => unawaited(sync()));
   }
 
   void setForeground(bool foreground) {
-    if (_disposed || starting) return;
-    if (foreground) {
-      _startTimer();
+    if (_disposed || _foreground == foreground) return;
+    _foreground = foreground;
+    _schedulePoll();
+    if (foreground && !starting) {
       unawaited(resendCalendar());
       unawaited(sync());
-    } else {
-      _timer?.cancel();
-      _timer = null;
     }
   }
 
@@ -563,7 +606,7 @@ class AppController extends ChangeNotifier {
             rethrow;
           }
         }),
-      )).whereType<wire.Episode>();
+      )).whereType<wire.Episode>().toList();
       for (final episode in details) {
         if (episode.householdId != id) {
           throw const FormatException('Wrong household');
@@ -577,6 +620,7 @@ class AppController extends ChangeNotifier {
       for (final card in poll.cards) {
         DateTime.parse(card.updatedAt);
       }
+      await _loadMissingHistory(id, details, poll.cards);
       for (final card in poll.cards) {
         final previous = cards[card.cardId];
         if (previous != null &&
@@ -654,6 +698,37 @@ class AppController extends ChangeNotifier {
     }
     _change();
     await _deliverNotifications();
+  }
+
+  Future<void> _loadMissingHistory(
+    String householdId,
+    List<wire.Episode> details,
+    List<wire.Card> updates,
+  ) async {
+    final available = {...cards.keys, ...updates.map((card) => card.cardId)};
+    final missing = {
+      for (final episode in details)
+        if (episode.status == wire.EpisodeStatus.CLOSED)
+          for (final cardId in episode.cardIds)
+            if (!available.contains(cardId) &&
+                !_historyChecked.contains(cardId))
+              cardId: episode.episodeId,
+    };
+    if (missing.isEmpty) return;
+    try {
+      // The cursorless read only returns open cards. Fetch missing history
+      // without moving the live cursor or sending old notifications.
+      final history = await api.cards(
+        householdId,
+        since: '1970-01-01T00:00:00Z',
+      );
+      for (final card in history.cards) {
+        if (missing[card.cardId] == card.episodeId) cards[card.cardId] = card;
+      }
+      _historyChecked.addAll(missing.keys);
+    } catch (_) {
+      // Keep the live refresh usable and retry missing history next time.
+    }
   }
 
   Future<void> _deliverNotifications() async {
@@ -750,6 +825,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> stop(wire.Card card) async {
     if (!canControl ||
+        episodes[card.episodeId]?.status == wire.EpisodeStatus.CLOSED ||
         card.stopped ||
         !card.buttons.contains(wire.CardButton.STOP)) {
       return;
@@ -803,11 +879,12 @@ class AppController extends ChangeNotifier {
   bool linePending(wire.Card card, wire.LineElement line) =>
       pendingLines.contains(_taskKey(card, line));
 
-  Future<void> switchLine(wire.Card card, wire.LineElement line) async {
+  Future<bool> switchLine(wire.Card card, wire.LineElement line) async {
     final key = _taskKey(card, line);
-    if (!canSwitch(card, line) || !pendingLines.add(key)) return;
+    if (!canSwitch(card, line) || !pendingLines.add(key)) return false;
     controlErrors.remove(card.cardId);
     _change();
+    var switched = false;
     await _serialize(() async {
       try {
         final current = cards[card.cardId];
@@ -820,7 +897,7 @@ class AppController extends ChangeNotifier {
             matching.state != line.state) {
           return;
         }
-        await api.react(
+        final updated = await api.react(
           card.cardId,
           wire.Reaction(
             reaction: line.state == wire.LineState.OFF
@@ -829,6 +906,13 @@ class AppController extends ChangeNotifier {
             taskId: line.taskId,
           ),
         );
+        switched =
+            line.state == wire.LineState.OFF ||
+            updated.lines.any(
+              (entry) =>
+                  entry.taskId == line.taskId &&
+                  entry.state == wire.LineState.OFF,
+            );
       } catch (error) {
         if (error is AppApiException &&
             error.code == wire.ErrorCode.LINE_STARTED) {
@@ -841,6 +925,16 @@ class AppController extends ChangeNotifier {
         _change();
       }
     });
+    return switched;
+  }
+
+  Future<void> undoLineOff(String cardId, String taskId) async {
+    final card = cards[cardId];
+    if (card == null) return;
+    final line = card.lines.where((line) => line.taskId == taskId).firstOrNull;
+    if (line != null && line.state == wire.LineState.OFF) {
+      await switchLine(card, line);
+    }
   }
 
   Future<void> setPaused(bool value) async {
@@ -933,7 +1027,8 @@ class AppController extends ChangeNotifier {
       return switch (error.code) {
         wire.ErrorCode.LINE_STARTED => '이미 시작된 항목은 바꿀 수 없어요.',
         wire.ErrorCode.INVALID_IMAGE => '서버가 이미지를 읽을 수 없어요. 새 캡처를 공유해 주세요.',
-        wire.ErrorCode.HOUSEHOLD_TYPES_INVALID => '선택한 가구 유형을 함께 사용할 수 없어요.',
+        wire.ErrorCode.HOUSEHOLD_TYPES_INVALID =>
+          '선택한 ${stateWords['household_profile']} 항목을 함께 사용할 수 없어요.',
         _ => fallback,
       };
     }
@@ -941,7 +1036,9 @@ class AppController extends ChangeNotifier {
   }
 
   void _change() {
-    if (!_disposed) notifyListeners();
+    if (_disposed) return;
+    _schedulePoll();
+    notifyListeners();
   }
 
   @override
