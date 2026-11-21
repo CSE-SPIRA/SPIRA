@@ -274,20 +274,84 @@ body:not(.test-home) .theme .home-device {
   color: var(--ink);
   font-size: .78rem;
 }
-.viewer-reports:not(:empty), .home-restore {
-  display: grid;
-  gap: var(--space-8);
-  margin-top: var(--space-16);
+.viewer-reports {
   color: var(--muted);
   font-size: .9rem;
 }
-.home-restore {
-  padding: var(--space-16);
+.viewer-reports:has(> *) {
+  display: grid;
+  gap: var(--space-8);
+  margin-top: var(--space-12);
+}
+.home-restore, #restore-history {
+  padding: var(--space-8) var(--space-16);
   border: 1px solid var(--line);
-  border-radius: var(--radius-22);
+  border-radius: var(--radius-12);
   background: var(--surface);
 }
-.home-restore h2 { color: var(--ink); font-size: 1.1rem; font-weight: 600; }
+.home-restore header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+.home-restore h2 { color: var(--ink); font-size: 1rem; font-weight: 600; }
+.home-restore button {
+  border: 0;
+  padding: 2px var(--space-4);
+  background: transparent;
+  color: var(--green-deep);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.restore-rows li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  padding-block: 2px;
+  color: var(--ink);
+}
+.restore-rows li + li { border-top: 1px solid var(--line); }
+.restore-rows time {
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+#restore-history {
+  max-width: min(30rem, 85vw);
+  max-height: 60svh;
+  overflow: auto;
+}
+
+@media (min-width: 49rem) and (min-height: 48rem) {
+  .test-home main:has(.house-view.ready):has(.home-restore) {
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    height: 100svh;
+  }
+  .test-home main:has(.house-view.ready):has(.home-restore) #home-state {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+  .test-home main:has(.house-view.ready):has(.home-restore) .house-layout {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+  .test-home main:has(.house-view.ready):has(.home-restore) .house-view {
+    box-sizing: border-box;
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    aspect-ratio: auto;
+  }
+  .viewer-reports { flex-shrink: 0; }
+}
 
 @media (max-width: 48rem) {
   .test-home main { padding-block: var(--space-16); }

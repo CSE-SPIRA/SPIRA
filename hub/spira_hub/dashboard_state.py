@@ -250,7 +250,7 @@ def ledger_view(installation, history, task_counts, tasks, attempts, facts, even
             for entry in task.get("trigger_evidence", []) + task.get("end_evidence", []):
                 match = entry.get("match", entry)
                 if "event_id" in match:
-                    event_plans[match["event_id"]].add((task["plan"], entry["plan_version"]))
+                    event_plans[match["event_id"]].add(task["plan"])
 
     def add(kind, at, label, what, by, reports, *, preparation=None, **details):
         order = min((sequence[report["id"]] for report in reports), default=float("inf"))
@@ -292,7 +292,7 @@ def ledger_view(installation, history, task_counts, tasks, attempts, facts, even
         result = row["packet"]
         kind, at = result["kind"], result["at"]
         report = delivery_report(kind, result["result_id"], row)
-        preparation = (result["plan_id"], result["plan_version"])
+        preparation = result["plan_id"]
         if kind == "run":
             operation = result["operation_id"]
             attempt = attempts_by_operation.get(operation)
@@ -340,7 +340,7 @@ def ledger_view(installation, history, task_counts, tasks, attempts, facts, even
             what = run_words(action["cmd"], action.get("value"), status, missing_report=compact and not reports)
         read_back = entry["read_back"]
         add(entry["kind"], entry["at"], device_words(device, devices), what, "spira",
-            reports, preparation=(attempt["plan"], attempt["version"]), device=device, status=status,
+            reports, preparation=attempt["plan"], device=device, status=status,
             operation_id=entry["operation_id"], acknowledgement=entry["acknowledgement"],
             read_back=read_back["values"] if read_back else None)
 

@@ -1219,7 +1219,7 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
             ("조명", "분홍 빛", "spira", ["run", "event"]),
             ("오븐", "170° 20분 대기", "spira", ["run", "event"]),
             ("오븐", "시작", "user", ["event"]),
-            ("조명", "분홍 빛 → 2700K", "user", ["event"]),
+            ("조명", "분홍 빛 → 따뜻한 빛", "user", ["event"]),
             ("—", "일정이 끝난 것을 확인", "hub", ["event"]),
             ("인덕션", "일정이 끝난 뒤 되돌림 확인 · 잠금 해제", "spira", ["restore", "event"]),
             ("전기포트", "일정이 끝난 뒤 되돌림 확인 · 켜짐", "spira", ["restore", "event"]),
@@ -1248,14 +1248,15 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
         assert all(label not in ledger_page for label in (
             "서버에 보냄", "보내는 중", "전송 실패", "계획 v", "ep_9031", "h_042", "pill actor",
         ))
-        newest, earlier, first = ledger_page.split('<details class="ledger-group"')[1:]
+        newest, = ledger_page.split('<details class="ledger-group"')[1:]
         assert 'data-newest open><summary>받은 준비 · 받은 시각 ' in newest
-        assert '>18:05</time> · 할 일 3 · 품목 안내 2</summary>' in newest
-        assert ' open>' not in earlier and '>08:40</time> · 할 일 3 · 품목 안내 2</summary>' in earlier
-        assert ' open>' not in first and '>21:11</time> · 할 일 4 · 품목 안내 2</summary>' in first
-        assert ledger_page.count('<li class="ledger-row">') == len(ledger) - 1
+        assert '>21:11</time> · 할 일 3 · 품목 안내 2</summary>' in newest
+        assert newest.count('<li class="ledger-row') == len(ledger) - 1
+        assert newest.count('<li class="ledger-row plan-change">') == 2
         assert newest.index('>토 17:50</time>') < newest.index('>토 13:30</time>')
-        assert "택배 들임" in newest and "청소기 취소" in earlier
+        assert "택배 들임" in newest
+        assert "준비가 바뀌었어요 · v2 · 청소기 취소" in newest
+        assert "준비가 바뀌었어요 · v3 · 택배 기다림 끝" in newest
         assert "사람이 조작함" in newest
         for source, label in (("command", "SPIRA가 시킴"), ("report", "기기가 알림"), ("restore", "집이 되돌림")):
             assert f'class="source-mark source-{source}" aria-hidden="true"></span>{label}' in ledger_page
@@ -1293,10 +1294,44 @@ def test_dashboard_labels_each_fridge_notice_with_its_item(tmp_path):
     run(exercise)
 
 
+def test_dashboard_keeps_cleaning_and_lock_with_their_preparation_across_versions(tmp_path):
+    async def exercise():
+        clock = Clock()
+        cleaning = task(clock, action("cleaner_01", "clean", {"room": "거실"}), restore=False)
+        safety = task(clock, action("cooktop_01", "child_lock"), n=2, restore=False)
+        stub = Stub(clock, cleaning, safety)
+        hub = Scenario(tmp_path, clock, stub=stub)
+        install_birthday(hub)
+        hub.boot()
+        try:
+            await hub.reconcile()
+            await hub.cycle()
+            original = (await hub.dashboard.get("/")).text
+            group_key = original.split('data-group="', 1)[1].split('"', 1)[0]
+            clock.advance(minutes=1)
+            future = task(clock, trigger={"time": (clock() + timedelta(minutes=5)).isoformat()})
+            stub.plans.append(dict(plan(clock, future), plan_id="ep_other"))
+            await hub.reconcile()
+            clock.advance(minutes=1)
+            stub.advance(cleaning, safety)
+            await hub.reconcile()
+
+            page = (await hub.dashboard.get("/")).text
+            newest, older = page.split('<details class="ledger-group"')[1:]
+            assert "data-newest open" in newest and " open>" not in older
+            assert f'data-group="{group_key}"' in older
+            assert "인덕션 · 잠금" in older and "청소기 · 청소 시작" in older
+            assert older.index("준비가 바뀌었어요 · v2") < older.index("인덕션 · 잠금")
+            assert "준비가 바뀌었어요" not in newest
+        finally:
+            await hub.close()
+    run(exercise)
+
+
 def test_dashboard_keeps_late_restoration_with_its_preparation(tmp_path):
     async def exercise():
         clock = Clock()
-        stub = Stub(clock, task(clock))
+        stub = Stub(clock, task(clock, action(cmd="color_temp", value={"kelvin": 4000})))
         hub = Scenario(tmp_path, clock, stub=stub)
         install_light(hub)
         hub.boot()
@@ -1316,7 +1351,9 @@ def test_dashboard_keeps_late_restoration_with_its_preparation(tmp_path):
             assert '>13:41</time> · 할 일 1</summary>' in newest
             assert "되돌림 확인" not in newest
             assert '>13:40</time> · 할 일 1</summary>' in older
-            assert '>토 13:42</time><div><strong>조명 · 끝난 뒤 되돌림 확인' in older
+            assert '>토 13:42</time><div><strong>조명 · 끝난 뒤 되돌림 확인 · 따뜻한 빛' in older
+            assert "조명 · 흰 빛" in older
+            assert "3000K" not in older and "4000K" not in older
         finally:
             await hub.close()
     run(exercise)

@@ -107,30 +107,33 @@ def test_scene_order_exposes_rationale_at_first_card_poll(episode_id):
     original = client.fixture("rationale.json")
     if episode_id == "ep_9031":
         starts = datetime.fromisoformat(cards[0]["starts_at"]).astimezone(ZoneInfo("Asia/Seoul"))
+        source_event = client.fixture("calendar.json")["events"][0]
+        duration = datetime.fromisoformat(source_event["end"]) - datetime.fromisoformat(source_event["start"])
         linked = actual["evidence"]["calendar"][0]
         assert linked["start"] == starts.strftime("%H:%M")
-        assert linked["end"] == (starts + timedelta(seconds=30)).strftime("%H:%M")
+        assert linked["end"] == (starts + duration).strftime("%H:%M")
         assert actual["evidence"]["calendar"][1:] == original["evidence"]["calendar"][1:]
     else:
         assert actual == original
 
 
-def test_demo_guest_window_and_calendar_agree_across_seoul_midnight():
+@pytest.mark.parametrize(("duration", "calendar_end"), [(30, "03:00"), (120, "00:02")])
+def test_demo_guest_window_and_calendar_agree_across_seoul_midnight(duration, calendar_end):
     now = datetime.fromisoformat("2026-11-22T23:59:00+09:00")
-    order = NextOrder(episode_id="ep_9031", starts_in_seconds=90, duration_seconds=30)
+    order = NextOrder(episode_id="ep_9031", starts_in_seconds=65, duration_seconds=duration)
     replay = live_replay(order, demo_mode=True, now=now, guest_window=900)
-    starts = now + timedelta(seconds=90)
-    ends = starts + timedelta(seconds=30)
+    starts = now + timedelta(seconds=65)
+    ends = starts + timedelta(seconds=duration)
     mood = next(task for task in replay.plan.tasks if task.task_id == "t_mood#3")
     assert datetime.fromisoformat(mood.trigger.window.from_) == starts
     closes = starts + timedelta(seconds=900)
     assert datetime.fromisoformat(mood.trigger.window.to) == closes
     assert datetime.fromisoformat(mood.end.or_time) > closes
     assert replay.calendar.events[0].start == starts.isoformat()
-    assert replay.calendar.events[0].end == ends.isoformat()
+    assert replay.calendar.events[0].end == f"2026-11-23T{calendar_end}:05+09:00"
     assert replay.files["rationale.json"]["evidence"]["calendar"][0] == {
         "id": "c1", "days_after": 1, "day": "월", "tags": ["생일"],
-        "start": "00:00", "end": "00:01",
+        "start": "00:00", "end": calendar_end,
     }
     assert replay.card.text.startswith("월요일 생일")
     for task, item in zip(replay.plan.tasks[-2:], replay.episode.item_tasks, strict=True):

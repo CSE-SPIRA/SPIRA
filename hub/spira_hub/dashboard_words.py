@@ -83,8 +83,8 @@ def property_words(prop, value):
         if value is None:
             return STATE_WORDS["off"]
     if prop in ("color", "color_temp") and isinstance(value, dict):
-        if "kelvin" in value:
-            return f'{number_words(value["kelvin"])}K'
+        if isinstance(kelvin := value.get("kelvin"), (int, float)):
+            return STATE_WORDS["light_warm" if kelvin < 4000 else "light_white"]
         if isinstance(hue := value.get("hue"), (float, int)):
             key = "light_white" if value.get("saturation") == 0 else next(
                 name for upper, name in LIGHT_HUE_RANGES if hue % 360 < upper
