@@ -11,7 +11,7 @@ from .plans import action_keys, trigger_match
 RUN_PROBLEMS = {"failed", "unknown", "unverifiable"}
 
 
-def state_view(runtime):
+def state_view(runtime, *, dashboard=False):
     store = runtime.store
     now = runtime.clock()
     snapshot = store.get("snapshot", {})
@@ -79,7 +79,7 @@ def state_view(runtime):
         ],
         "server_confirmed": runtime.reconciled and runtime.last_pull_error is None,
         "ledger": ledger_view(runtime.installation, history, task_counts, tasks, attempts, facts, events, executions,
-                              {row["id"]: row["seq"] for rows in outbox.values() for row in rows}),
+                              {row["id"]: row["seq"] for rows in outbox.values() for row in rows}, compact=dashboard),
         "devices": device_bindings(runtime), "paused": snapshot.get("paused"),
         "server_peer": runtime.server.fixture, "server_error": runtime.last_pull_error,
         "registry_error": runtime.config_error, "observation_gap_at": runtime.observations.gap_at,
@@ -236,7 +236,7 @@ def evidence(row):
             "packet": packet_body(row)}
 
 
-def ledger_view(installation, history, task_counts, tasks, attempts, facts, events, executions, sequence):
+def ledger_view(installation, history, task_counts, tasks, attempts, facts, events, executions, sequence, *, compact):
     devices = {device.id: device for device in installation.devices.devices}
     task_devices = {
         (task["plan"], task["id"]): list(dict.fromkeys(action["device"] for action in task["body"]["actions"]))
@@ -244,9 +244,18 @@ def ledger_view(installation, history, task_counts, tasks, attempts, facts, even
     }
     task_ends = {(task["plan"], task["id"]): task.get("end_evidence", []) for task in tasks}
     rows = []
+    event_plans = defaultdict(set)
+    if compact:
+        for task in tasks:
+            for entry in task.get("trigger_evidence", []) + task.get("end_evidence", []):
+                match = entry.get("match", entry)
+                if "event_id" in match:
+                    event_plans[match["event_id"]].add((task["plan"], entry["plan_version"]))
 
-    def add(kind, at, label, what, by, reports, **details):
+    def add(kind, at, label, what, by, reports, *, preparation=None, **details):
         order = min((sequence[report["id"]] for report in reports), default=float("inf"))
+        if compact and preparation is not None:
+            details["preparation"] = preparation
         rows.append((offset_time(at), order, {
             "kind": kind, "at": at, "label": label, "what": what, "by": by, "reports": reports, **details,
         }))
@@ -254,7 +263,7 @@ def ledger_view(installation, history, task_counts, tasks, attempts, facts, even
     for version in history:
         plan_id, number = version["plan_id"], version["plan_version"]
         count = task_counts.get((plan_id, number))
-        what = plan_words(version, count, task_devices, devices)
+        what = plan_words(version, count, task_devices, devices, compact=compact)
         add("plan", version["received_at"], "—", what, "hub",
             [delivery_report("ack", f"{plan_id}/{number}", version["ack"])],
             plan_id=plan_id, plan_version=number, task_count=count)
@@ -283,13 +292,16 @@ def ledger_view(installation, history, task_counts, tasks, attempts, facts, even
         result = row["packet"]
         kind, at = result["kind"], result["at"]
         report = delivery_report(kind, result["result_id"], row)
+        preparation = (result["plan_id"], result["plan_version"])
         if kind == "run":
             operation = result["operation_id"]
             attempt = attempts_by_operation.get(operation)
             device, cmd, status = result["device"], result["cmd"], result["status"]
             value = attempt["action"].get("value") if attempt else None
-            add("run", at, device_words(device, devices), run_words(cmd, value, status), "spira",
-                [report, *reports_for_operation(operation)], device=device, status=status,
+            device_reports = reports_for_operation(operation)
+            what = run_words(cmd, value, status, missing_report=compact and not device_reports)
+            add("run", at, device_words(device, devices), what, "spira",
+                [report, *device_reports], preparation=preparation, device=device, status=status,
                 operation_id=operation, acknowledgement=attempt["ack"] if attempt else None,
                 read_back=result.get("observed"))
             reported_operations.add(operation)
@@ -309,8 +321,10 @@ def ledger_view(installation, history, task_counts, tasks, attempts, facts, even
             for attempt in writes:
                 reports.extend(reports_for_operation(attempt["op"]))
                 reported_operations.add(attempt["op"])
-            add("restore", at, device_words(device, devices), restore_words(status, writes, originals, end=end),
-                "spira" if status == "restored" else "hub", reports, device=device, status=status,
+            what = restore_words(status, writes, originals, end=end, compact=compact)
+            add("restore", at, device_words(device, devices), what,
+                "spira" if status == "restored" else "hub", reports, preparation=preparation,
+                device=device, status=status,
                 commands=[command(attempt) for attempt in writes])
 
     for attempt in attempts:
@@ -318,14 +332,15 @@ def ledger_view(installation, history, task_counts, tasks, attempts, facts, even
             continue
         entry = command(attempt)
         device, status = entry["device"], entry["status"]
+        reports = reports_for_operation(entry["operation_id"])
         if entry["kind"] == "restore":
-            what = restore_words(status, [attempt], [])
+            what = restore_words(status, [attempt], [], compact=compact)
         else:
             action = attempt["action"]
-            what = run_words(action["cmd"], action.get("value"), status)
+            what = run_words(action["cmd"], action.get("value"), status, missing_report=compact and not reports)
         read_back = entry["read_back"]
         add(entry["kind"], entry["at"], device_words(device, devices), what, "spira",
-            reports_for_operation(entry["operation_id"]), device=device, status=status,
+            reports, preparation=(attempt["plan"], attempt["version"]), device=device, status=status,
             operation_id=entry["operation_id"], acknowledgement=entry["acknowledgement"],
             read_back=read_back["values"] if read_back else None)
 
@@ -334,7 +349,9 @@ def ledger_view(installation, history, task_counts, tasks, attempts, facts, even
         source = event["source"]
         label, what = event_words(event, devices)
         by = "hub" if source == "hub" else event["payload"]["by"]
+        linked = event_plans.get(event_id, ())
         add("event", event["at"], label, what, by, [delivery_report("event", event_id, row)],
+            preparation=next(iter(linked)) if len(linked) == 1 else None,
             device=None if source == "hub" else source, event_type=event["type"])
     return [row for _, _, row in sorted(rows, key=lambda entry: entry[:2])]
 
