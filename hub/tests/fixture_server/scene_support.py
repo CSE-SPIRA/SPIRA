@@ -90,12 +90,16 @@ def rebase_linked_calendar(replay: Replay, starts: datetime, ends: datetime, sha
     for event in replay.files["calendar.json"]["events"]:
         if datetime.fromisoformat(event["start"]) != source_start:
             continue
-        event.update(start=starts.isoformat(), end=ends.isoformat())
+        # Sub-minute rehearsal windows are too short for minute-level calendar evidence.
+        calendar_end = ends if ends - starts >= timedelta(minutes=1) else (
+            starts + (datetime.fromisoformat(event["end"]) - source_start)
+        )
+        event.update(start=starts.isoformat(), end=calendar_end.isoformat())
         for evidence in rationale.get("evidence", {}).get("calendar", []):
             if evidence["id"] == event["id"]:
                 evidence.update(
                     days_after=(starts.date() - shared.date()).days, day=weekday,
-                    start=starts.strftime("%H:%M"), end=ends.strftime("%H:%M"),
+                    start=starts.strftime("%H:%M"), end=calendar_end.strftime("%H:%M"),
                 )
         break
     replay.calendar = replay.load(Calendar, "calendar.json")

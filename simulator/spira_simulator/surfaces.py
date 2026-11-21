@@ -381,13 +381,12 @@ def viewer_plan(data: dict, device_names: dict) -> tuple[dict, list[dict]]:
         {
             "device": device_names.get(row["device"], "기기"),
             "outcome": RESTORE_NAMES[row["status"]],
-            "substrate": SUBSTRATE_NAMES.get(
-                row["substrate"], "기기 유형 미확인"
-            ),
+            "substrate": SUBSTRATE_NAMES["physical"] if row["substrate"] == "physical" else None,
             "at": display_time(row["at"]),
+            "occurred_at": row["at"],
             "pending": row.get("delivery") == "not_delivered",
         }
-        for row in data["restores"]
+        for row in sorted(data["restores"], key=lambda row: datetime.fromisoformat(row["at"]), reverse=True)
     ]
     return {device: list(entries.values()) for device, entries in planned.items()}, restores
 

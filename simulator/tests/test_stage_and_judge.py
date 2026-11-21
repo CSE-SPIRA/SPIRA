@@ -958,6 +958,36 @@ def test_restore_overlay_keeps_report_and_observation_separate(tmp_path, status)
         assert public_value(restores)
 
 
+def test_viewer_shows_five_latest_restore_rows_with_older_rows_in_more(tmp_path):
+    records = fixture_json("ep_9031/executions.json")
+    restore = next(row for row in records if row["kind"] == "restore" and row["task_id"] == "t_safe#2")
+    records = [row for row in records if row["kind"] == "run"]
+    source = SourceStub(records)
+    timestamps = [f"2026-10-17T17:{minute:02}:00+09:00" for minute in range(7)]
+    for index in (3, 6, 1, 0, 4, 2, 5):
+        source.body.append(dict(restore, result_id=f"rs_test_{index}", at=timestamps[index],
+                                items=[restore["items"][0]]))
+    app = operator_app(tmp_path, execution_source=source)
+    with TestClient(app) as client:
+        view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").raise_for_status().text)
+        panel = view.find('.//section[@class="home-restore"]')
+        recent = panel.findall("ul/li/time")
+        assert [time.get("datetime") for time in recent] == timestamps[:1:-1]
+        assert panel.findtext("header/h2") == "되돌림 기록"
+        more = panel.find("header/button")
+        assert more.text == "더 보기"
+        history = panel.find(f'section[@id="{more.get("popovertarget")}"]')
+        assert history.get("popover") == "auto"
+        assert [time.get("datetime") for time in history.findall("ul/li/time")] == timestamps[1::-1]
+        assert "모의 기기" not in client.get("/sim/viewer").text
+
+        source.body = [row for row in records if row.get("at") not in timestamps[:2]]
+        view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").raise_for_status().text)
+        panel = view.find('.//section[@class="home-restore"]')
+        assert len(panel.findall("ul/li")) == 5
+        assert panel.find("header/button") is None
+
+
 def test_protective_fallback_overlay_preserves_observed_state(tmp_path):
     plan = fixture_json("ep_9031/plan.v3.json")
     records = fixture_json("ep_9031/executions.json")

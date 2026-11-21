@@ -186,10 +186,11 @@ Hub-computed `by` and the C-3 payload sent to the Server; and restoration versus
 skip outcomes. It MUST identify each device as virtual or physical and visibly
 mark the class-A local-operation assumption. (PC-4, PC-5, PC-6)
 
-**H8-R4.** The first screen MUST group the ledger by plan receipt, with the
-newest group kept open and older groups collapsed on arrival. Each group shows
-its receipt time and available counts for situation tasks and item notices,
-with its rows ordered newest first.
+**H8-R4.** The first screen MUST group the ledger by preparation (plan ID),
+with the newest preparation kept open and older preparations collapsed on arrival.
+Each group shows its first receipt time and the latest available counts for
+situation tasks and item notices. Rows from all versions appear newest first,
+with version changes shown as subdued rows.
 Rows show local wall time, the device or home event, household wording, and a
 source marker explained in the legend. Outstanding deliveries show a pending
 or failed mark. The ledger MUST include unverified runs and restoration outcomes.

@@ -1,6 +1,7 @@
 """Read-only household ledger and Hub diagnostics."""
 
 from bisect import bisect_right
+from collections import defaultdict
 from hashlib import blake2s
 from html import escape
 from pathlib import Path
@@ -86,31 +87,39 @@ def ledger_time(value, *, short=False):
 def preparation_groups(state):
     ledger = state["ledger"]
     receipts = [row for row in ledger if row["kind"] == "plan"]
-    receipt_times = [offset_time(row["at"]) for row in receipts]
-    groups = {(row["plan_id"], row["plan_version"]): [] for row in receipts}
+    versions = defaultdict(list)
+    for receipt in receipts:
+        versions[receipt["plan_id"]].append(receipt)
+    plan_ids = list(versions)
+    receipt_times = [offset_time(versions[plan_id][0]["at"]) for plan_id in plan_ids]
+    groups = {plan_id: [] for plan_id in plan_ids}
     household_rows = []
     for row in reversed(ledger):
         if row["kind"] == "plan":
-            if row["what"] or delivery_mark(row):
-                groups[row["plan_id"], row["plan_version"]].append(row)
+            plan_id = row["plan_id"]
+            if row is not versions[plan_id][0]:
+                change = f'준비가 바뀌었어요 · v{row["plan_version"]}'
+                what = f'{change} · {row["what"]}' if row["what"] else change
+                groups[plan_id].append({**row, "kind": "plan_change", "what": what})
+            elif row["what"] or delivery_mark(row):
+                groups[plan_id].append(row)
             continue
         preparation = row.get("preparation")
         if preparation is None:
             # Place ordinary household activity in the matching time period.
             index = bisect_right(receipt_times, offset_time(row["at"])) - 1
             if index >= 0:
-                receipt = receipts[index]
-                preparation = (receipt["plan_id"], receipt["plan_version"])
+                preparation = plan_ids[index]
         groups.get(preparation, household_rows).append(row)
 
     sections = []
-    for index, receipt in enumerate(reversed(receipts)):
-        plan_id, version = receipt["plan_id"], receipt["plan_version"]
-        counts = task_count_words(receipt["task_count"], receipt["notice_count"])
+    for index, (plan_id, history) in enumerate(reversed(versions.items())):
+        first, latest = history[0], history[-1]
+        counts = task_count_words(latest["task_count"], latest["notice_count"])
         tasks = "".join(f" · {count}" for count in counts)
-        title = f'받은 준비 · 받은 시각 {ledger_time(receipt["at"], short=True)}{tasks}'
-        key = blake2s(f"{plan_id}/{version}".encode(), digest_size=8).hexdigest()
-        sections.append(ledger_group(key, title, groups[plan_id, version], newest=index == 0))
+        title = f'받은 준비 · 받은 시각 {ledger_time(first["at"], short=True)}{tasks}'
+        key = blake2s(plan_id.encode(), digest_size=8).hexdigest()
+        sections.append(ledger_group(key, title, groups[plan_id], newest=index == 0))
     if household_rows:
         sections.append(ledger_group("household", "집에서 일어난 일", household_rows, newest=not receipts))
     return "".join(sections)
@@ -145,13 +154,16 @@ def ledger_row(row):
     actor = SOURCE_LABELS[source]
     if kind == "plan":
         actor = "준비를 받음"
+    elif kind == "plan_change":
+        actor = "준비 변경을 받음"
     elif kind == "event" and by == "hub":
         actor = "집이 감지함"
     detail = ' <span class="person">· 사람이 조작함</span>' if by == "user" else ""
     status = row.get("status")
     tone = f' class="outcome-{status}"' if status in {"unverifiable", "failed"} else ""
+    row_class = "ledger-row plan-change" if kind == "plan_change" else "ledger-row"
     return (
-        f'<li class="ledger-row">{source_mark(source, actor)}{ledger_time(row["at"])}'
+        f'<li class="{row_class}">{source_mark(source, actor)}{ledger_time(row["at"])}'
         f'<div><strong{tone}>{label}{escape(row["what"] or "받은 준비")}</strong>{detail}'
         f'{delivery_mark(row)}</div></li>'
     )

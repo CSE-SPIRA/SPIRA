@@ -74,6 +74,7 @@ a:focus-visible { outline: 3px solid var(--green); outline-offset: 5px; }
 .ledger-row + .ledger-row { border-top: 1px solid var(--line); }
 .ledger-row time, .ledger-row .person { font-size: var(--size-14); color: var(--muted); }
 .ledger-row strong { font-weight: 600; }
+.ledger-row.plan-change strong { color: var(--muted); font-weight: 400; }
 .ledger-row .outcome-unverifiable { color: var(--muted); }
 .ledger-row .outcome-failed, .ledger-row .delivery-failed { color: var(--pink-ink); }
 .ledger-row .delivery { display: block; margin-top: var(--space-4); font-size: var(--size-13); }
