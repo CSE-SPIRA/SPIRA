@@ -5,12 +5,15 @@ motion values. `vocabulary.json` defines Korean device and room names, App
 icons, and short state labels. Short labels and App labels preserve wording
 already used in those contexts.
 
-Run `python3 design/build.py` from the repository root after editing either
-file. Commit the generated App Dart, Hub CSS and Python, and Simulator CSS,
-Python, and JS alongside the source. Run `python3 design/build.py --check` to
-check them without writing. Each part's test suite also checks its own outputs.
-The App and Simulator package the same IBM Plex Sans KR OpenType files from
-the Simulator's `ui/house/fonts/` directory.
+[`fonts/`](fonts) is the shared `spira_fonts` package with the IBM Plex Sans KR
+OpenType files and licence. The App uses that package directly. The Simulator
+serves generated WOFF2 copies and the licence from its `ui/house/fonts/` directory.
+
+From the repository root, install the font build dependencies in your Python
+environment with `python3 -m pip install -r design/requirements.txt`. Run
+`python3 design/build.py` after editing the tokens, vocabulary, or fonts. Commit
+the generated files alongside the source. Run `python3 design/build.py --check`
+to check them without writing. Each part's test suite also checks its own outputs.
 
 ## Writing
 

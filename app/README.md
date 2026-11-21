@@ -50,7 +50,7 @@ Optional Dart defines:
   [Flutter Android sign-in setup](https://pub.dev/packages/google_sign_in_android)
   [Google Calendar events API](https://developers.google.com/workspace/calendar/api/v3/reference/events/list)
 
-## Run in the browser
+### Run in the browser
 
 Run the App, Hub, Simulator, and fixture Server from one checkout. The launcher
 needs Python 3.9+, `uv`, `mosquitto`, Flutter, and Chrome for hot reload.
@@ -79,7 +79,7 @@ demo shell's sample order and skips Android sharing and Google Calendar. It
 displays the same bundled PNG it uploads to the demo route. The web build
 serves it at `/assets/assets/example-order.png`.
 
-### Manual fallback
+#### Manual fallback
 
 Start the fixture stack from the repository root.
 
@@ -113,21 +113,7 @@ Enter the fixture placeholder `demo` under **서버 접속 토큰 입력**. Unde
 `contracts/fixtures/ep_9031/household.created.json`. Keep both tokens out of Dart
 defines for manual and real-server runs.
 
-### Where to change what
-
-| Change | File |
-| --- | --- |
-| Shared design and vocabulary | [`design/`](../design/README.md) |
-| App theme | [`theme.dart`](lib/theme.dart) |
-| Tabs and app shell | [`main.dart`](lib/main.dart) |
-| Current and past preparations | [`preparations.dart`](lib/features/preparations.dart) |
-| Order scan and extracted items | [`order_extraction.dart`](lib/features/order_extraction.dart) |
-| WHY | [`rationale.dart`](lib/features/rationale.dart) |
-| 우리 집 | [`our_home.dart`](lib/features/our_home.dart) |
-| Settings and connection keys | [`settings.dart`](lib/features/settings.dart) |
-| Labels | [`labels.dart`](lib/features/labels.dart) |
-
-## Checks
+## Tests
 
 ```sh
 flutter test
@@ -140,6 +126,20 @@ The Flutter tests drive the UI and typed HTTP client with small in-test peers.
 They read the shared fixture payloads directly. Build verification covers the
 Android manifest, Kotlin share inbox and notification bridge. Android share
 delivery, process recreation, and TalkBack still require an Android runtime.
+
+## Where to change what
+
+| Change | File |
+| --- | --- |
+| Shared design and vocabulary | [`design/`](../design/README.md) |
+| App theme | [`theme.dart`](lib/theme.dart) |
+| Tabs and app shell | [`main.dart`](lib/main.dart) |
+| Current and past preparations | [`preparations.dart`](lib/features/preparations.dart) |
+| Order scan and extracted items | [`order_extraction.dart`](lib/features/order_extraction.dart) |
+| WHY | [`rationale.dart`](lib/features/rationale.dart) |
+| 우리 집 | [`our_home.dart`](lib/features/our_home.dart) |
+| Settings and connection keys | [`settings.dart`](lib/features/settings.dart) |
+| Labels | [`labels.dart`](lib/features/labels.dart) |
 
 ## Contract boundaries
 

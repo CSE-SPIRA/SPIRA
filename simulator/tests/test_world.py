@@ -57,8 +57,8 @@ def test_sim_at01_configured_household_without_peers(wire, tmp_path):
         assert len(font_paths) == 4
         for path in font_paths:
             font = client.get(f"/sim/assets/house/{path}").raise_for_status()
-            assert font.headers["content-type"] == "font/otf"
-            assert font.content.startswith(b"OTTO")
+            assert font.headers["content-type"] == "font/woff2"
+            assert font.content.startswith(b"wOF2")
         license_text = client.get("/sim/assets/house/fonts/LICENSE.txt").raise_for_status().text
         assert "SIL OPEN FONT LICENSE" in license_text
         snapshot = client.get("/sim/snapshot").json()

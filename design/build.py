@@ -3,9 +3,11 @@
 
 import argparse
 import json
+from io import BytesIO
 from pathlib import Path
 
 DESIGN = Path(__file__).resolve().parent
+FONTS = DESIGN / "fonts"
 ROOT = DESIGN.parent
 APP = Path("app/lib")
 HUB = Path("hub/spira_hub")
@@ -124,6 +126,18 @@ def dart_vocabulary(vocabulary):
     )
 
 
+def web_fonts():
+    from fontTools.ttLib.woff2 import compress
+
+    files = {HOUSE / "fonts/LICENSE.txt": (FONTS / "LICENSE.txt").read_bytes()}
+    for weight in ("Regular", "Medium", "SemiBold", "Bold"):
+        name = f"IBMPlexSansKR-{weight}"
+        output = BytesIO()
+        compress(FONTS / f"{name}.otf", output)
+        files[HOUSE / f"fonts/{name}.woff2"] = output.getvalue()
+    return files
+
+
 def generate():
     tokens = read("tokens.json")
     vocabulary = read("vocabulary.json")
@@ -151,14 +165,18 @@ def main():
     parser.add_argument("--check", action="store_true", help="check without writing")
     parser.add_argument("--part", choices=("app", "hub", "simulator"), help="limit to one part")
     args = parser.parse_args()
+    outputs = generate()
+    if args.part in (None, "simulator"):
+        outputs["simulator"].update(web_fonts())
     stale = []
-    for part, files in generate().items():
+    for part, files in outputs.items():
         if args.part and part != args.part:
             continue
         for relative, contents in files.items():
             path = ROOT / relative
-            data = contents.encode("utf-8")
+            data = contents.encode("utf-8") if isinstance(contents, str) else contents
             if not args.check:
+                path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(data)
             elif not path.is_file() or path.read_bytes() != data:
                 stale.append(relative)

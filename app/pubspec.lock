@@ -437,7 +437,7 @@ packages:
   spira_fonts:
     dependency: "direct main"
     description:
-      path: "../simulator/spira_simulator/ui/house/fonts"
+      path: "../design/fonts"
       relative: true
     source: path
     version: "1.1.0"

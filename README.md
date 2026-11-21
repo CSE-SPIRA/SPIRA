@@ -13,8 +13,9 @@ SPIRA reads an order screenshot, finds similar cases in a synthetic purchase-int
 | [`app/`](app) | Flutter app: share orders, preparation card, stop / switch off | Yejoon Kim |
 | [`server/`](server) | SPIRA Server: extract → retrieve → judge intent → tasks → plan (S1–S7) | Seojin Lee |
 | [`hub/`](hub) | Home Hub: pull plan, triggers, execute, read back, restore | Yejoon Kim |
-| [`simulator/`](simulator) | Virtual household (MQTT) + 2D viewer | Yejoon Kim |
+| [`simulator/`](simulator) | Virtual household (MQTT) + 3D viewer | Yejoon Kim |
 | [`contracts/`](contracts) | Values shared between parts: API, schemas, enums, fixtures | Shared |
+| [`design/`](design) | Shared design tokens, vocabulary, writing rules and fonts | Shared |
 | [`docs/`](docs) | [Architecture](docs/architecture.md) · [Paper (LaTeX)](docs/paper) | Shared · Jeewon Lee |
 | [SPIRA_KB](https://github.com/CSE-SPIRA/SPIRA_KB) | Synthetic purchase-intent knowledge base (separate repository) | Uijin Lee |
 
@@ -23,6 +24,10 @@ SPIRA reads an order screenshot, finds similar cases in a synthetic purchase-int
 1. Read [`contracts/README.md`](contracts/README.md) — the values every part agrees on.
 2. Read the `README.md` and `spec.md` in your part folder.
 3. Follow [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md) for branches and pull requests.
+
+## Run the demo
+
+Run the fixture stack from one checkout with the [Simulator demo guide](simulator/DEMO.md) or use [`app/scripts/browser-demo`](app/scripts/browser-demo) for the Flutter App preview.
 
 ## Paper
 
