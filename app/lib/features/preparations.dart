@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
 import '../contracts.dart' as wire;
+import '../theme.dart';
 import 'labels.dart';
+import 'order_extraction.dart';
 import 'rationale.dart';
 import 'setup.dart';
 
@@ -15,13 +17,36 @@ class Preparations extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final known = app.orderedEpisodes.toList();
+    final latest = known.firstOrNull;
+    final current = app.currentPreparationOrder;
+    final reading = known.where(
+      (episode) =>
+          episode != current &&
+          (app.accepted.contains(episode.episodeId) ||
+              app.orderImages(episode.episodeId).isNotEmpty ||
+              episode.status == wire.EpisodeStatus.READING ||
+              episode.status == wire.EpisodeStatus.RECEIVED),
+    );
+    final visible = {...reading, ?current, ?latest};
+    final previous = known.where((episode) => !visible.contains(episode));
     return RefreshIndicator(
       onRefresh: app.sync,
       child: ListView(
+        primary: false,
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
         children: [
-          Text('우리 집 준비', style: Theme.of(context).textTheme.headlineMedium),
+          if (app.browserPreview && app.fixture)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton(
+                onPressed: app.canControl && !app.sharingExample
+                    ? app.shareExample
+                    : null,
+                child: Text(app.sharingExample ? '주문을 보내는 중…' : '예시 주문으로 공유'),
+              ),
+            ),
+          if (app.exampleShareError case final error?) StatusMessage(error),
           if (app.refreshError case final error?) StatusMessage(error),
           if (app.stale && known.isNotEmpty)
             const StatusMessage('마지막으로 확인한 정보예요. 현재 상태를 확인하는 중이에요.'),
@@ -48,15 +73,38 @@ class Preparations extends StatelessWidget {
               app.refreshError == null &&
               app.accepted.isEmpty)
             const StatusMessage('준비를 불러오는 중이에요…'),
-          if (known.isEmpty &&
+          if (app.platform != null &&
+              known.isEmpty &&
               app.refreshed &&
               app.accepted.isEmpty &&
               app.queuedShares == 0)
             const StatusMessage('주문 화면을 캡처한 뒤 안드로이드 공유 메뉴에서 SPIRA를 선택해 주세요.'),
-          for (final _ in app.accepted)
-            const StatusMessage('주문을 받았어요. 읽기 결과를 기다리는 중이에요.'),
-          for (final episode in known)
-            _OrderSection(app: app, episode: episode),
+          for (final id in app.accepted)
+            if (!app.episodes.containsKey(id))
+              _OrderSection(key: ValueKey(id), app: app, episodeId: id),
+          for (final episode in visible)
+            _OrderSection(
+              key: ValueKey(episode.episodeId),
+              app: app,
+              episodeId: episode.episodeId,
+              current: episode == current,
+            ),
+          if (previous.isNotEmpty)
+            ExpansionTile(
+              key: const PageStorageKey('past-preparations'),
+              tilePadding: EdgeInsets.zero,
+              title: const Text('지난 준비'),
+              shape: const Border(),
+              expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final episode in previous)
+                  _OrderSection(
+                    key: ValueKey(episode.episodeId),
+                    app: app,
+                    episodeId: episode.episodeId,
+                  ),
+              ],
+            ),
         ],
       ),
     );
@@ -64,107 +112,255 @@ class Preparations extends StatelessWidget {
 }
 
 class _OrderSection extends StatelessWidget {
-  const _OrderSection({required this.app, required this.episode});
+  const _OrderSection({
+    super.key,
+    required this.app,
+    required this.episodeId,
+    this.current = false,
+  });
 
   final AppController app;
-  final wire.Episode episode;
+  final String episodeId;
+  final bool current;
 
   @override
   Widget build(BuildContext context) {
-    final cards = app.cardsFor(episode);
+    final episode = app.episodes[episodeId];
     final theme = Theme.of(context);
-    final status = switch (episode.status) {
+    final status = switch (episode?.status) {
+      null => '주문을 받았어요. 읽기 결과를 기다리는 중이에요.',
       wire.EpisodeStatus.RECEIVED => '주문을 받았어요. 읽기 대기 중이에요.',
       wire.EpisodeStatus.READING => '주문을 읽고 있어요.',
       wire.EpisodeStatus.READ_FAILED => '주문을 읽지 못했어요. 주문 화면을 캡처해서 다시 공유해 주세요.',
       wire.EpisodeStatus.JUDGED => '집에서 준비할 일이 없어요.',
-      wire.EpisodeStatus.NOTIFIED => '준비를 확인했어요.',
+      wire.EpisodeStatus.NOTIFIED => current ? null : '준비를 확인했어요.',
       wire.EpisodeStatus.HELD => '준비할 시간을 기다리고 있어요.',
       wire.EpisodeStatus.CLOSED => '주문을 마쳤어요.',
       wire.EpisodeStatus.PAUSED_SKIP =>
         '주문을 보관했어요. 자동 준비가 일시정지 중이라 주문을 판단하지 않았어요.',
     };
     return Padding(
-      padding: const EdgeInsets.only(top: 22),
+      padding: EdgeInsets.only(top: current ? 8 : 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            seoulDateTime(episode.sharedAt),
-            style: theme.textTheme.titleMedium,
-          ),
-          StatusMessage(status),
-          if (episode.itemCount > 0) Text('읽은 품목 ${episode.itemCount}개'),
-          Wrap(
-            spacing: 8,
-            children: [
-              if (app.canEdit(episode))
-                TextButton(
-                  onPressed: () => Navigator.push<void>(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => _OrderEditor(app: app, episode: episode),
+          if (episode != null && !current)
+            Text(
+              seoulDateTime(episode.sharedAt),
+              style: theme.textTheme.titleMedium,
+            ),
+          OrderExtraction(
+            episode: episode,
+            images: app.orderImages(episodeId),
+            status: status,
+            awaitingEpisode: app.accepted.contains(episodeId),
+            onComplete: (images) => app.finishOrderCapture(episodeId, images),
+            rationale: app.requestedRationale(episodeId),
+            edit: episode != null && app.canEdit(episode)
+                ? TextButton(
+                    onPressed: () => Navigator.push<void>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            _OrderEditor(app: app, episode: episode),
+                      ),
                     ),
+                    child: const Text('읽은 품목 수정'),
+                  )
+                : null,
+            child: episode == null
+                ? const SizedBox.shrink()
+                : _OrderPreparation(
+                    app: app,
+                    episode: episode,
+                    current: current,
                   ),
-                  child: const Text('읽은 품목 수정'),
-                ),
-              if (episode.cardIds.isEmpty &&
-                  const {
-                    wire.EpisodeStatus.JUDGED,
-                    wire.EpisodeStatus.CLOSED,
-                  }.contains(episode.status))
-                TextButton(
-                  onPressed: () =>
-                      openRationale(context, app, episode.episodeId),
-                  child: const Text('WHY · 이유 보기'),
-                ),
-            ],
           ),
-          for (final card in cards) _PreparationCard(app: app, card: card),
-          if (episode.itemTasks.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            _ItemGuidance(episode: episode),
-          ],
         ],
       ),
     );
   }
 }
 
+class _OrderPreparation extends StatelessWidget {
+  const _OrderPreparation({
+    required this.app,
+    required this.episode,
+    required this.current,
+  });
+
+  final AppController app;
+  final wire.Episode episode;
+  final bool current;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      if (episode.cardIds.isEmpty &&
+          const {
+            wire.EpisodeStatus.JUDGED,
+            wire.EpisodeStatus.CLOSED,
+          }.contains(episode.status))
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            onPressed: () => openRationale(context, app, episode.episodeId),
+            child: const Text('WHY · 이유 보기'),
+          ),
+        ),
+      for (final (index, card) in app.cardsFor(episode).indexed)
+        _PreparationCard(app: app, card: card, hero: current && index == 0),
+      if (episode.itemTasks.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        _ItemGuidance(episode: episode),
+      ],
+    ],
+  );
+}
+
 class _PreparationCard extends StatelessWidget {
-  const _PreparationCard({required this.app, required this.card});
+  const _PreparationCard({
+    required this.app,
+    required this.card,
+    required this.hero,
+  });
 
   final AppController app;
   final wire.Card card;
+  final bool hero;
+
+  Future<void> _confirmStop(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('이 준비를 중지할까요?'),
+        content: const Text('이 카드의 준비를 중지해요. 품목 안내는 계속돼요.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('중지'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    final latest = app.cards[card.cardId];
+    if (latest != null) await app.stop(latest);
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final stopPending = app.stopPending(card.cardId);
     final stopUncertain = app.stopUncertain(card.cardId);
     return Card(
       key: ValueKey(card.cardId),
+      color: hero ? appPaper : colors.surface,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(appCardRadius),
+        side: BorderSide(color: hero ? colors.outline : colors.outlineVariant),
+      ),
       margin: const EdgeInsets.symmetric(vertical: 6),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(14, 10, 10, 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              card.text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.titleLarge,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Semantics(
+                    header: true,
+                    hint: '판단 근거 열기',
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: () => openRationale(context, app, card.episodeId),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 5),
+                        child: FutureBuilder<wire.Rationale>(
+                          future: app.requestedRationale(card.episodeId),
+                          builder: (context, snapshot) {
+                            final intent = snapshot.data?.intents
+                                .where((intent) => intent.cardId == card.cardId)
+                                .firstOrNull;
+                            return Text.rich(
+                              highlightTheme(
+                                card.text,
+                                intent?.situation.theme,
+                                colors.onSecondaryContainer,
+                              ),
+                              style: theme.textTheme.titleLarge,
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                if (!card.stopped &&
+                    card.buttons.contains(wire.CardButton.STOP))
+                  PopupMenuButton<bool>(
+                    tooltip: '준비 더보기 · ${card.text}',
+                    icon: const Icon(Icons.more_horiz),
+                    color: colors.surface,
+                    enabled: app.canControl && (!stopPending || stopUncertain),
+                    onSelected: (_) => _confirmStop(context),
+                    itemBuilder: (_) => [
+                      PopupMenuItem(
+                        value: true,
+                        child: Text(stopUncertain ? '중지 요청 재시도' : '이 준비 중지'),
+                      ),
+                    ],
+                  ),
+              ],
             ),
-            const SizedBox(height: 8),
-            Text(
-              card.startsAt == null
-                  ? '일정이 잡히기를 기다리고 있어요.'
-                  : '${seoulWeekdayTime(card.startsAt!)} 일정',
+            Padding(
+              padding: const EdgeInsets.only(top: 4, bottom: 8),
+              child: Wrap(
+                spacing: 10,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(
+                    card.startsAt == null
+                        ? '일정이 잡히기를 기다리고 있어요.'
+                        : '${seoulWeekdayTime(card.startsAt!)} 일정',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  DecoratedBox(
+                    decoration: ShapeDecoration(
+                      color: colors.primaryContainer,
+                      shape: const StadiumBorder(),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      child: Text(
+                        '${card.summary.done}/${card.summary.total} 준비',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colors.onPrimaryContainer,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (card.summary.waitingFor case final event?)
+                    Text(
+                      '${eventLabel(event)} 기다리는 중',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                ],
+              ),
             ),
-            Text('${card.summary.done}/${card.summary.total} 준비'),
-            if (card.summary.waitingFor case final event?)
-              Text('${eventLabel(event)} 기다리는 중'),
             if (stopPending)
               StatusMessage(card.stopped ? '종료 결과 확인 중…' : '이 준비의 중지 요청 확인 중…')
             else if (card.stopped)
@@ -172,36 +368,9 @@ class _PreparationCard extends StatelessWidget {
             if (app.controlErrors[card.cardId] case final error?)
               StatusMessage(error),
             for (final line in card.lines.take(4)) ...[
-              const Divider(height: 24),
+              const Divider(height: 1),
               _PreparationLine(app: app, card: card, line: line),
             ],
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              alignment: WrapAlignment.spaceBetween,
-              children: [
-                TextButton(
-                  onPressed: () => openRationale(
-                    context,
-                    app,
-                    card.episodeId,
-                    cardId: card.cardId,
-                  ),
-                  child: const Text('WHY · 이유 보기'),
-                ),
-                if (!card.stopped &&
-                    card.buttons.contains(wire.CardButton.STOP))
-                  OutlinedButton(
-                    onPressed: app.canControl && (!stopPending || stopUncertain)
-                        ? () => app.stop(card)
-                        : null,
-                    child: Text(
-                      stopUncertain ? '중지 요청 재시도' : '이 준비 중지',
-                      semanticsLabel: '이 준비 중지 · ${card.text}',
-                    ),
-                  ),
-              ],
-            ),
           ],
         ),
       ),
@@ -222,39 +391,93 @@ class _PreparationLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final timing = switch ((line.when?.time, line.when?.event)) {
-      (final time?, _) =>
-        card.startsAt != null &&
-                DateTime.parse(time)
-                    .isAtSameMomentAs(DateTime.parse(card.startsAt!))
-            ? '일정이 시작될 때'
-            : '${seoulWeekdayTime(time, relativeTo: card.startsAt)}에',
-      (_, wire.TriggerEvent.GUEST_ARRIVED) => '손님이 오면',
-      (_, wire.TriggerEvent.EVENT_END) => '일정이 끝나면',
-      (_, wire.TriggerEvent.PACKAGE_BROUGHT_IN) => '택배를 집 안으로 들이면',
-      _ => null,
-    };
+    final theme = Theme.of(context);
+    final timing = lineTimeLabel(line) ?? lineLabel(wire.LineState.HELD);
     final state = visibleLineLabel(line.state);
     final pending = app.linePending(card, line);
-    final on = line.state == wire.LineState.OFF;
+    final canSwitch = app.canSwitch(card, line);
+    final on = line.state != wire.LineState.OFF;
     final end = line.endState;
     final outcome = end == null ? null : endLabel(end);
     final note = line.note;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        Text(line.text, style: Theme.of(context).textTheme.titleMedium),
-        if (timing != null) Text(timing),
-        if (state != null) Text(state),
-        if (outcome != null) Text(outcome),
-        if (note != null && note != outcome) Text(note),
-        if (pending) const StatusMessage('항목 변경 확인 중…'),
-        if (app.canSwitch(card, line))
-          TextButton(
-            onPressed: pending ? null : () => app.switchLine(card, line),
-            child: Text(
-              on ? '항목 켜기' : '항목 끄기',
-              semanticsLabel: '${line.text} ${on ? '켜기' : '끄기'}',
+        Expanded(
+          child: Semantics(
+            hint: '판단 근거 열기',
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => openRationale(
+                context,
+                app,
+                card.episodeId,
+                focus: (cardId: card.cardId, taskId: line.taskId),
+              ),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 48),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 9),
+                  child: Row(
+                    children: [
+                      if (!canSwitch) ...[
+                        Icon(
+                          line.checked ? Icons.check : Icons.circle_outlined,
+                          color: appGreen,
+                          size: 17,
+                          semanticLabel: line.checked ? '선택됨' : '선택 해제됨',
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Expanded(
+                        child: Column(
+                          spacing: 2,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(line.text, style: theme.textTheme.titleMedium),
+                            Wrap(
+                              spacing: 8,
+                              children: [
+                                Text(
+                                  timing,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                  ),
+                                ),
+                                if (state != null && state != timing)
+                                  Text(state, style: theme.textTheme.bodySmall),
+                              ],
+                            ),
+                            if (outcome != null) Text(outcome),
+                            if (note != null && note != outcome) Text(note),
+                            if (pending) const StatusMessage('항목 변경 확인 중…'),
+                          ],
+                        ),
+                      ),
+                      Icon(
+                        Icons.chevron_right,
+                        size: 18,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (canSwitch)
+          Semantics(
+            label: '${line.text} ${on ? '끄기' : '켜기'}',
+            child: Transform.scale(
+              scale: .78,
+              transformHitTests: false,
+              child: Switch(
+                value: on,
+                onChanged: pending ? null : (_) => app.switchLine(card, line),
+              ),
             ),
           ),
       ],

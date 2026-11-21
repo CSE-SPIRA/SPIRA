@@ -1,14 +1,18 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api/app_api.dart';
 import 'contracts.dart' as wire;
 import 'platform/android_bridge.dart';
 import 'platform/google_calendar.dart';
+import 'platform/home_hub_onboarding.dart';
 
 abstract interface class AppStore {
   Future<String?> read(String key);
@@ -38,15 +42,19 @@ class AppController extends ChangeNotifier {
     required this.platform,
     required this.store,
     required this.fixture,
+    this.browserPreview = false,
+    this.homeHub,
     this.readCalendar,
     this.discovered,
     this.configuredHousehold,
   });
 
   final AppApi api;
-  final AppPlatform platform;
+  final AppPlatform? platform;
   final AppStore store;
   final bool fixture;
+  final bool browserPreview;
+  final HttpHomeHubOnboarding? homeHub;
   final CalendarReader? readCalendar;
   final wire.Devices? discovered;
   final String? configuredHousehold;
@@ -67,10 +75,12 @@ class AppController extends ChangeNotifier {
   bool pausePending = false;
   bool needsToken = false;
   bool refreshed = false;
+  bool sharingExample = false;
   String? setupError;
   String? refreshError;
   String? uploadError;
   String? shareIssue;
+  String? exampleShareError;
   int queuedShares = 0;
 
   final householdTypes = <String>{};
@@ -78,6 +88,8 @@ class AppController extends ChangeNotifier {
   final episodes = <String, wire.Episode>{};
   final cards = <String, wire.Card>{};
   final accepted = <String>{};
+  // Keep captures in memory until their extraction sequence has been shown.
+  final _orderCaptures = <String, Queue<List<Uint8List>>>{};
   final _startedTasks = <String, Set<String>>{};
   final _pendingStops = <String, Set<String>>{};
   final _uncertainStops = <String>{};
@@ -110,13 +122,38 @@ class AppController extends ChangeNotifier {
         card,
   ];
 
+  wire.Episode? get currentPreparationOrder {
+    for (final (index, episode) in orderedEpisodes.indexed) {
+      // Keep the latest order's card visible after its work ends.
+      if (index > 0 && episode.status == wire.EpisodeStatus.CLOSED) continue;
+      if (cardsFor(episode).isNotEmpty) return episode;
+    }
+    return null;
+  }
+
+  List<Uint8List> orderImages(String episodeId) =>
+      _orderCaptures[episodeId]?.first ?? const [];
+
+  void _queueCapture(String episodeId, List<Uint8List> images) {
+    if (images.isEmpty) return;
+    _orderCaptures.putIfAbsent(episodeId, Queue.new).addLast(images);
+  }
+
+  void finishOrderCapture(String episodeId, List<Uint8List> images) {
+    final captures = _orderCaptures[episodeId];
+    if (captures == null || !identical(captures.first, images)) return;
+    captures.removeFirst();
+    if (captures.isEmpty) _orderCaptures.remove(episodeId);
+    _change();
+  }
+
   bool stopPending(String cardId) => _pendingStops.containsKey(cardId);
   bool stopUncertain(String cardId) => _uncertainStops.contains(cardId);
   bool get canControl => !stale && !pausePending;
   bool get canResendCalendar => _calendarConnected && readCalendar != null;
 
   Future<void> start() async {
-    _shareSubscription = platform.sharesChanged.listen((_) {
+    _shareSubscription = platform?.sharesChanged.listen((_) {
       _inboxChanged = true;
       unawaited(sync());
     });
@@ -259,7 +296,7 @@ class AppController extends ChangeNotifier {
           wire.HouseholdCreate(householdTypes: []),
         );
         household = created.householdId;
-        // The App API has no route to hand off the Hub key.
+        homeHub?.useApiKey(created.hubApiKey);
         await _saveSetup();
       }
       await api.profile(
@@ -349,7 +386,7 @@ class AppController extends ChangeNotifier {
 
   void _requestNotificationPermission() {
     unawaited(
-      platform.requestNotificationPermission().catchError((Object _) {}),
+      platform?.requestNotificationPermission().catchError((Object _) {}),
     );
   }
 
@@ -387,6 +424,8 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _upload() async {
+    final platform = this.platform;
+    if (platform == null) return;
     final id = household!;
     try {
       final inbox = await platform.inbox(_scope);
@@ -409,12 +448,46 @@ class AppController extends ChangeNotifier {
         // Persist the receipt before allowing Android to discard the images.
         accepted.add(receipt.episodeId);
         await _save();
+        final images = <Uint8List>[];
+        for (final image in order.images) {
+          try {
+            images.add(await image.readAsBytes());
+          } on FileSystemException {
+            // The upload is already accepted even if its local preview is gone.
+          }
+        }
         await platform.acknowledge(_scope, order.sourceId, receipt.episodeId);
+        _queueCapture(receipt.episodeId, images);
         queuedShares--;
         _change();
       }
     } catch (error) {
       uploadError = _error(error, '주문을 보내지 못했어요. 다시 시도해 주세요.');
+    }
+  }
+
+  Future<void> shareExample() async {
+    if (!browserPreview || !fixture || !canControl || sharingExample) return;
+    sharingExample = true;
+    exampleShareError = null;
+    _change();
+    try {
+      await _serialize(() async {
+        // The demo shell's birthday sample, rendered from its sampleOrder canvas.
+        final asset = await rootBundle.load('assets/example-order.png');
+        final image = Uint8List.sublistView(asset);
+        final receipt = await api.shareExample(image);
+        _queueCapture(receipt.episodeId, [image]);
+        accepted.add(receipt.episodeId);
+        _change();
+        await _save();
+        await _refresh();
+      });
+    } catch (error) {
+      exampleShareError = _error(error, '예시 주문을 보내지 못했어요. 다시 시도해 주세요.');
+    } finally {
+      sharingExample = false;
+      _change();
     }
   }
 
@@ -459,7 +532,7 @@ class AppController extends ChangeNotifier {
           continue;
         }
         cards[card.cardId] = card;
-        if (card.notify) {
+        if (platform != null && card.notify) {
           _notifications[jsonEncode([card.cardId, card.updatedAt])] = [
             '준비 카드',
             card.text,
@@ -488,7 +561,8 @@ class AppController extends ChangeNotifier {
         }
         episodes[episode.episodeId] = episode;
         accepted.remove(episode.episodeId);
-        if (episode.status == wire.EpisodeStatus.READ_FAILED) {
+        if (platform != null &&
+            episode.status == wire.EpisodeStatus.READ_FAILED) {
           _notifications[jsonEncode(['read_failed', episode.episodeId])] = [
             '주문을 읽지 못했어요',
             '주문 화면을 캡처해서 다시 공유해 주세요.',
@@ -506,6 +580,17 @@ class AppController extends ChangeNotifier {
       stale = false;
       refreshed = true;
       refreshError = null;
+      // Card themes and set-aside items come from the stored rationale.
+      for (final episode in episodes.values) {
+        final justRead =
+            _orderCaptures.containsKey(episode.episodeId) &&
+            (episode.items.isNotEmpty || episode.maskedCount > 0);
+        if (_disposed || (!justRead && cardsFor(episode).isEmpty)) continue;
+        unawaited(
+          rationale(episode.episodeId)
+              .then<void>((_) {}, onError: (Object _) {}),
+        );
+      }
     } catch (error) {
       stale = true;
       refreshError = _error(error, '새로 불러오지 못했어요. 다시 시도해 주세요.');
@@ -515,6 +600,8 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _deliverNotifications() async {
+    final platform = this.platform;
+    if (platform == null) return;
     final sent = <String>[];
     for (final entry in _notifications.entries) {
       try {
@@ -723,18 +810,27 @@ class AppController extends ChangeNotifier {
     });
   }
 
+  Future<wire.Rationale>? requestedRationale(String episode) =>
+      _rationales[episode];
+
   Future<wire.Rationale> rationale(String episode) {
-    return _rationales.putIfAbsent(episode, () async {
-      try {
-        final rationale = await api.rationale(episode);
-        if (rationale.episodeId != episode) {
-          throw const FormatException('Wrong episode');
-        }
-        return rationale;
-      } catch (_) {
-        _rationales.remove(episode);
-        rethrow;
-      }
+    return _rationales.putIfAbsent(episode, () {
+      late final Future<wire.Rationale> request;
+      request = api
+          .rationale(episode)
+          .then((rationale) {
+            if (rationale.episodeId != episode) {
+              throw const FormatException('Wrong episode');
+            }
+            return rationale;
+          })
+          .catchError((Object error, StackTrace stackTrace) {
+            if (identical(_rationales[episode], request)) {
+              _rationales.remove(episode);
+            }
+            Error.throwWithStackTrace(error, stackTrace);
+          });
+      return request;
     });
   }
 
@@ -773,6 +869,7 @@ class AppController extends ChangeNotifier {
     _disposed = true;
     _timer?.cancel();
     unawaited(_shareSubscription?.cancel());
+    homeHub?.close();
     super.dispose();
   }
 }

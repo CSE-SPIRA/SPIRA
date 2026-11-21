@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
@@ -29,7 +30,7 @@ class AppApi {
   final Uri baseUrl;
   final http.Client _client;
 
-  /// Entered at runtime when the peer requires a bearer token.
+  /// In-memory bearer token for the active peer.
   String? token;
 
   String _household(String id) => '/v1/households/${Uri.encodeComponent(id)}';
@@ -62,7 +63,7 @@ class AppApi {
     request.followRedirects = false;
     request.headers['Accept'] = 'application/json';
     final bearer = token;
-    if (bearer != null && request.url.path != _uri('/health').path) {
+    if (bearer != null && request.url.path.startsWith(_uri('/v1/').path)) {
       request.headers['Authorization'] = 'Bearer $bearer';
     }
     final response = await _client
@@ -196,6 +197,20 @@ class AppApi {
         ),
       );
     }
+    return wire.orderAcceptedFromJson(await _send(request, {200, 202}));
+  }
+
+  Future<wire.OrderAccepted> shareExample(Uint8List image) async {
+    final request = http.MultipartRequest('POST', _uri('/demo/api/order'))
+      ..fields['sample'] = 'birthday'
+      ..files.add(
+        http.MultipartFile.fromBytes(
+          'images',
+          image,
+          filename: 'example-order.png',
+          contentType: MediaType('image', 'png'),
+        ),
+      );
     return wire.orderAcceptedFromJson(await _send(request, {200, 202}));
   }
 }

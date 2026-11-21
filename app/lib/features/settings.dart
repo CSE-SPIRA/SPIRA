@@ -7,92 +7,102 @@ import 'labels.dart';
 import 'setup.dart';
 
 class SettingsScreen extends StatelessWidget {
-  const SettingsScreen(this.app, {super.key});
+  const SettingsScreen(
+    this.app, {
+    required this.onServerToken,
+    required this.onHomeKey,
+    super.key,
+  });
 
   final AppController app;
+  final VoidCallback onServerToken;
+  final VoidCallback onHomeKey;
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: app,
-    builder: (context, _) => Scaffold(
-      appBar: AppBar(title: const Text('설정')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
+  Widget build(BuildContext context) => ListView(
+    padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+    children: [
+      Text('설정', style: Theme.of(context).textTheme.headlineMedium),
+      if (app.needsToken)
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.key),
+          title: const Text('서버 접속 토큰 입력'),
+          onTap: onServerToken,
+        ),
+      if (app.homeHub != null)
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.vpn_key_outlined),
+          title: const Text('우리 집 접속 키 입력'),
+          onTap: onHomeKey,
+        ),
+      const SizedBox(height: 12),
+      Text('자동 준비', style: Theme.of(context).textTheme.titleLarge),
+      const Text(
+        '일시정지하면 시작 전 준비를 취소하고, 진행 중인 준비는 그대로 이어가요. '
+        '일시정지 중 공유한 주문은 보관해요. 재개하면 이후 주문부터 새로 준비해요.',
+      ),
+      StatusMessage(
+        app.pausePending
+            ? '자동 준비 상태 변경을 확인하는 중…'
+            : switch (app.paused) {
+                true => '자동 준비 일시정지됨',
+                false => '자동 준비 켜짐',
+                null => '자동 준비 상태 미확인',
+              },
+      ),
+      if (app.controlErrors['pause'] case final error?) StatusMessage(error),
+      Wrap(
+        spacing: 8,
         children: [
-          PeerLabel(app.fixture),
-          const SizedBox(height: 16),
-          Text('자동 준비', style: Theme.of(context).textTheme.titleLarge),
-          const Text(
-            '일시정지하면 시작 전 준비를 취소하고, 진행 중인 준비는 그대로 이어가요. '
-            '일시정지 중 공유한 주문은 보관해요. 재개하면 이후 주문부터 새로 준비해요.',
-          ),
-          StatusMessage(
-            app.pausePending
-                ? '자동 준비 상태 변경을 확인하는 중…'
-                : switch (app.paused) {
-                    true => '자동 준비 일시정지됨',
-                    false => '자동 준비 켜짐',
-                    null => '자동 준비 상태 미확인',
-                  },
-          ),
-          if (app.controlErrors['pause'] case final error?)
-            StatusMessage(error),
-          Wrap(
-            spacing: 8,
-            children: [
-              if (app.paused != true)
-                OutlinedButton(
-                  onPressed: app.pausePending
-                      ? null
-                      : () => app.setPaused(true),
-                  child: const Text('자동 준비 일시정지'),
-                ),
-              if (app.paused != false)
-                OutlinedButton(
-                  onPressed: app.pausePending
-                      ? null
-                      : () => app.setPaused(false),
-                  child: const Text('자동 준비 재개'),
-                ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          const Divider(),
-          if (app.canResendCalendar)
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('캘린더 다시 보내기'),
-              onTap: app.resendCalendar,
+          if (app.paused != true)
+            OutlinedButton(
+              onPressed: app.pausePending ? null : () => app.setPaused(true),
+              child: const Text('자동 준비 일시정지'),
             ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('우리 집 기억'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.push<void>(
-              context,
-              MaterialPageRoute(builder: (_) => _MemoryScreen(app)),
+          if (app.paused != false)
+            OutlinedButton(
+              onPressed: app.pausePending ? null : () => app.setPaused(false),
+              child: const Text('자동 준비 재개'),
             ),
-          ),
-          if (app.discovered?.devices case final devices?
-              when devices.isNotEmpty) ...[
-            const Divider(),
-            Text('기기 동작 선택', style: Theme.of(context).textTheme.titleLarge),
-            const Text('이 앱에 저장된 선택이에요.'),
-            for (final device in devices) ...[
-              const SizedBox(height: 12),
-              Text(
-                '${device.label ?? deviceLabel(device.type)} · ${device.room ?? '공간 미확인'} · '
-                '${device.substrate == wire.Substrate.VIRTUAL ? '가상 기기' : '실물 기기'}',
-              ),
-              for (final entry in (app.deviceChoices[device.id] ?? {}).entries)
-                Text(
-                  '${commandLabel(entry.key)} · ${entry.value == DeviceChoice.delegated ? '맡기기로 선택' : '맡기지 않기로 선택'}',
-                ),
-            ],
-          ],
         ],
       ),
-    ),
+      const SizedBox(height: 24),
+      const Divider(),
+      if (app.canResendCalendar)
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('캘린더 다시 보내기'),
+          onTap: app.resendCalendar,
+        ),
+      ListTile(
+        contentPadding: EdgeInsets.zero,
+        title: const Text('우리 집 기억'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => Navigator.push<void>(
+          context,
+          MaterialPageRoute(builder: (_) => _MemoryScreen(app)),
+        ),
+      ),
+      if (app.discovered?.devices case final devices?
+          when devices.isNotEmpty) ...[
+        const Divider(),
+        Text('기기 동작 선택', style: Theme.of(context).textTheme.titleLarge),
+        const Text('이 앱에 저장된 선택이에요.'),
+        for (final device in devices) ...[
+          const SizedBox(height: 12),
+          Text(
+            '${device.label ?? deviceLabel(device.type)} · ${device.room ?? '공간 미확인'} · '
+            '${device.substrate == wire.Substrate.VIRTUAL ? '가상 기기' : '실물 기기'}',
+          ),
+          for (final entry in (app.deviceChoices[device.id] ?? {}).entries)
+            Text(
+              '${commandLabel(entry.key)} · ${entry.value == DeviceChoice.delegated ? '맡기기로 선택' : '맡기지 않기로 선택'}',
+            ),
+        ],
+      ],
+    ],
   );
 }
 

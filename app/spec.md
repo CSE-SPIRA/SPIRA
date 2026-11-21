@@ -27,7 +27,13 @@ PC-3, PC-5, PC-6)
 **P-R2.** The App MUST derive product state only from contract values received
 from the Server and MUST distinguish observed results from acknowledgements,
 unknown facts from success, and virtual, physical, fixture, and real-Server
-qualification. It MUST NOT read or control the Hub or Simulator directly.
+qualification. The Hub's home-key authenticated `GET /home/onboarding/devices`
+supplies the read-only inventory for 우리 집. The App MUST mark the devices
+from the card's rationale tasks and the order's item tasks. Item-task
+executions identify their devices. For a fridge notice without an execution,
+the App uses the home's fridge by type when there is exactly one match. If the
+Hub list is unavailable, the App shows the identified devices with a note.
+The App MUST NOT use the Hub or Simulator to control devices directly.
 (PC-4, PC-5)
 
 **P-R3.** Until the real Server implements the App contract, the local App peer
@@ -54,10 +60,12 @@ PC-5)
 
 ### A3. Shared orders
 
-**A3-R1.** The only order input MUST be an Android OS share containing one to
-three ordered screenshots. The App MUST NOT provide an image picker, form, or
-follow-up question. It MUST preserve one share identity so redelivery or retry
-does not create a second episode. (PC-1, PC-3, PC-4)
+**A3-R1.** The only production order input MUST be an Android OS share
+containing one to three ordered screenshots. The App MUST NOT provide an image
+picker, form, or follow-up question. It MUST preserve one share identity so
+redelivery or retry does not create a second episode. The browser fixture
+preview uses the demo shell's sample order and disables the Android share and
+calendar integrations. (PC-1, PC-3, PC-4)
 
 **A3-R2.** An HTTP 202 MUST be shown only as intake acceptance, never as a
 finished judgment or preparation. The App MUST use the episode contract to show
@@ -72,8 +80,10 @@ affordance MUST be absent. (PC-1, PC-2, PC-4)
 For each order the App MUST show no more than the contract maximum of two cards.
 Each card MUST show the understood situation in one line (`text`), its schedule,
 up to four lines, `done / total`, the awaited event, and for every line its
-contract state and `when`. After a line ends, it MUST show the supplied
-`end_state` and Server display `note`. (PC-1, PC-3, PC-4, PC-5)
+contract state and `when`. Show absolute line times as a Seoul weekday and
+24-hour clock, and show the guest-arrival trigger as “손님이 오면”. After a line
+ends, it MUST show the supplied `end_state` and Server display `note`.
+(PC-1, PC-3, PC-4, PC-5)
 
 **A4-R2.** A line's planned end condition MUST be shown only when a future
 contract field explicitly supplies it. The App MUST NOT infer one from `when`,
@@ -111,18 +121,16 @@ eligibility only and MUST NOT silently revive cancelled work. (PC-5, PC-6)
 
 ### A6. WHY
 
-**A6-R1.** WHY MUST render the stored rationale without starting a new
-inference. Its presentation is a whitelist:
-
-- understood `intent_text`;
-- situation slots and, for each slot, its evidence items or calendar event;
-- deliberately excluded `unbundled` items; and
-- for each preparation line, `need` → device room/type → current contract state.
-
-For no-intent episodes it MUST show the stored no-intent fact. It MUST NOT render
-purchase-history comparison (`unusual_items`), `kb_counts`, `kb_examples`, or
-other KB examples/counts. Missing rationale MUST remain unavailable rather than
-being invented locally. (PC-1, PC-2)
+**A6-R1.** WHY MUST show the stored evidence chain without starting a new
+inference. In one scroll, show item types and quantities with unbundled items
+marked, linked calendar evidence, unusual items and their reasons, similar
+order counts by intent and examples with overlapping items, situation slots
+with their evidence, and intent text with the theme highlighted. Then show each
+task's need, line, devices, way, and available card time and state, followed by
+fridge notice text. Use contract fields only. For no-intent orders, show the
+stored reason and notices and skip empty sections. A line's WHY opens at its
+task and highlights the situation behind its card. Missing rationale remains
+unavailable. (PC-1, PC-2)
 
 ### A7. Item guidance
 
@@ -169,10 +177,10 @@ exits.
 | APP-AT-08 | Stop a card containing unstarted work, a SPIRA-owned effect, a person-changed effect, and a person-started job. The peer receives contract `stop`; refreshed UI shows cancellation/restoration while preserving both human effects, asks no reason, and leaves item guidance unchanged. | PC-5, PC-6 | A5-R2, A7-R1, A8-R1 |
 | APP-AT-09 | Pause a household with unstarted work, a running effect, and then a newly shared order. The refreshed projection cancels the unstarted work, keeps the running lifecycle, stores the order as paused without judgment, and does not revive cancelled work after resume. | PC-5, PC-6 | A5-R3, A8-R1 |
 | APP-AT-10 | After the peer has only a command acknowledgement, return a card that is not `done`; then return refreshed `done`, `partial`, `failed`, `unknown`, and restore outcomes. The UI does not complete on acknowledgement and renders every supplied state without upgrading unknown evidence. | PC-4, PC-5 | P-R2, A8-R1 |
-| APP-AT-11 | Render the `ep_9031`-shaped rationale containing intent/situation basis, calendar evidence, `unbundled`, task need/device/state, `unusual_items`, `kb_counts`, and `kb_examples`. WHY shows only the A6-R1 whitelist and a second open does not cause an inference request. | PC-1, PC-2 | A6-R1 |
+| APP-AT-11 | Render the `ep_9031` and `ep_9150` evidence chains from contract fields. A line's WHY focuses its task and supporting situation. A second open uses the stored rationale. | PC-1, PC-2 | A6-R1 |
 | APP-AT-12 | Render the plain-groceries episode with `card_ids: []` and item guidance through unreleased, released, and closed states. No preparation card is fabricated, and the guidance lifecycle remains visible. | PC-1, PC-2 | A3-R2, A7-R1 |
 | APP-AT-13 | From settings, open memory, view Server rows, delete one case with a failed response and then a successful response/readback. No edit controls exist; failure remains visible; deletion is claimed only after Server confirmation. | PC-6 | A9-R1 |
-| APP-AT-14 | Run the same scene against the local fixture peer and against a qualified Server profile. Fixture qualification is visible and never presented as real-Server, physical-device, or native-lifecycle evidence; no App request reaches Hub or Simulator endpoints. | PC-4 | P-R2, P-R3 |
+| APP-AT-14 | Run the same scene against the local fixture peer and against a qualified Server profile. Fixture qualification is visible and never presented as real-Server, physical-device, or native-lifecycle evidence. Verify 우리 집 reads the Hub inventory and that browser sample sharing uses the demo shell route. | PC-4 | P-R2, P-R3 |
 | APP-AT-15 | With Android large text and a screen reader enabled, locate and operate card Stop, pre-start line off/on, and settings pause. Each scope and pending/confirmed result is identifiable without color alone. | PC-5 | A5-R1, A5-R2, A5-R3 |
 
 ## 4. Open items
