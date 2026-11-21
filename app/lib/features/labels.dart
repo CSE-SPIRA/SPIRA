@@ -71,6 +71,11 @@ String seoulDateTime(String raw, {bool fullDate = false}) {
   return '${dt.month}월 ${dt.day}일 (${_weekday(dt)}) ${_hourMinute(dt)}';
 }
 
+String seoulClock(String raw) => _hourMinute(_seoulTime(raw));
+
+String scheduleDayLabel(String raw, String? name) =>
+    '${_weekday(_seoulTime(raw))}요일 ${name ?? '일정'}';
+
 const _weekdays = ['월', '화', '수', '목', '금', '토', '일'];
 
 String _weekday(DateTime seoul) => _weekdays[seoul.weekday - 1];
@@ -89,6 +94,23 @@ String? lineTimeLabel(wire.LineElement? line) =>
       (_, wire.TriggerEvent.PACKAGE_BROUGHT_IN) => '택배를 집 안으로 들이면',
       _ => null,
     };
+
+String? lineRelationLabel(wire.LineElement? line, wire.Card card) {
+  final time = line?.when?.time;
+  if (time == null) return lineTimeLabel(line);
+  final start = card.startsAt;
+  if (start == null) return null;
+  final event = switch (card.intentId) {
+    'kid_birthday_party' || 'home_party' || 'christmas_party' => '파티',
+    _ => '일정',
+  };
+  final relation = DateTime.parse(time).compareTo(DateTime.parse(start));
+  return switch (relation) {
+    < 0 => '$event 전',
+    0 => '$event 시작에 맞춰',
+    _ => '$event 시작 후',
+  };
+}
 
 String? lineTimeDerivation(wire.LineElement? line, String? scheduleStart) {
   final time = line?.when?.time;

@@ -74,15 +74,24 @@ the absence of preparation. Before any line has started, the user MUST be able t
 correct read product names and quantities; after a line starts, that correction
 affordance MUST be absent. (PC-1, PC-2, PC-4)
 
+**A3-R3.** For a new share, the App MUST show the capture and read items.
+When the card and stored rationale are available, show the situation and
+basis, intent and basis with any set-aside items, and the Server's task lines
+before the card.
+The person can skip to the current result. With reduced motion or on reload,
+show the current result directly. (PC-1, PC-2)
+
 ### A4. Preparation cards
 
 **A4-R1.** One preparation MUST be shown as one card, with no approval button.
 For each order the App MUST show no more than the contract maximum of two cards.
 Each card MUST show the understood situation in one line (`text`), its schedule,
 up to four lines, `done / total`, the awaited event, and for every line its
-contract state and `when`. Show absolute line times as a Seoul weekday and
-24-hour clock, and show the guest-arrival trigger as “손님이 오면”. After a line
-ends, it MUST show the supplied `end_state` and Server display `note`.
+contract state and `when`. Show the schedule as the Seoul weekday and event
+name when available. On the card and in 우리 집, show a line's trigger or its
+relation to the schedule start from the supplied times. Show exact times in
+판단 근거. After a line ends, it MUST show the supplied `end_state` and Server
+display `note`.
 (PC-1, PC-3, PC-4, PC-5)
 
 **A4-R2.** A line's planned end condition MUST be shown only when a future
@@ -150,6 +159,12 @@ It MUST NOT turn an HTTP receipt, missing evidence, or a stale value into `done`
 A `user_changed` presentation requires that Server-provided state, and
 `kept_user_change` MUST be shown as a preserved human change rather than a
 failure. (PC-4, PC-5)
+
+**A8-R2.** When the Server is unreachable, the App MUST show the last known
+preparations and 우리 집 with an inline connection notice and the last check
+time when available. It MUST retry in the background and explain that queued
+Android shares will send when the connection returns. A failed browser sample
+share MUST show an explicit failure. (PC-1, PC-4, PC-5)
 
 ### A9. This-home memory
 

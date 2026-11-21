@@ -22,65 +22,34 @@ class OurHome extends StatefulWidget {
 class _OurHomeState extends State<OurHome> {
   AppController get app => widget.app;
 
-  Future<wire.Devices?>? _inventory;
-  wire.Episode? _order;
-  Future<wire.Rationale>? _rationale;
+  late Future<void> _inventory;
 
-  @override
-  void initState() {
-    super.initState();
-    _inventory = _fetchInventory();
-    _updateOrder();
-  }
-
-  @override
-  void didUpdateWidget(OurHome oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _updateOrder();
-  }
-
-  Future<wire.Devices?>? _fetchInventory() =>
-      app.homeHub?.fetchDevices(app.household!);
-
-  void _updateOrder({bool retry = false}) {
+  wire.Episode? get _order {
     final latest = app.orderedEpisodes.firstOrNull;
-    final order =
-        app.currentPreparationOrder ??
+    return app.currentPreparationOrder ??
         (latest?.status != wire.EpisodeStatus.CLOSED &&
                 (latest?.itemTasks.isNotEmpty ?? false)
             ? latest
             : null);
-    if (order == null) {
-      _order = null;
-      _rationale = null;
-      return;
-    }
-    final cached = app.requestedRationale(order.episodeId);
-    if (cached != null) {
-      _rationale = cached;
-    } else if (retry ||
-        order.episodeId != _order?.episodeId ||
-        order.status != _order?.status) {
-      _rationale = app.rationale(order.episodeId);
-    }
-    _order = order;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _inventory = app.refreshHomeInventory();
   }
 
   Future<void> _refresh() async {
-    final inventory = _fetchInventory();
-    setState(() {
-      _inventory = inventory;
-      _updateOrder(retry: true);
-    });
-    await Future.wait([app.sync(), ?inventory]);
+    setState(() => _inventory = app.refreshHomeInventory());
+    await Future.wait([app.sync(), _inventory]);
   }
 
   Map<String, ({wire.Device device, Set<String> times})> _selectedDevices(
+    wire.Episode? order,
     wire.Devices? inventory,
     wire.Rationale? rationale,
   ) {
     final selected = <String, ({wire.Device device, Set<String> times})>{};
-    final order = _order;
     if (order == null) return selected;
 
     final cards = {for (final card in app.cardsFor(order)) card.cardId: card};
@@ -90,7 +59,7 @@ class _OurHomeState extends State<OurHome> {
       final line = card.lines
           .where((line) => line.taskId == task.taskId)
           .firstOrNull;
-      final time = lineTimeLabel(line);
+      final time = lineRelationLabel(line, card);
       for (final device in task.devices) {
         final entry = selected.putIfAbsent(
           device.id,
@@ -117,120 +86,124 @@ class _OurHomeState extends State<OurHome> {
       }
       for (final id in ids) {
         if (inventory == null && task.kind == null) continue;
-        selected.putIfAbsent(
+        final entry = selected.putIfAbsent(
           id,
           () => (
             device: wire.Device(id: id, type: 'fridge', room: null),
             times: {},
           ),
         );
+        if (order.status != wire.EpisodeStatus.CLOSED &&
+            (task.state == wire.LineState.HELD ||
+                task.state == wire.LineState.SCHEDULED)) {
+          entry.times.add('택배를 집 안으로 들이면');
+        }
       }
     }
     return selected;
   }
 
   @override
-  Widget build(BuildContext context) => FutureBuilder<wire.Devices?>(
+  Widget build(BuildContext context) => FutureBuilder<void>(
     future: _inventory,
-    builder: (context, inventory) => FutureBuilder<wire.Rationale>(
-      future: _rationale,
-      builder: (context, rationale) {
-        final loading =
-            inventory.connectionState == ConnectionState.waiting ||
-            rationale.connectionState == ConnectionState.waiting;
-        // A new rationale must never highlight devices from the previous order.
-        final result = rationale.data?.episodeId == _order?.episodeId
-            ? rationale.data
-            : null;
-        final selected = _selectedDevices(inventory.data, result);
-        final devices = [
-          if (inventory.data case final manifest?)
-            for (final device in manifest.devices)
-              (
-                id: device.id,
-                type: device.type,
-                room: device.room,
-                label: device.label,
-              )
-          else
-            for (final entry in selected.values)
-              (
-                id: entry.device.id,
-                type: entry.device.type,
-                room: entry.device.room,
-                label: null,
-              ),
-        ];
-        final rooms = <String, List<Widget>>{};
-        final selectionKnown = _order == null || result != null;
-        final usedForPreparation = stateWords['used_for_preparation']!;
-        for (final (:id, :type, :room, :label) in devices) {
-          final roomName = roomLabel(room);
-          final name = label?.trim();
-          final times = selected[id]?.times;
-          rooms
-              .putIfAbsent(roomName ?? '방 미확인', () => [])
-              .add(
-                _HomeDevice(
-                  key: ValueKey(id),
-                  name: name == null || name.isEmpty
-                      ? deviceNames[type] ?? '기기'
-                      : name,
-                  type: type,
-                  selected: times != null,
-                  status: switch (times) {
-                    final times? when times.isNotEmpty =>
-                      '$usedForPreparation · ${times.join(' · ')}',
-                    _ when times != null && type == 'fridge' =>
-                      '$usedForPreparation · ${stateWords['guidance']}',
-                    _ when times != null => usedForPreparation,
-                    _ when selectionKnown => stateWords['resting']!,
-                    _ => '준비 미확인',
-                  },
-                ),
-              );
-        }
-
-        final theme = Theme.of(context);
-        return RefreshIndicator(
-          onRefresh: _refresh,
-          child: ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(
-              DesignTokens.space20,
-              DesignTokens.space12,
-              DesignTokens.space20,
-              DesignTokens.space24,
+    builder: (context, snapshot) {
+      final order = _order;
+      final inventory = app.homeInventory;
+      final result = order == null ? null : app.rationaleFor(order.episodeId);
+      final loading =
+          (inventory == null &&
+              snapshot.connectionState == ConnectionState.waiting) ||
+          (result == null &&
+              order != null &&
+              app.loadingRationale(order.episodeId));
+      final selected = _selectedDevices(order, inventory, result);
+      final devices = [
+        if (inventory case final manifest?)
+          for (final device in manifest.devices)
+            (
+              id: device.id,
+              type: device.type,
+              room: device.room,
+              label: device.label,
+            )
+        else
+          for (final entry in selected.values)
+            (
+              id: entry.device.id,
+              type: entry.device.type,
+              room: entry.device.room,
+              label: null,
             ),
-            children: [
-              KoreanText('우리 집', style: theme.textTheme.headlineMedium),
-              if (devices.isNotEmpty)
-                KoreanText(
-                  '확인한 기기 ${devices.length}대',
-                  style: theme.textTheme.bodySmall,
-                ),
-              if (loading)
-                const LinearProgressIndicator(semanticsLabel: '우리 집 기기 확인 중')
-              else ...[
-                if (!selectionKnown)
-                  const StatusMessage('이번 준비에 선택된 기기를 확인할 수 없어요.'),
-                if (inventory.data == null)
-                  StatusMessage(
-                    devices.isEmpty
-                        ? '집 기기 목록을 받지 못했어요.'
-                        : '집 기기 목록을 받지 못해 이번 준비에 선택된 기기만 보여 드려요.',
-                  )
-                else if (devices.isEmpty)
-                  const StatusMessage('집에 등록된 기기가 없어요.'),
-              ],
-              for (final room in {...roomNames.values, ...rooms.keys})
-                if (rooms[room] case final cards?)
-                  _RoomGrid(name: room, cards: cards),
-            ],
+      ];
+      final rooms = <String, List<Widget>>{};
+      final selectionKnown = order == null || result != null;
+      final usedForPreparation = stateWords['used_for_preparation']!;
+      for (final (:id, :type, :room, :label) in devices) {
+        final roomName = roomLabel(room);
+        final name = label?.trim();
+        final times = selected[id]?.times;
+        rooms
+            .putIfAbsent(roomName ?? '방 미확인', () => [])
+            .add(
+              _HomeDevice(
+                key: ValueKey(id),
+                name: name == null || name.isEmpty
+                    ? deviceNames[type] ?? '기기'
+                    : name,
+                type: type,
+                selected: times != null,
+                status: switch (times) {
+                  final times? when times.isNotEmpty =>
+                    '$usedForPreparation · ${times.join(' · ')}',
+                  _ when times != null && type == 'fridge' =>
+                    '$usedForPreparation · ${stateWords['guidance']}',
+                  _ when times != null => usedForPreparation,
+                  _ when selectionKnown => stateWords['resting']!,
+                  _ => '준비 미확인',
+                },
+              ),
+            );
+      }
+
+      final theme = Theme.of(context);
+      return RefreshIndicator(
+        onRefresh: _refresh,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(
+            DesignTokens.space20,
+            DesignTokens.space12,
+            DesignTokens.space20,
+            DesignTokens.space24,
           ),
-        );
-      },
-    ),
+          children: [
+            KoreanText('우리 집', style: theme.textTheme.headlineMedium),
+            if (devices.isNotEmpty)
+              KoreanText(
+                '확인한 기기 ${devices.length}대',
+                style: theme.textTheme.bodySmall,
+              ),
+            if (loading)
+              const LinearProgressIndicator(semanticsLabel: '우리 집 기기 확인 중')
+            else ...[
+              if (!selectionKnown)
+                const StatusMessage('이번 준비에 선택된 기기를 확인할 수 없어요.'),
+              if (inventory == null)
+                StatusMessage(
+                  devices.isEmpty
+                      ? '집 기기 목록을 받지 못했어요.'
+                      : '집 기기 목록을 받지 못해 이번 준비에 선택된 기기만 보여 드려요.',
+                )
+              else if (devices.isEmpty)
+                const StatusMessage('집에 등록된 기기가 없어요.'),
+            ],
+            for (final room in {...roomNames.values, ...rooms.keys})
+              if (rooms[room] case final cards?)
+                _RoomGrid(name: room, cards: cards),
+          ],
+        ),
+      );
+    },
   );
 }
 

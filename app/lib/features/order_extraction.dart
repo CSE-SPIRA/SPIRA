@@ -11,6 +11,9 @@ import '../korean_text.dart';
 import 'setup.dart';
 
 const _scanDuration = Duration(milliseconds: 2400);
+const _stepDuration = Duration(milliseconds: 1250);
+
+enum JudgmentStep { situation, intent, tasks }
 
 class OrderExtraction extends StatefulWidget {
   const OrderExtraction({
@@ -21,6 +24,9 @@ class OrderExtraction extends StatefulWidget {
     required this.awaitingEpisode,
     required this.onComplete,
     required this.rationale,
+    required this.waitingForJudgment,
+    required this.canShowJudgment,
+    required this.judgment,
     required this.edit,
     required this.child,
   });
@@ -30,7 +36,10 @@ class OrderExtraction extends StatefulWidget {
   final String? status;
   final bool awaitingEpisode;
   final ValueChanged<List<Uint8List>> onComplete;
-  final Future<wire.Rationale>? rationale;
+  final wire.Rationale? rationale;
+  final bool waitingForJudgment;
+  final bool canShowJudgment;
+  final Widget Function(JudgmentStep step, wire.Rationale result) judgment;
   final Widget? edit;
   final Widget child;
 
@@ -53,15 +62,13 @@ class _OrderExtractionState extends State<OrderExtraction>
   late final _reveal = AnimationController(vsync: this, duration: appSettle)
     ..addStatusListener((status) {
       if (status != AnimationStatus.completed) return;
-      final images = widget.images;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && identical(widget.images, images)) {
-          widget.onComplete(images);
-        }
-      });
+      _holdStep();
     });
 
   Timer? _scanWindow;
+  Timer? _stepTimer;
+  JudgmentStep? _step;
+  bool _finished = false;
   bool _expanded = false;
   bool _reduceMotion = false;
 
@@ -72,7 +79,7 @@ class _OrderExtractionState extends State<OrderExtraction>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _reduceMotion = MediaQuery.disableAnimationsOf(context);
-    if (_reduceMotion && _reveal.isAnimating) _reveal.value = 1;
+    if (_reduceMotion && widget.images.isNotEmpty) _finish();
   }
 
   @override
@@ -82,12 +89,37 @@ class _OrderExtractionState extends State<OrderExtraction>
       updateKeepAlive();
       _scanWindow?.cancel();
       _scanWindow = null;
-      if (widget.images.isNotEmpty) _reveal.reset();
+      _stepTimer?.cancel();
+      _stepTimer = null;
+      _step = null;
+      _finished = false;
+      _reveal.reset();
     }
     if (!widget.hasRows || widget.images.isNotEmpty) {
       _expanded = false;
     }
     _advance();
+  }
+
+  void _finish() {
+    if (_finished) return;
+    _finished = true;
+    _scanWindow?.cancel();
+    _stepTimer?.cancel();
+    _reveal.stop();
+    final images = widget.images;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && identical(widget.images, images)) {
+        widget.onComplete(images);
+      }
+    });
+  }
+
+  void _holdStep() {
+    _stepTimer = Timer(_stepDuration, () {
+      _stepTimer = null;
+      setState(_advance);
+    });
   }
 
   void _previewFrame() {
@@ -97,7 +129,8 @@ class _OrderExtractionState extends State<OrderExtraction>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted ||
           !identical(widget.images, images) ||
-          _scanWindow != null) {
+          _scanWindow != null ||
+          _finished) {
         return;
       }
       setState(() {
@@ -107,17 +140,29 @@ class _OrderExtractionState extends State<OrderExtraction>
   }
 
   void _advance() {
-    if (widget.images.isEmpty ||
-        _scanWindow == null ||
-        _scanWindow!.isActive ||
-        !widget.hasResult ||
-        _reveal.isAnimating ||
-        _reveal.isCompleted) {
-      return;
-    }
-    if (_reduceMotion || !widget.hasRows) {
-      _reveal.value = 1;
-    } else {
+    if (widget.images.isEmpty || _finished) return;
+    if (_reduceMotion) {
+      _finish();
+    } else if (_reveal.isCompleted) {
+      if (_stepTimer != null || widget.waitingForJudgment) return;
+      final result = widget.rationale;
+      if (_step == JudgmentStep.tasks ||
+          !widget.canShowJudgment ||
+          result == null ||
+          result.intents.isEmpty) {
+        _finish();
+        return;
+      }
+      _step = JudgmentStep.values[(_step?.index ?? -1) + 1];
+      _holdStep();
+    } else if (_scanWindow != null &&
+        !_scanWindow!.isActive &&
+        widget.hasResult &&
+        !_reveal.isAnimating) {
+      if (!widget.hasRows) {
+        _finish();
+        return;
+      }
       _reveal.forward();
     }
   }
@@ -125,6 +170,7 @@ class _OrderExtractionState extends State<OrderExtraction>
   @override
   void dispose() {
     _scanWindow?.cancel();
+    _stepTimer?.cancel();
     _reveal.dispose();
     super.dispose();
   }
@@ -132,79 +178,97 @@ class _OrderExtractionState extends State<OrderExtraction>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    return FutureBuilder<wire.Rationale>(
-      future: widget.rationale,
-      builder: (context, snapshot) => AnimatedBuilder(
-        animation: _reveal,
-        child: widget.child,
-        builder: (context, following) {
-          final episode = widget.episode;
-          final previewing = widget.images.isNotEmpty && !_reveal.isCompleted;
-          final revealing = previewing && _reveal.isAnimating;
-          final expanded = _expanded || revealing;
-          final progress = revealing ? appEase.transform(_reveal.value) : 1.0;
-          final preview = revealing ? 1 - progress : 1.0;
-          final status = previewing && episode != null
-              ? '주문을 읽고 있어요.'
-              : widget.status;
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (status != null) StatusMessage(status),
-              if (previewing)
-                ClipRect(
-                  child: Align(
-                    alignment: Alignment.topCenter,
-                    heightFactor: preview,
-                    child: Opacity(
-                      opacity: preview,
-                      child: _CapturePreview(
-                        images: widget.images,
-                        animate:
-                            _scanWindow != null && !revealing && !_reduceMotion,
-                        onFrame: _previewFrame,
-                      ),
+    return AnimatedBuilder(
+      animation: _reveal,
+      child: widget.child,
+      builder: (context, following) {
+        final episode = widget.episode;
+        final presenting = widget.images.isNotEmpty && !_finished;
+        final previewing = presenting && !_reveal.isCompleted;
+        final revealing = previewing && _reveal.isAnimating;
+        final expanded =
+            _expanded ||
+            (presenting && !previewing && _step == null) ||
+            revealing;
+        final progress = revealing ? appEase.transform(_reveal.value) : 1.0;
+        final preview = revealing ? 1 - progress : 1.0;
+        final status = presenting && episode != null
+            ? (previewing ? '주문을 읽고 있어요.' : null)
+            : widget.status;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (status != null) StatusMessage(status),
+            if (presenting)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => setState(_finish),
+                  child: const KoreanText('건너뛰기'),
+                ),
+              ),
+            if (previewing)
+              ClipRect(
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  heightFactor: preview,
+                  child: Opacity(
+                    opacity: preview,
+                    child: _CapturePreview(
+                      images: widget.images,
+                      animate:
+                          _scanWindow != null && !revealing && !_reduceMotion,
+                      onFrame: _previewFrame,
                     ),
                   ),
                 ),
-              if ((!previewing || revealing) && episode != null)
-                if (widget.hasRows) ...[
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Semantics(
-                      expanded: expanded,
-                      child: TextButton.icon(
-                        onPressed: revealing
-                            ? null
-                            : () => setState(() => _expanded = !_expanded),
-                        icon: Icon(
-                          expanded ? Icons.expand_less : Icons.expand_more,
-                        ),
-                        label: KoreanText('읽은 품목 ${episode.itemCount}개'),
+              ),
+            if ((!previewing || revealing) && episode != null)
+              if (widget.hasRows) ...[
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Semantics(
+                    expanded: expanded,
+                    child: TextButton.icon(
+                      onPressed: presenting
+                          ? null
+                          : () => setState(() => _expanded = !_expanded),
+                      icon: Icon(
+                        expanded ? Icons.expand_less : Icons.expand_more,
+                      ),
+                      label: KoreanText('읽은 품목 ${episode.itemCount}개'),
+                    ),
+                  ),
+                ),
+                if (expanded)
+                  ClipRect(
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      heightFactor: progress,
+                      child: OrderItemList(
+                        episode: episode,
+                        unbundled: presenting
+                            ? const []
+                            : widget.rationale?.unbundled ?? const [],
+                        reveal: progress,
                       ),
                     ),
                   ),
-                  if (expanded)
-                    ClipRect(
-                      child: Align(
-                        alignment: Alignment.topCenter,
-                        heightFactor: progress,
-                        child: OrderItemList(
-                          episode: episode,
-                          unbundled: snapshot.data?.unbundled ?? const [],
-                          reveal: progress,
-                        ),
-                      ),
-                    ),
-                  if (_expanded && !previewing && widget.edit != null)
-                    Align(alignment: Alignment.centerLeft, child: widget.edit),
-                ] else if (episode.itemCount > 0)
-                  KoreanText('읽은 품목 ${episode.itemCount}개'),
-              if (!previewing) following!,
-            ],
-          );
-        },
-      ),
+                if (_expanded && !previewing && widget.edit != null)
+                  Align(alignment: Alignment.centerLeft, child: widget.edit),
+              ] else if (episode.itemCount > 0)
+                KoreanText('읽은 품목 ${episode.itemCount}개'),
+            if (!presenting)
+              following!
+            else if (_step case final step?)
+              if (widget.rationale case final rationale?)
+                KeyedSubtree(
+                  key: ValueKey(step),
+                  child: widget.judgment(step, rationale),
+                ),
+          ],
+        );
+      },
     );
   }
 }

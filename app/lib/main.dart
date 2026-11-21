@@ -8,6 +8,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'api/app_api.dart';
 import 'app_controller.dart';
 import 'contracts.dart' as wire;
+import 'features/labels.dart';
 import 'features/our_home.dart';
 import 'features/preparations.dart';
 import 'features/settings.dart';
@@ -157,6 +158,7 @@ class _HomeState extends State<_Home> with WidgetsBindingObserver {
     builder: (context, _) {
       final ready = !app.starting && app.step == SetupStep.ready;
       final surface = ready ? Theme.of(context).colorScheme.surface : null;
+      final lastCheck = app.lastServerCheck;
       return Scaffold(
         backgroundColor: surface,
         appBar: AppBar(
@@ -178,25 +180,45 @@ class _HomeState extends State<_Home> with WidgetsBindingObserver {
                   child: CircularProgressIndicator(semanticsLabel: '앱 시작 중'),
                 )
               : ready
-              ? Stack(
-                  fit: StackFit.expand,
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Keep the preparation scroll and extraction alive
-                    // while another tab is visible.
-                    Offstage(
-                      offstage: _tab != _HomeTab.preparations,
-                      child: ExcludeFocus(
-                        excluding: _tab != _HomeTab.preparations,
-                        child: Preparations(app),
+                    if (app.serverUnavailable)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+                        child: Semantics(
+                          liveRegion: true,
+                          child: KoreanText(
+                            lastCheck == null
+                                ? '서버에 연결할 수 없어요'
+                                : '서버에 연결할 수 없어요 · 마지막 확인 ${seoulClock(lastCheck)}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                      ),
+                    Expanded(
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          // Keep the preparation scroll and extraction alive
+                          // while another tab is visible.
+                          Offstage(
+                            offstage: _tab != _HomeTab.preparations,
+                            child: ExcludeFocus(
+                              excluding: _tab != _HomeTab.preparations,
+                              child: Preparations(app),
+                            ),
+                          ),
+                          if (_tab == _HomeTab.ourHome) OurHome(app),
+                          if (_tab == _HomeTab.settings)
+                            SettingsScreen(
+                              app,
+                              onServerToken: _token,
+                              onHomeKey: () => _token(hub: true),
+                            ),
+                        ],
                       ),
                     ),
-                    if (_tab == _HomeTab.ourHome) OurHome(app),
-                    if (_tab == _HomeTab.settings)
-                      SettingsScreen(
-                        app,
-                        onServerToken: _token,
-                        onHomeKey: () => _token(hub: true),
-                      ),
                   ],
                 )
               : SetupScreen(app),

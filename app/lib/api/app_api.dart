@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -13,6 +14,12 @@ class AppApiException implements Exception {
   final int status;
   final wire.ErrorCode? code;
 }
+
+bool isServerUnavailable(Object error) => switch (error) {
+  AppApiException(:final status) => status == 408 || status >= 500,
+  http.ClientException() || SocketException() || TimeoutException() => true,
+  _ => false,
+};
 
 /// The files have already been copied to the Android app's private inbox.
 class SharedOrder {
@@ -56,10 +63,14 @@ class AppApi {
       request.headers['Content-Type'] = 'application/json';
       request.body = jsonEncode(body);
     }
-    return decode(await _send(request, statuses));
+    final response = await _send(request, statuses);
+    return decode(utf8.decode(response.bodyBytes));
   }
 
-  Future<String> _send(http.BaseRequest request, Set<int> statuses) async {
+  Future<http.Response> _send(
+    http.BaseRequest request,
+    Set<int> statuses,
+  ) async {
     request.followRedirects = false;
     request.headers['Accept'] = 'application/json';
     final bearer = token;
@@ -70,17 +81,16 @@ class AppApi {
         .send(request)
         .then(http.Response.fromStream)
         .timeout(const Duration(seconds: 25));
-    final body = utf8.decode(response.bodyBytes);
     if (!statuses.contains(response.statusCode)) {
       wire.ErrorCode? code;
       try {
-        code = wire.errorFromJson(body).code;
+        code = wire.errorFromJson(utf8.decode(response.bodyBytes)).code;
       } catch (_) {
         // A proxy may send a non-contract error response.
       }
       throw AppApiException(response.statusCode, code);
     }
-    return body;
+    return response;
   }
 
   Future<wire.Health> health() =>
@@ -178,7 +188,7 @@ class AppApi {
     body: body.toJson()..removeWhere((key, value) => value == null),
   );
 
-  Future<wire.OrderAccepted> share(String household, SharedOrder order) async {
+  Future<ShareReceipt> share(String household, SharedOrder order) async {
     final images = <http.MultipartFile>[];
     for (final image in order.images) {
       final png = image.path.endsWith('.png');
@@ -195,7 +205,7 @@ class AppApi {
     return _share(household, order.sourceId, order.sharedAt, images);
   }
 
-  Future<wire.OrderAccepted> shareExample(
+  Future<ShareReceipt> shareExample(
     String household,
     String sourceId,
     String sharedAt,
@@ -209,7 +219,7 @@ class AppApi {
     ),
   ]);
 
-  Future<wire.OrderAccepted> _share(
+  Future<ShareReceipt> _share(
     String household,
     String sourceId,
     String sharedAt,
@@ -222,6 +232,12 @@ class AppApi {
         'shared_at': sharedAt,
       })
       ..files.addAll(images);
-    return wire.orderAcceptedFromJson(await _send(request, {200, 202}));
+    final response = await _send(request, {200, 202});
+    final accepted = wire.orderAcceptedFromJson(
+      utf8.decode(response.bodyBytes),
+    );
+    return (accepted: accepted, isNew: response.statusCode == 202);
   }
 }
+
+typedef ShareReceipt = ({wire.OrderAccepted accepted, bool isNew});

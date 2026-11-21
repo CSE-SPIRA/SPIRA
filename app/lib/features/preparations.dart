@@ -31,7 +31,7 @@ class Preparations extends StatelessWidget {
               episode.status == wire.EpisodeStatus.RECEIVED),
     );
     final visible = app.demoPreview
-        ? {if (pending.isEmpty) ?latest}
+        ? {if (pending.isEmpty || app.serverUnavailable) ?latest}
         : {...reading, ?current, ?latest};
     final previous = known.where((episode) => !visible.contains(episode));
     final showEmpty =
@@ -41,8 +41,6 @@ class Preparations extends StatelessWidget {
         app.queuedShares == 0;
     final sections = [
       if (app.refreshError case final error?) StatusMessage(error),
-      if (app.stale && known.isNotEmpty)
-        const StatusMessage('마지막으로 확인한 정보예요. 현재 상태를 확인하는 중이에요.'),
       if (app.uploadError case final error?) StatusMessage(error),
       if (app.shareIssue case final issue?)
         StatusMessage(switch (issue) {
@@ -52,7 +50,10 @@ class Preparations extends StatelessWidget {
           'rejected' => '서버가 이미지를 읽을 수 없어요. 새 캡처를 공유해 주세요.',
           _ => '공유한 이미지를 열 수 없어요. 주문 화면을 다시 공유해 주세요.',
         }),
-      if (app.queuedShares > 0) const StatusMessage('공유한 주문을 보내는 중이에요…'),
+      if (app.uploadDeferred)
+        const StatusMessage('연결되면 공유한 주문을 보낼게요.')
+      else if (app.queuedShares > 0 && app.uploadError == null)
+        const StatusMessage('공유한 주문을 보내는 중이에요…'),
       if ((app.refreshError != null || app.uploadError != null) &&
           !app.needsToken)
         Align(
@@ -62,7 +63,10 @@ class Preparations extends StatelessWidget {
             child: const KoreanText('다시 시도'),
           ),
         ),
-      if (!app.refreshed && app.refreshError == null && app.accepted.isEmpty)
+      if (!app.refreshed &&
+          !app.serverUnavailable &&
+          app.refreshError == null &&
+          app.accepted.isEmpty)
         const StatusMessage('준비를 불러오는 중이에요…'),
       for (final id in pending)
         _OrderSection(key: ValueKey(id), app: app, episodeId: id),
@@ -212,9 +216,7 @@ class _PreviewStrip extends StatelessWidget {
                 ),
               ),
               TextButton(
-                onPressed: app.canControl && !app.sharingExample
-                    ? app.shareExample
-                    : null,
+                onPressed: app.canShareExample ? app.shareExample : null,
                 child: KoreanText(
                   app.sharingExample ? '주문을 보내는 중…' : '예시 주문으로 공유',
                 ),
@@ -242,6 +244,8 @@ class _OrderSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final episode = app.episodes[episodeId];
+    final rationale = app.rationaleFor(episodeId);
+    final cards = episode == null ? const <wire.Card>[] : app.cardsFor(episode);
     final theme = Theme.of(context);
     final status = switch (episode?.status) {
       null => '주문을 받았어요. 읽기 결과를 기다리는 중이에요.',
@@ -271,7 +275,17 @@ class _OrderSection extends StatelessWidget {
             status: status,
             awaitingEpisode: app.accepted.contains(episodeId),
             onComplete: (images) => app.finishOrderCapture(episodeId, images),
-            rationale: app.requestedRationale(episodeId),
+            rationale: rationale,
+            waitingForJudgment:
+                !app.stale &&
+                episode != null &&
+                (episode.status == wire.EpisodeStatus.RECEIVED ||
+                    episode.status == wire.EpisodeStatus.READING ||
+                    cards.length < episode.cardIds.length ||
+                    app.loadingRationale(episodeId)),
+            canShowJudgment: cards.isNotEmpty && !app.stale,
+            judgment: (step, result) =>
+                OrderJudgment(step: step, result: result, episode: episode!),
             edit: episode != null && app.canEdit(episode)
                 ? TextButton(
                     onPressed: () => Navigator.push<void>(
@@ -378,6 +392,15 @@ class _PreparationCard extends StatelessWidget {
     final colors = theme.colorScheme;
     final stopPending = app.stopPending(card.cardId);
     final stopUncertain = app.stopUncertain(card.cardId);
+    final intent = app
+        .rationaleFor(card.episodeId)
+        ?.intents
+        .where((intent) => intent.cardId == card.cardId)
+        .firstOrNull;
+    final eventName = intent?.situation.event?.trim();
+    final scheduleName = eventName == null || eventName.isEmpty
+        ? intent?.calendarTags.firstOrNull
+        : eventName;
     return Card(
       key: ValueKey(card.cardId),
       color: hero ? appPaper : colors.surface,
@@ -404,21 +427,13 @@ class _PreparationCard extends StatelessWidget {
                       onTap: () => openRationale(context, app, card.episodeId),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 5),
-                        child: FutureBuilder<wire.Rationale>(
-                          future: app.requestedRationale(card.episodeId),
-                          builder: (context, snapshot) {
-                            final intent = snapshot.data?.intents
-                                .where((intent) => intent.cardId == card.cardId)
-                                .firstOrNull;
-                            return KoreanText.rich(
-                              highlightTheme(
-                                card.text,
-                                intent?.situation.theme,
-                                colors.onSecondaryContainer,
-                              ),
-                              style: theme.textTheme.titleLarge,
-                            );
-                          },
+                        child: KoreanText.rich(
+                          highlightTheme(
+                            card.text,
+                            intent?.situation.theme,
+                            colors.onSecondaryContainer,
+                          ),
+                          style: theme.textTheme.titleLarge,
                         ),
                       ),
                     ),
@@ -453,7 +468,7 @@ class _PreparationCard extends StatelessWidget {
                   KoreanText(
                     card.startsAt == null
                         ? '일정이 잡히기를 기다리고 있어요.'
-                        : seoulDateTime(card.startsAt!, fullDate: true),
+                        : scheduleDayLabel(card.startsAt!, scheduleName),
                     style: theme.textTheme.bodySmall,
                   ),
                   KoreanText(
@@ -501,8 +516,12 @@ class _PreparationLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final timing = lineTimeLabel(line) ?? lineLabel(wire.LineState.HELD);
-    final state = visibleLineLabel(line.state);
+    final timing =
+        lineRelationLabel(line, card) ??
+        (line.when == null ? lineLabel(wire.LineState.HELD) : null);
+    final state = timing == null
+        ? lineLabel(line.state)
+        : visibleLineLabel(line.state);
     final pending = app.linePending(card, line);
     final canSwitch = app.canSwitch(card, line);
     final on = line.state != wire.LineState.OFF;
@@ -549,15 +568,13 @@ class _PreparationLine extends StatelessWidget {
                             Wrap(
                               spacing: 8,
                               children: [
-                                KoreanText(
-                                  timing,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant,
-                                    fontFeatures: const [
-                                      FontFeature.tabularFigures(),
-                                    ],
+                                if (timing != null)
+                                  KoreanText(
+                                    timing,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
                                   ),
-                                ),
                                 if (state != null && state != timing)
                                   KoreanText(
                                     state,

@@ -61,6 +61,8 @@ class AppController extends ChangeNotifier {
   final String? configuredHousehold;
 
   bool get demoPreview => browserPreview && fixture && platform == null;
+  bool get canShareExample =>
+      demoPreview && !sharingExample && (canControl || serverUnavailable);
 
   String get _environment =>
       jsonEncode([fixture, api.baseUrl.toString(), configuredHousehold]);
@@ -82,6 +84,8 @@ class AppController extends ChangeNotifier {
   String? setupError;
   String? refreshError;
   String? uploadError;
+  bool uploadDeferred = false;
+  bool serverUnavailable = false;
   String? shareIssue;
   String? exampleShareError;
   int queuedShares = 0;
@@ -100,9 +104,14 @@ class AppController extends ChangeNotifier {
   final pendingLines = <String>{};
   final controlErrors = <String, String>{};
   final _notifications = <String, List<String>>{};
-  final _rationales = <String, Future<wire.Rationale>>{};
+  final _rationales =
+      <String, ({Future<wire.Rationale> future, bool loading})>{};
+  final _storedRationales = <String, wire.Rationale>{};
+  wire.Devices? homeInventory;
+  Future<void>? _homeInventoryRefresh;
 
   String? _cursor;
+  String? get lastServerCheck => _cursor;
   Timer? _timer;
   StreamSubscription<void>? _shareSubscription;
   Future<void> _queue = Future<void>.value();
@@ -227,6 +236,16 @@ class AppController extends ChangeNotifier {
       cards[card.cardId] = card;
     }
     _cursor = value['cursor'] as String?;
+    if (value['inventory'] case final Map<String, dynamic> inventory) {
+      final manifest = wire.Devices.fromJson(inventory);
+      if (manifest.householdId == household) homeInventory = manifest;
+    }
+    for (final data in (value['rationales'] as List<dynamic>? ?? const [])) {
+      final rationale = wire.Rationale.fromJson(data as Map<String, dynamic>);
+      if (episodes.containsKey(rationale.episodeId)) {
+        _storedRationales[rationale.episodeId] = rationale;
+      }
+    }
     paused = value['paused'] as bool?;
     accepted.addAll((value['accepted'] as List<dynamic>).cast<String>());
     final started = value['started'] as Map<String, dynamic>;
@@ -274,6 +293,10 @@ class AppController extends ChangeNotifier {
       'accepted': accepted.toList(),
       'episodes': episodes.values.map((episode) => episode.toJson()).toList(),
       'cards': cards.values.map((card) => card.toJson()).toList(),
+      'rationales': _storedRationales.values
+          .map((value) => value.toJson())
+          .toList(),
+      'inventory': homeInventory?.toJson(),
       'started': _startedTasks.map(
         (card, tasks) => MapEntry(card, tasks.toList()),
       ),
@@ -436,11 +459,12 @@ class AppController extends ChangeNotifier {
     try {
       final inbox = await platform.inbox(_scope);
       queuedShares = inbox.orders.length;
+      if (queuedShares == 0) uploadDeferred = false;
       shareIssue = inbox.issue;
       uploadError = null;
       _change();
       for (final order in inbox.orders) {
-        final wire.OrderAccepted receipt;
+        final ShareReceipt receipt;
         try {
           receipt = await api.share(id, order);
         } on AppApiException catch (error) {
@@ -452,28 +476,36 @@ class AppController extends ChangeNotifier {
           continue;
         }
         // Persist the receipt before allowing Android to discard the images.
-        accepted.add(receipt.episodeId);
+        final episodeId = receipt.accepted.episodeId;
+        if (receipt.isNew) _rationales.remove(episodeId);
+        accepted.add(episodeId);
         await _save();
         final images = <Uint8List>[];
-        for (final image in order.images) {
-          try {
-            images.add(await image.readAsBytes());
-          } on FileSystemException {
-            // The upload is already accepted even if its local preview is gone.
+        if (receipt.isNew) {
+          for (final image in order.images) {
+            try {
+              images.add(await image.readAsBytes());
+            } on FileSystemException {
+              // The upload is already accepted even if its local preview is gone.
+            }
           }
         }
-        await platform.acknowledge(_scope, order.sourceId, receipt.episodeId);
-        _queueCapture(receipt.episodeId, images);
+        await platform.acknowledge(_scope, order.sourceId, episodeId);
+        _queueCapture(episodeId, images);
         queuedShares--;
         _change();
       }
+      uploadDeferred = false;
     } catch (error) {
-      uploadError = _error(error, '주문을 보내지 못했어요. 다시 시도해 주세요.');
+      uploadDeferred = queuedShares > 0 && isServerUnavailable(error);
+      if (!uploadDeferred) {
+        uploadError = _error(error, '주문을 보내지 못했어요. 다시 시도해 주세요.');
+      }
     }
   }
 
   Future<void> shareExample() async {
-    if (!demoPreview || !canControl || sharingExample) return;
+    if (!canShareExample) return;
     sharingExample = true;
     exampleShareError = null;
     _change();
@@ -483,7 +515,8 @@ class AppController extends ChangeNotifier {
         final image = Uint8List.sublistView(asset);
         final random = Random.secure();
         final share = _exampleShare ??= (
-          sourceId: 'preview_${base64UrlEncode(List.generate(12, (_) => random.nextInt(256)))}',
+          sourceId:
+              'preview_${base64UrlEncode(List.generate(12, (_) => random.nextInt(256)))}',
           sharedAt: DateTime.now().toUtc().toIso8601String(),
         );
         final receipt = await api.shareExample(
@@ -493,8 +526,12 @@ class AppController extends ChangeNotifier {
           image,
         );
         _exampleShare = null;
-        _queueCapture(receipt.episodeId, [image]);
-        accepted.add(receipt.episodeId);
+        final episodeId = receipt.accepted.episodeId;
+        if (receipt.isNew) {
+          _rationales.remove(episodeId);
+          _queueCapture(episodeId, [image]);
+        }
+        accepted.add(episodeId);
         _change();
         await _save();
         await _refresh();
@@ -595,13 +632,14 @@ class AppController extends ChangeNotifier {
       }
       stale = false;
       refreshed = true;
+      serverUnavailable = false;
       refreshError = null;
       // Card themes and set-aside items come from the stored rationale.
       for (final episode in episodes.values) {
-        final justRead =
-            _orderCaptures.containsKey(episode.episodeId) &&
-            (episode.items.isNotEmpty || episode.maskedCount > 0);
-        if (_disposed || (!justRead && cardsFor(episode).isEmpty)) continue;
+        if (_disposed ||
+            (cardsFor(episode).isEmpty && episode.itemTasks.isEmpty)) {
+          continue;
+        }
         unawaited(
           rationale(episode.episodeId)
               .then<void>((_) {}, onError: (Object _) {}),
@@ -609,7 +647,10 @@ class AppController extends ChangeNotifier {
       }
     } catch (error) {
       stale = true;
-      refreshError = _error(error, '새로 불러오지 못했어요. 다시 시도해 주세요.');
+      serverUnavailable = isServerUnavailable(error);
+      refreshError = serverUnavailable
+          ? null
+          : _error(error, '새로 불러오지 못했어요. 다시 시도해 주세요.');
     }
     _change();
     await _deliverNotifications();
@@ -826,10 +867,11 @@ class AppController extends ChangeNotifier {
     });
   }
 
-  Future<wire.Rationale>? requestedRationale(String episode) =>
-      _rationales[episode];
+  wire.Rationale? rationaleFor(String episode) => _storedRationales[episode];
 
   Future<wire.Rationale> rationale(String episode) {
+    final cached = _storedRationales[episode];
+    if (stale && cached != null) return Future.value(cached);
     return _rationales.putIfAbsent(episode, () {
       late final Future<wire.Rationale> request;
       request = api
@@ -838,16 +880,38 @@ class AppController extends ChangeNotifier {
             if (rationale.episodeId != episode) {
               throw const FormatException('Wrong episode');
             }
+            if (identical(_rationales[episode]?.future, request) &&
+                !_disposed) {
+              _rationales[episode] = (future: request, loading: false);
+              _storedRationales[episode] = rationale;
+              _change();
+              unawaited(_serialize(_save).catchError((Object _) {}));
+            }
             return rationale;
           })
           .catchError((Object error, StackTrace stackTrace) {
-            if (identical(_rationales[episode], request)) {
+            if (identical(_rationales[episode]?.future, request)) {
               _rationales.remove(episode);
+              _change();
             }
             Error.throwWithStackTrace(error, stackTrace);
           });
-      return request;
-    });
+      return (future: request, loading: true);
+    }).future;
+  }
+
+  bool loadingRationale(String episode) =>
+      _rationales[episode]?.loading ?? false;
+
+  Future<void> refreshHomeInventory() => _homeInventoryRefresh ??=
+      _loadHomeInventory().whenComplete(() => _homeInventoryRefresh = null);
+
+  Future<void> _loadHomeInventory() async {
+    final inventory = await homeHub?.fetchDevices(household!);
+    if (_disposed || inventory == null) return;
+    homeInventory = inventory;
+    _change();
+    await _serialize(_save).catchError((Object _) {});
   }
 
   Future<wire.Memory> memory() async {
