@@ -198,12 +198,12 @@ class AppController extends ChangeNotifier {
             episode.status == wire.EpisodeStatus.READING ||
             (episode.status != wire.EpisodeStatus.CLOSED &&
                 cardsFor(episode).length < episode.cardIds.length) ||
-            // Read but not yet judged into cards: the card is about to arrive.
+            // The first card may follow the initial item projection.
             (const {
                   wire.EpisodeStatus.JUDGED,
                   wire.EpisodeStatus.NOTIFIED,
                 }.contains(episode.status) &&
-                cardsFor(episode).isEmpty &&
+                episode.cardIds.isEmpty &&
                 _sharedRecently(episode)),
       ) ||
       cards.values.any(_cardIsActive);
@@ -636,6 +636,7 @@ class AppController extends ChangeNotifier {
         DateTime.parse(card.updatedAt);
       }
       await _loadMissingHistory(id, details, poll.cards);
+      final newCardEpisodes = <String>{};
       for (final card in poll.cards) {
         final previous = cards[card.cardId];
         if (previous != null &&
@@ -643,6 +644,7 @@ class AppController extends ChangeNotifier {
                 .isBefore(DateTime.parse(previous.updatedAt))) {
           continue;
         }
+        if (previous == null) newCardEpisodes.add(card.episodeId);
         cards[card.cardId] = card;
         if (platform != null && card.notify) {
           _notifications[jsonEncode([card.cardId, card.updatedAt])] = [
@@ -668,7 +670,10 @@ class AppController extends ChangeNotifier {
         }
       }
       for (final episode in details) {
-        if (episodes[episode.episodeId]?.status != episode.status) {
+        final previous = episodes[episode.episodeId];
+        if (previous?.status != episode.status ||
+            !listEquals(previous?.cardIds, episode.cardIds) ||
+            newCardEpisodes.contains(episode.episodeId)) {
           _rationales.remove(episode.episodeId);
         }
         episodes[episode.episodeId] = episode;

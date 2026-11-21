@@ -123,7 +123,10 @@ class _HomeState extends State<_Home> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    app.setForeground(state == AppLifecycleState.resumed);
+    // On web, a visible window becomes inactive when another window has focus.
+    app.setForeground(
+      state == AppLifecycleState.resumed || state == AppLifecycleState.inactive,
+    );
   }
 
   @override

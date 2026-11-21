@@ -10,8 +10,9 @@ import '../theme.dart';
 import '../korean_text.dart';
 import 'setup.dart';
 
-const _scanDuration = Duration(milliseconds: 2400);
-const _stepDuration = Duration(milliseconds: 1250);
+const _scanDuration = Duration(milliseconds: 900);
+const _stepDuration = Duration(milliseconds: 500);
+const _presentationDuration = Duration(milliseconds: 3600);
 
 enum JudgmentStep { situation, intent, tasks }
 
@@ -67,6 +68,7 @@ class _OrderExtractionState extends State<OrderExtraction>
 
   Timer? _scanWindow;
   Timer? _stepTimer;
+  Timer? _presentationWindow;
   JudgmentStep? _step;
   bool _finished = false;
   bool _expanded = false;
@@ -74,6 +76,19 @@ class _OrderExtractionState extends State<OrderExtraction>
 
   @override
   bool get wantKeepAlive => widget.images.isNotEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    _startPresentationWindow();
+  }
+
+  void _startPresentationWindow() {
+    _presentationWindow?.cancel();
+    _presentationWindow = widget.images.isEmpty
+        ? null
+        : Timer(_presentationDuration, () => setState(_advance));
+  }
 
   @override
   void didChangeDependencies() {
@@ -94,6 +109,7 @@ class _OrderExtractionState extends State<OrderExtraction>
       _step = null;
       _finished = false;
       _reveal.reset();
+      _startPresentationWindow();
     }
     if (!widget.hasRows || widget.images.isNotEmpty) {
       _expanded = false;
@@ -106,6 +122,7 @@ class _OrderExtractionState extends State<OrderExtraction>
     _finished = true;
     _scanWindow?.cancel();
     _stepTimer?.cancel();
+    _presentationWindow?.cancel();
     _reveal.stop();
     final images = widget.images;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -141,7 +158,9 @@ class _OrderExtractionState extends State<OrderExtraction>
 
   void _advance() {
     if (widget.images.isEmpty || _finished) return;
-    if (_reduceMotion) {
+    // Slow replies can use up the presentation window while the items are up.
+    if (_reduceMotion ||
+        (widget.canShowJudgment && _presentationWindow?.isActive == false)) {
       _finish();
     } else if (_reveal.isCompleted) {
       if (_stepTimer != null || widget.waitingForJudgment) return;
@@ -171,6 +190,7 @@ class _OrderExtractionState extends State<OrderExtraction>
   void dispose() {
     _scanWindow?.cancel();
     _stepTimer?.cancel();
+    _presentationWindow?.cancel();
     _reveal.dispose();
     super.dispose();
   }

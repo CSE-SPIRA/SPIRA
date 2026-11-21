@@ -134,6 +134,8 @@ class Peer {
   int pollCount = 0;
   Future<http.Response> Function(http.Request)? reaction;
   Future<http.Response> Function(http.Request)? upload;
+  Future<http.Response> Function()? readRationale;
+  void Function(http.Request)? onRequest;
   void Function(bool)? onPause;
 
   AppApi client() =>
@@ -148,6 +150,7 @@ class Peer {
 
   Future<http.Response> handle(http.Request request) async {
     requests.add(request);
+    onRequest?.call(request);
     if (unavailable) {
       return response({'code': 'internal', 'message': 'offline'}, 503);
     }
@@ -220,6 +223,7 @@ class Peer {
         path.startsWith('/v1/episodes/') &&
         path.endsWith('/rationale')) {
       rationaleReads++;
+      if (readRationale case final read?) return read();
       final rationale = rationales[request.url.pathSegments[2]];
       if (rationale != null) return response(rationale);
       return response({'code': 'not_found', 'message': 'no rationale'}, 404);
@@ -472,7 +476,7 @@ void main() {
           await tester.pump(const Duration(milliseconds: 400));
           expect(tester.getTopLeft(orderScan).dy, greaterThan(start.dy));
         }
-        await tester.pump(const Duration(seconds: 3));
+        await tester.pump(const Duration(milliseconds: 600));
         expect(
           find.byType(Image),
           reducedMotion ? findsNothing : findsOneWidget,
@@ -493,7 +497,6 @@ void main() {
         } else {
           expect(find.byType(Image), findsOneWidget);
           expect(find.byType(Card), findsNothing);
-          await tester.pumpAndSettle();
           await tapText(tester, '바로 보기');
           expect(find.byType(Image), findsNothing);
           expect(find.byType(Card), findsOneWidget);
@@ -558,6 +561,7 @@ void main() {
         final app = preview();
         await openApp(tester, app, size: const Size(412, 900));
 
+        final availableAt = tester.binding.clock.now();
         await tester.tap(find.text('예시 주문으로 공유'));
         await tester.pump();
         expect(app.episodes['ep_9031']?.status, wire.EpisodeStatus.NOTIFIED);
@@ -568,7 +572,7 @@ void main() {
         if (mode != 'reduced motion') {
           expect(find.byType(Image), findsOneWidget);
           await paintOrderPreview(tester);
-          await tester.pump(const Duration(milliseconds: 2350));
+          await tester.pump(const Duration(milliseconds: 850));
           expect(orderScan, findsOneWidget);
           expect(items, findsNothing);
           expect(find.byType(Card), findsNothing);
@@ -580,9 +584,8 @@ void main() {
           expect(tasks, findsNothing);
           expect(find.byType(Card), findsNothing);
 
-          const step = Duration(milliseconds: 1250);
+          const step = Duration(milliseconds: 500);
           await tester.pump(step);
-          await tester.pump(appSettle);
           expect(situation.hitTestable(), findsOneWidget);
           expect(find.text('행사 · 생일'), findsOneWidget);
           expect(find.text('토요일 생일 일정 · 케이크 토퍼'), findsOneWidget);
@@ -593,11 +596,10 @@ void main() {
           expect(find.byType(Card), findsNothing);
 
           if (mode == 'skip') {
-            await tapText(tester, '바로 보기');
-            await tester.pump(step * 3);
+            await tester.tap(find.text('바로 보기'));
+            await tester.pump();
           } else {
-            await tester.pump(step - appSettle);
-            await tester.pump(appSettle);
+            await tester.pump(step);
             expect(situation, findsNothing);
             expect(intent.hitTestable(), findsOneWidget);
             final sentence = wire.Rationale.fromJson(
@@ -624,14 +626,13 @@ void main() {
             expect(tasks, findsNothing);
             expect(find.byType(Card), findsNothing);
 
-            await tester.pump(step - appSettle);
-            await tester.pump(appSettle);
+            await tester.pump(step);
             expect(intent, findsNothing);
             expect(tasks.hitTestable(), findsOneWidget);
             expect(find.text('손님 오기 전 거실 청소'), findsOneWidget);
             expect(find.text('오븐 컵케이크 설정 대기'), findsOneWidget);
             expect(find.byType(Card), findsNothing);
-            await tester.pump(step - appSettle);
+            await tester.pump(step);
           }
         }
         expect(find.byType(Image), findsNothing);
@@ -640,6 +641,10 @@ void main() {
         expect(intent, findsNothing);
         expect(tasks, findsNothing);
         expect(find.byType(Card), findsOneWidget);
+        expect(
+          tester.binding.clock.now().difference(availableAt),
+          lessThanOrEqualTo(const Duration(seconds: 4)),
+        );
         expect(find.text('읽은 품목 9개'), findsOneWidget);
         expect(find.text('설향 딸기 500g (냉장)'), findsNothing);
 
@@ -650,6 +655,117 @@ void main() {
         expect(find.text('바로 보기'), findsNothing);
         expect(find.text('읽은 품목 9개'), findsOneWidget);
         expect(find.byType(Card), findsOneWidget);
+      },
+    );
+  }
+
+  for (final blur in [false, true]) {
+    testWidgets(
+      'staged share and preparation update within four seconds (window blur $blur)',
+      (tester) async {
+        final peer = Peer();
+        final app = AppController(
+          api: peer.client(),
+          platform: null,
+          store: TestStore(),
+          fixture: true,
+          browserPreview: true,
+          configuredHousehold: 'h_042',
+        );
+        await openApp(tester, app);
+
+        final started = tester.binding.clock.now();
+        Duration elapsed() => tester.binding.clock.now().difference(started);
+        peer.onRequest = (request) {
+          debugPrint(
+            '${elapsed().inMilliseconds} ms ${request.method} ${request.url.path}',
+          );
+        };
+        final earlyRationale = Completer<http.Response>();
+        peer.readRationale = () => peer.rationaleReads == 1
+            ? earlyRationale.future
+            : Future.value(Peer.response(peer.rationales['ep_9031']));
+        peer.upload = (_) async =>
+            Peer.response({'episode_id': 'ep_9031', 'status': 'received'}, 202);
+        await tester.tap(find.text('예시 주문으로 공유'));
+        await tester.pump();
+        await paintOrderPreview(tester);
+
+        Future<void> advanceTo(Duration time, {Finder? until}) async {
+          while (elapsed() < time && until?.evaluate().isNotEmpty != true) {
+            final left = time - elapsed();
+            const frame = Duration(milliseconds: 100);
+            await tester.pump(left < frame ? left : frame);
+          }
+        }
+
+        final episode = fixture('episode.json')
+          ..['status'] = 'notified'
+          ..['shared_at'] = DateTime.now().toUtc().toIso8601String();
+        final itemTasks = (episode['item_tasks'] as List<dynamic>)
+            .cast<Map<String, dynamic>>();
+        await advanceTo(const Duration(seconds: 5));
+        peer.episodes['ep_9031'] = {
+          ...episode,
+          'card_ids': blur ? [] : episode['card_ids'],
+          'item_tasks': [
+            for (final task in itemTasks) {...task, 'state': 'scheduled'},
+          ],
+        };
+        debugPrint('5000 ms items available');
+        await advanceTo(const Duration(seconds: 7));
+        expect(find.text('설향 딸기 500g (냉장)'), findsOneWidget);
+        expect(peer.rationaleReads, 1);
+        expect(find.byType(Card), findsNothing);
+
+        if (blur) {
+          tester.binding.handleAppLifecycleStateChanged(
+            AppLifecycleState.inactive,
+          );
+        }
+        final card = fixture('card.v1.json');
+        peer.episodes['ep_9031'] = {
+          ...peer.birthday,
+          'card_ids': episode['card_ids'],
+        };
+        peer.cards = [card];
+        debugPrint('7000 ms card and rationale available');
+        final visibleCard = find.byType(Card).hitTestable();
+        await advanceTo(const Duration(seconds: 11), until: visibleCard);
+        expect(visibleCard, findsOneWidget);
+        debugPrint('${elapsed().inMilliseconds} ms card visible');
+        expect(peer.rationaleReads, 2);
+        earlyRationale.complete(
+          Peer.response({'code': 'not_found', 'message': 'pending'}, 404),
+        );
+        await tester.pump();
+
+        await advanceTo(const Duration(milliseconds: 12100));
+        final lines = (card['lines'] as List<dynamic>)
+            .cast<Map<String, dynamic>>();
+        expect(find.text('4개 중 0개 끝남'), findsOneWidget);
+        expect(find.text(itemTasks.first['text'] as String), findsNothing);
+        peer.cards = [
+          {
+            ...card,
+            'lines': [
+              for (final line in lines) {...line, 'state': 'done'},
+            ],
+            'summary': {'done': 4, 'total': 4, 'waiting_for': null},
+          },
+        ];
+        peer.episodes['ep_9031'] = episode;
+        debugPrint('12100 ms guidance and line states changed');
+        final completedLines = find.text('4개 중 4개 끝남');
+        await advanceTo(
+          const Duration(milliseconds: 16100),
+          until: completedLines,
+        );
+        expect(completedLines, findsOneWidget);
+        expect(find.text(itemTasks.first['text'] as String), findsOneWidget);
+        debugPrint(
+          '${elapsed().inMilliseconds} ms updated guidance and lines visible',
+        );
       },
     );
   }
@@ -1821,7 +1937,7 @@ void main() {
     await tester.tap(share);
     await tester.pump();
     await paintOrderPreview(tester);
-    await tester.pump(const Duration(milliseconds: 2400));
+    await tester.pump(const Duration(milliseconds: 900));
     await tester.pumpAndSettle();
     await tapText(tester, '바로 보기');
     expect(intro, findsNothing);
