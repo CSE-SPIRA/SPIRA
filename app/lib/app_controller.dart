@@ -197,9 +197,24 @@ class AppController extends ChangeNotifier {
             episode.status == wire.EpisodeStatus.RECEIVED ||
             episode.status == wire.EpisodeStatus.READING ||
             (episode.status != wire.EpisodeStatus.CLOSED &&
-                cardsFor(episode).length < episode.cardIds.length),
+                cardsFor(episode).length < episode.cardIds.length) ||
+            // Read but not yet judged into cards: the card is about to arrive.
+            (const {
+                  wire.EpisodeStatus.JUDGED,
+                  wire.EpisodeStatus.NOTIFIED,
+                }.contains(episode.status) &&
+                cardsFor(episode).isEmpty &&
+                _sharedRecently(episode)),
       ) ||
       cards.values.any(_cardIsActive);
+
+  // A judged order that produces no card must not keep fast polling forever.
+  bool _sharedRecently(wire.Episode episode) {
+    final shared = DateTime.tryParse(episode.sharedAt);
+    return shared != null &&
+        DateTime.now().toUtc().difference(shared.toUtc()) <
+            const Duration(minutes: 2);
+  }
 
   bool _cardIsActive(wire.Card card) {
     if (stopPending(card.cardId)) return true;
