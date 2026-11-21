@@ -627,12 +627,16 @@ def test_sim_at10_read_only_faint_waiting_and_item_only_episode(tmp_path):
     with TestClient(operator_app(tmp_path, plan_source=source)) as client:
         initial = client.get("/sim/snapshot").json()
         viewer = client.get("/sim/viewer")
-        assert viewer.status_code == 200 and "<button" not in viewer.text
+        assert viewer.status_code == 200 and "<form" not in viewer.text
         assert 'class="planned"' in viewer.text
         css = client.get("/sim/assets/house/viewer.css").raise_for_status().text
         assert "border: 1px dashed var(--green-line)" in css
         active_view = ElementTree.fromstring(
             client.get("/sim/viewer?fragment=true").raise_for_status().text
+        )
+        assert all(
+            button.get("type") == "button" and button.get("popovertarget")
+            for button in active_view.findall(".//button")
         )
         assert active_view.find('.//div[@data-device="light_01"]').get("data-resting") is None
         assert active_view.find('.//div[@data-device="styler_01"]').get("data-resting") == ""
@@ -1003,6 +1007,52 @@ def test_sim_at19_live_3d_households_and_household_content(tmp_path, monkeypatch
         assert view.findtext('.//section[@data-room="entrance"]/h2') == "현관"
 
 
+def test_viewer_planned_rows_show_targets_and_collapse_duplicates(tmp_path):
+    plan = fixture_json("ep_9031/plan.v3.json")
+    light_task = next(task for task in plan["tasks"] if task["task_id"] == "t_mood#3")
+    for index, command, value, trigger in (
+        (7, "color", {"hue": 350, "saturation": 65, "brightness": 80}, light_task["trigger"]),
+        (8, "color_temp", {"kelvin": 2700}, {"time": "2026-10-17T12:40:00+09:00"}),
+        (9, "color_temp", {"kelvin": 6500}, {"time": "2026-10-17T12:41:00+09:00"}),
+    ):
+        plan["tasks"].append({
+            **light_task,
+            "task_id": f"t_mood#{index}",
+            "actions": [{"device": "light_01", "cmd": command, "value": value}],
+            "trigger": trigger,
+        })
+
+    with TestClient(operator_app(tmp_path, plan_source=SourceStub(plan))) as client:
+        view = ElementTree.fromstring(
+            client.get("/sim/viewer?fragment=true").raise_for_status().text
+        )
+        for device, expected in (
+            ("display_01", ["공주 화면 · 손님 오면"]),
+            ("plug_kettle", ["끄기 · 토 13:30"]),
+            ("fridge_01", ["안내 표시 · 택배를 들이면"]),
+            ("light_01", ["분홍 빛 · 손님 오면", "따뜻한 빛 · 토 12:40", "흰 빛 · 토 12:41"]),
+        ):
+            rows = view.findall(f'.//div[@data-device="{device}"]/p[@class="planned"]')
+            assert ["".join(row.itertext()) for row in rows] == expected
+
+        light = view.find('.//div[@data-device="light_01"]')
+        details = [
+            "색조 330° · 채도 45% · 밝기 70%\n색조 350° · 채도 65% · 밝기 80%",
+            "2700K",
+            "6500K",
+        ]
+        buttons = light.findall('p[@class="planned"]/button')
+        assert [button.get("title") for button in buttons] == [
+            detail.replace("\n", " ") for detail in details
+        ]
+        assert [
+            light.findtext(f'p[@id="{button.get("popovertarget")}"][@popover="auto"]')
+            for button in buttons
+        ] == details
+        overlay = client.get("/sim/overlay").raise_for_status().json()
+        assert len(overlay["notices"]) == 2
+
+
 def test_sim_at20_viewer_projects_world_markers_and_no_reasoning(tmp_path, monkeypatch):
     plan = fixture_json("ep_9031/plan.v3.json")
     card = fixture_json("ep_9031/card.v1.json")
@@ -1052,12 +1102,10 @@ def test_sim_at20_viewer_projects_world_markers_and_no_reasoning(tmp_path, monke
             assert set(row) == {
                 "plan_id", "task_id", "device", "command", "target_value", "wait", "protective",
             }
-        assert "오븐 · 굽기 설정 대기 170° 20분" in page
         assert '<span class="planned-clock"> · 토 14:00</span>' in page
-        assert "냉장고 · 안내 표시 · 택배를 들이면" in page
         view = ElementTree.fromstring(fragment)
         oven_plan = view.find('.//div[@data-device="oven_01"]/p[@class="planned"]')
-        assert "".join(oven_plan.itertext()) == "오븐 · 굽기 설정 대기 170° 20분 · 토 14:00"
+        assert "".join(oven_plan.itertext()) == "170° 20분 굽기 대기 · 토 14:00"
         assert oven_plan.findtext('span[@class="planned-clock"]') == " · 토 14:00"
         visual_values = {
             marker.get("data-device"): json.loads(marker.get("data-values"))

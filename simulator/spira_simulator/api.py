@@ -235,7 +235,7 @@ def create_app(
                 "peers": request.app.state.peer_viewers,
                 "rooms": rooms,
                 "room_names": ROOM_NAMES,
-                "unplaced": planned.values(),
+                "unplaced": planned.items(),
                 "has_preparation": bool(overlay_data["preparation"]),
                 "overlay_errors": overlay_data["errors"],
                 "restores": restores,

@@ -246,8 +246,8 @@ test("focused demo labels reserve space and colliding resting tags drop at all t
 
 test("the viewer fits the house at desktop and phone widths and keeps labels clear of the table", () => {
   const sizes = {
-    entrance: [134, 28], display_01: [108, 45], light_01: [114, 45], cooktop_01: [96, 45],
-    fridge_01: [208, 64], oven_01: [208, 95], plug_kettle: [116, 45], cleaner_01: [85, 45],
+    entrance: [134, 28], display_01: [142, 73], light_01: [130, 73], cooktop_01: [110, 73],
+    fridge_01: [168, 73], oven_01: [188, 73], plug_kettle: [116, 73], cleaner_01: [85, 45],
     purifier_01: [84, 45], styler_01: [110, 45],
   };
   for (const [width, height] of [[1470, 824], [1226, 662], [372, 261]]) {

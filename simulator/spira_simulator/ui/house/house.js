@@ -230,11 +230,16 @@ export function layoutHouseLabels(markers, viewWidth, viewHeight, { screen, pend
 
 export function replaceHouseMarkers(current, next) {
   const focused = current.contains(document.activeElement) ? document.activeElement.id : "";
-  const openNotice = CSS.supports("selector(:popover-open)") &&
-    current.querySelector(".notice-detail:popover-open")?.id;
+  const openDetail = CSS.supports("selector(:popover-open)") &&
+    current.querySelector(":is(.notice-detail, .planned-detail):popover-open");
   current.replaceWith(next);
   if (focused) document.getElementById(focused)?.focus({ preventScroll: true });
-  if (openNotice) document.getElementById(openNotice)?.showPopover();
+  if (openDetail) {
+    const detail = document.getElementById(openDetail.id);
+    if (detail && (detail.matches(".notice-detail") || detail.textContent === openDetail.textContent)) {
+      detail.showPopover();
+    }
+  }
 }
 
 // The fixed I1 cutaway. View direction and entrance cues are separate from device values.

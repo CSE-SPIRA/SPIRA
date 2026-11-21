@@ -36,5 +36,13 @@ STATE_WORDS = {
     "normal_screen": "평소 화면",
     "notice": "안내 표시",
     "virtual": "모의 기기",
-    "physical": "실물 기기"
+    "physical": "실물 기기",
+    "light_pink": "분홍 빛",
+    "light_orange": "주황 빛",
+    "light_yellow": "노랑 빛",
+    "light_green": "초록 빛",
+    "light_blue": "파랑 빛",
+    "light_purple": "보라 빛",
+    "light_white": "흰 빛",
+    "light_warm": "따뜻한 빛"
 }

@@ -93,6 +93,7 @@ body.test-home {
   align-items: start;
   gap: var(--space-8);
 }
+.test-home .room-devices { display: flex; flex-wrap: wrap; }
 .viewer-room:not(:has(.viewer-marker:not(.anchored, .unplaced))),
 .viewer-room:not(:has(.viewer-marker:not(.anchored, .unplaced))) .room-devices { display: contents; }
 .viewer-room:not(:has(.viewer-marker:not(.anchored, .unplaced))) > h2 { display: none; }
@@ -108,6 +109,10 @@ body.test-home {
   font-weight: 400;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+.test-home .viewer-marker[data-device] {
+  --card-min-width: min(4rem, 100%);
+  min-width: var(--card-min-width);
 }
 .viewer-marker:is(.anchored, .unplaced) { position: absolute; z-index: 1; }
 .test-home .viewer-marker.anchored { z-index: auto; }
@@ -143,6 +148,12 @@ body:not(.test-home) .viewer-marker.anchored:not([data-resting])::after {
   border-radius: var(--radius-8);
 }
 .home-device { background: var(--surface); color: var(--ink); box-shadow: 0 3px 12px #43372420; }
+.test-home .viewer-marker[data-device] > .home-device {
+  justify-self: start;
+  min-width: var(--card-min-width);
+  max-width: 100%;
+  box-sizing: border-box;
+}
 .home-device h3 { font-size: inherit; font-weight: 600; }
 .device-value { white-space: pre-wrap; }
 .test-home :is(.device-value, .notice-trigger span) {
@@ -152,7 +163,7 @@ body:not(.test-home) .viewer-marker.anchored:not([data-resting])::after {
   -webkit-line-clamp: 2;
 }
 .test-home .device-value:has(.notice-trigger) { display: block; }
-.notice-trigger {
+:is(.notice-trigger, .planned-trigger) {
   display: block;
   max-width: 100%;
   padding: 0;
@@ -165,8 +176,8 @@ body:not(.test-home) .viewer-marker.anchored:not([data-resting])::after {
   overflow-wrap: inherit;
   cursor: pointer;
 }
-.notice-trigger:focus-visible { outline: 2px solid var(--green); }
-.notice-detail {
+:is(.notice-trigger, .planned-trigger):focus-visible { outline: 2px solid var(--green); }
+.notice-detail, .planned-detail {
   position: fixed;
   inset: 0;
   width: fit-content;
@@ -182,7 +193,7 @@ body:not(.test-home) .viewer-marker.anchored:not([data-resting])::after {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.test-home .notice-detail, .house-view .notice-detail { margin: auto; }
+.test-home :is(.notice-detail, .planned-detail), .house-view :is(.notice-detail, .planned-detail) { margin: auto; }
 body:not(.test-home) .device-value.visually-hidden {
   position: absolute;
   width: 1px;
@@ -250,6 +261,8 @@ body:not(.test-home) .theme .home-device {
 .observation-warning { color: var(--pink-ink); font-size: .84rem; font-weight: 600; }
 .planned {
   width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
   border: 1px dashed var(--green-line);
   background: color-mix(in srgb, var(--paper) 85%, transparent);
   color: var(--muted);

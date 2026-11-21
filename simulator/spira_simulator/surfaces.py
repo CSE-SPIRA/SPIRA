@@ -39,6 +39,15 @@ TRIGGER_NAMES = {
     "guest_arrived": "손님 오면",
     "event_end": "행사가 끝나면",
 }
+LIGHT_HUE_RANGES = (
+    (15, "light_pink"),
+    (45, "light_orange"),
+    (70, "light_yellow"),
+    (165, "light_green"),
+    (255, "light_blue"),
+    (315, "light_purple"),
+    (360, "light_pink"),
+)
 RESTORE_NAMES = {
     "restored": "되돌림",
     "not_needed": "되돌릴 값 없음",
@@ -264,53 +273,63 @@ def viewer_world(world: World) -> dict:
     }
 
 
-def planned_value(command: str, value) -> str | None:
-    """The target of a planned action, in household words (device-level only)."""
+def planned_action(command: str, value) -> tuple[str, str | None]:
+    """Describe the target in household words, with optional light settings."""
     match command, value:
         case "clean", {"room": str(room)}:
-            return ROOM_NAMES.get(room, room if room in ROOM_NAMES.values() else None)
+            room_name = ROOM_NAMES.get(room, room if room in ROOM_NAMES.values() else None)
+            if room_name:
+                return f"{room_name} 청소", None
         case "play_mood", {"scene": str(scene)}:
-            return SCENES.get(scene)
+            return SCENES.get(scene, COMMAND_NAMES[command]), None
         case "color", {
             "hue": (int() | float()) as hue,
             "saturation": (int() | float()) as saturation,
             "brightness": (int() | float()) as brightness,
         }:
-            name = "분홍" if hue == 330 and saturation else "색상"
-            return f"{name} {number_text(hue)}/{number_text(saturation)}/{number_text(brightness)}"
+            angle = hue % 360
+            name = "light_white" if saturation == 0 else next(
+                key for upper, key in LIGHT_HUE_RANGES if angle < upper
+            )
+            detail = (
+                f"색조 {number_text(hue)}° · 채도 {number_text(saturation)}%"
+                f" · 밝기 {number_text(brightness)}%"
+            )
+            return STATE_WORDS[name], detail
         case "color_temp", {"kelvin": (int() | float()) as kelvin}:
-            return f"{number_text(kelvin)}K"
+            name = "light_warm" if kelvin < 4000 else "light_white"
+            return STATE_WORDS[name], f"{number_text(kelvin)}K"
         case "set_cook_standby", {"temp_c": (int() | float()) as degrees}:
             minutes = value.get("minutes")
             time = f" {number_text(minutes)}분" if isinstance(minutes, (int, float)) else ""
-            return f"{number_text(degrees)}°{time}"
+            return f"{number_text(degrees)}°{time} 굽기 대기", None
         case "play", {"playlist": str(playlist_code)}:
-            playlist = PLAYLISTS.get(playlist_code, "음악")
+            playlist = PLAYLISTS.get(playlist_code, "음악 재생")
             volume = value.get("volume")
-            return f"{playlist} · 볼륨 {number_text(volume)}" if isinstance(volume, (int, float)) else playlist
+            if isinstance(volume, (int, float)):
+                return f"{playlist} · 볼륨 {number_text(volume)}", None
+            return playlist, None
         case "mode", {"mode": str(mode)}:
-            return PURIFIER_MODES.get(mode)
+            if mode in PURIFIER_MODES:
+                return f"{PURIFIER_MODES[mode]} 모드", None
         case "set_course_standby", {"course": str(course)}:
-            return STYLER_COURSES.get(course)
-    return None
+            if course in STYLER_COURSES:
+                return f"{STYLER_COURSES[course]} 코스 대기", None
+    return COMMAND_NAMES.get(command, "기기 동작"), None
 
 
 def viewer_plan(data: dict, device_names: dict) -> tuple[dict, list[dict]]:
-    planned = defaultdict(list)
+    planned = defaultdict(dict)
     for row in data["preparation"] + data["notices"]:
         wait = row["wait"]
-        planned[row["device"]].append(
-            {
-                "action": " ".join(
-                    part for part in (
-                        COMMAND_NAMES.get(row["command"], "기기 동작"),
-                        planned_value(row["command"], row.get("target_value")),
-                    ) if part
-                ),
-                "wait": TRIGGER_NAMES.get(wait) or display_time(wait),
-                "timed": wait not in TRIGGER_NAMES,
-            }
+        action, detail = planned_action(row["command"], row.get("target_value"))
+        label = TRIGGER_NAMES.get(wait) or display_time(wait)
+        timed = wait not in TRIGGER_NAMES
+        entry = planned[row["device"]].setdefault(
+            (action, label, timed), {"action": action, "wait": label, "timed": timed, "details": []}
         )
+        if detail and detail not in entry["details"]:
+            entry["details"].append(detail)
     restores = [
         {
             "device": device_names.get(row["device"], "기기"),
@@ -323,7 +342,7 @@ def viewer_plan(data: dict, device_names: dict) -> tuple[dict, list[dict]]:
         }
         for row in data["restores"]
     ]
-    return planned, restores
+    return {device: list(entries.values()) for device, entries in planned.items()}, restores
 
 
 @dataclass(frozen=True)
