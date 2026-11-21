@@ -34,89 +34,110 @@ class Preparations extends StatelessWidget {
         ? {if (pending.isEmpty) ?latest}
         : {...reading, ?current, ?latest};
     final previous = known.where((episode) => !visible.contains(episode));
+    final showEmpty =
+        known.isEmpty &&
+        app.refreshed &&
+        app.accepted.isEmpty &&
+        app.queuedShares == 0;
+    final sections = [
+      if (app.refreshError case final error?) StatusMessage(error),
+      if (app.stale && known.isNotEmpty)
+        const StatusMessage('마지막으로 확인한 정보예요. 현재 상태를 확인하는 중이에요.'),
+      if (app.uploadError case final error?) StatusMessage(error),
+      if (app.shareIssue case final issue?)
+        StatusMessage(switch (issue) {
+          'count' => '주문 화면을 한 번에 1~3장 공유해 주세요.',
+          'size' => '이미지 한 장은 5MB 이하여야 해요.',
+          'format' => 'JPG 또는 PNG 주문 화면을 공유해 주세요.',
+          'rejected' => '서버가 이미지를 읽을 수 없어요. 새 캡처를 공유해 주세요.',
+          _ => '공유한 이미지를 열 수 없어요. 주문 화면을 다시 공유해 주세요.',
+        }),
+      if (app.queuedShares > 0) const StatusMessage('공유한 주문을 보내는 중이에요…'),
+      if ((app.refreshError != null || app.uploadError != null) &&
+          !app.needsToken)
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton(
+            onPressed: app.sync,
+            child: const KoreanText('다시 시도'),
+          ),
+        ),
+      if (!app.refreshed && app.refreshError == null && app.accepted.isEmpty)
+        const StatusMessage('준비를 불러오는 중이에요…'),
+      for (final id in pending)
+        _OrderSection(key: ValueKey(id), app: app, episodeId: id),
+      for (final episode in visible)
+        _OrderSection(
+          key: ValueKey(episode.episodeId),
+          app: app,
+          episodeId: episode.episodeId,
+          current: episode == current,
+        ),
+      if (previous.isNotEmpty)
+        ExpansionTile(
+          key: app.demoPreview
+              ? ValueKey(visible.firstOrNull?.episodeId)
+              : const PageStorageKey('past-preparations'),
+          tilePadding: EdgeInsets.zero,
+          title: KoreanText(
+            app.demoPreview ? '지난 준비 ${previous.length}개' : '지난 준비',
+          ),
+          shape: const Border(),
+          expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final episode in previous)
+              if (app.demoPreview)
+                ListTile(
+                  key: ValueKey(episode.episodeId),
+                  contentPadding: EdgeInsets.zero,
+                  title: KoreanText(
+                    seoulDateTime(episode.sharedAt, fullDate: true),
+                  ),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (final card in app.cardsFor(episode))
+                        KoreanText(card.text),
+                    ],
+                  ),
+                )
+              else
+                _OrderSection(
+                  key: ValueKey(episode.episodeId),
+                  app: app,
+                  episodeId: episode.episodeId,
+                ),
+          ],
+        ),
+    ];
     final orders = RefreshIndicator(
       onRefresh: app.sync,
-      child: ListView(
+      child: CustomScrollView(
         primary: false,
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-        children: [
-          if (app.refreshError case final error?) StatusMessage(error),
-          if (app.stale && known.isNotEmpty)
-            const StatusMessage('마지막으로 확인한 정보예요. 현재 상태를 확인하는 중이에요.'),
-          if (app.uploadError case final error?) StatusMessage(error),
-          if (app.shareIssue case final issue?)
-            StatusMessage(switch (issue) {
-              'count' => '주문 화면을 한 번에 1~3장 공유해 주세요.',
-              'size' => '이미지 한 장은 5MB 이하여야 해요.',
-              'format' => 'JPG 또는 PNG 주문 화면을 공유해 주세요.',
-              'rejected' => '서버가 이미지를 읽을 수 없어요. 새 캡처를 공유해 주세요.',
-              _ => '공유한 이미지를 열 수 없어요. 주문 화면을 다시 공유해 주세요.',
-            }),
-          if (app.queuedShares > 0) const StatusMessage('공유한 주문을 보내는 중이에요…'),
-          if ((app.refreshError != null || app.uploadError != null) &&
-              !app.needsToken)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: OutlinedButton(
-                onPressed: app.sync,
-                child: const KoreanText('다시 시도'),
-              ),
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(
+              DesignTokens.space20,
+              DesignTokens.space12,
+              DesignTokens.space20,
+              DesignTokens.space32,
             ),
-          if (!app.refreshed &&
-              app.refreshError == null &&
-              app.accepted.isEmpty)
-            const StatusMessage('준비를 불러오는 중이에요…'),
-          if (app.platform != null &&
-              known.isEmpty &&
-              app.refreshed &&
-              app.accepted.isEmpty &&
-              app.queuedShares == 0)
-            const StatusMessage('주문 화면을 캡처한 뒤 안드로이드 공유 메뉴에서 SPIRA를 선택해 주세요.'),
-          for (final id in pending)
-            _OrderSection(key: ValueKey(id), app: app, episodeId: id),
-          for (final episode in visible)
-            _OrderSection(
-              key: ValueKey(episode.episodeId),
-              app: app,
-              episodeId: episode.episodeId,
-              current: episode == current,
-            ),
-          if (previous.isNotEmpty)
-            ExpansionTile(
-              key: app.demoPreview
-                  ? ValueKey(visible.firstOrNull?.episodeId)
-                  : const PageStorageKey('past-preparations'),
-              tilePadding: EdgeInsets.zero,
-              title: KoreanText(
-                app.demoPreview ? '지난 준비 ${previous.length}개' : '지난 준비',
+            sliver: SliverList.list(children: sections),
+          ),
+          if (showEmpty)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Align(
+                alignment: const Alignment(0, -1 / 3),
+                child: _EmptyPreparation(
+                  hint: app.demoPreview
+                      ? '아래에서 ‘예시 주문으로 공유’를 눌러 보세요.'
+                      : app.platform != null
+                      ? '주문 화면을 캡처하고 공유 메뉴에서 SPIRA를 선택해 주세요.'
+                      : null,
+                ),
               ),
-              shape: const Border(),
-              expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (final episode in previous)
-                  if (app.demoPreview)
-                    ListTile(
-                      key: ValueKey(episode.episodeId),
-                      contentPadding: EdgeInsets.zero,
-                      title: KoreanText(
-                        seoulDateTime(episode.sharedAt, fullDate: true),
-                      ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          for (final card in app.cardsFor(episode))
-                            KoreanText(card.text),
-                        ],
-                      ),
-                    )
-                  else
-                    _OrderSection(
-                      key: ValueKey(episode.episodeId),
-                      app: app,
-                      episodeId: episode.episodeId,
-                    ),
-              ],
             ),
         ],
       ),
@@ -128,6 +149,39 @@ class Preparations extends StatelessWidget {
         Expanded(child: orders),
         _PreviewStrip(app: app),
       ],
+    );
+  }
+}
+
+class _EmptyPreparation extends StatelessWidget {
+  const _EmptyPreparation({required this.hint});
+
+  final String? hint;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: DesignTokens.space20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        spacing: DesignTokens.space8,
+        children: [
+          KoreanText(
+            '쇼핑 앱에서 주문 화면을 공유하면, 그 주문에 맞춰 집을 준비해요.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.titleMedium,
+          ),
+          if (hint case final hint?)
+            KoreanText(
+              hint,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
