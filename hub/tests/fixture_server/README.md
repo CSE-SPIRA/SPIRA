@@ -41,9 +41,9 @@ family gathering. Plan times use the Server's COM-15 offsets. Turn off the
 cleaning line before running the Hub if the chosen offset puts cleaning in the
 past.
 
-The live launcher passes `--guest-window` (600 seconds by default). This
-opens the guest trigger at the scheduled event start and keeps it open for
-that many seconds. A fixture started directly without that override keeps
+The live launcher passes `--guest-window` (600 seconds by default). The guest
+trigger still opens `guest_window_before_min` before the scheduled event start,
+as the Server writes it; only its end moves to that many seconds after the start. A fixture started directly without that override keeps
 the COM-15 window. In demo mode the linked event in WHY uses the replay's
 scheduled start. It keeps the original calendar duration for replay windows
 shorter than one minute and uses the replay duration for longer windows.
