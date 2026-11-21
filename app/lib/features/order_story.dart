@@ -20,28 +20,7 @@ String closedPreparationSummary(
   wire.Card card,
   wire.Rationale? rationale,
 ) {
-  final tasks = rationale?.tasks ?? const <wire.Task>[];
-  final inventory = app.homeInventory ?? app.discovered;
-  final devices = <String>{};
-  for (final task in tasks.where((task) => task.cardId == card.cardId)) {
-    if (rationaleLine(task, tasks, card)?.endState != wire.EndState.RESTORED) {
-      continue;
-    }
-    for (final device in task.devices) {
-      final appliance = device.type == 'smart_plug'
-          ? inventory?.devices
-                .where((entry) => entry.id == device.id)
-                .firstOrNull
-                ?.label
-                ?.trim()
-          : null;
-      devices.add(
-        appliance == null || appliance.isEmpty
-            ? deviceNames[device.type] ?? '기기'
-            : appliance,
-      );
-    }
-  }
+  final devices = _restoredDeviceNames(app, card, rationale);
   if (devices.isEmpty) {
     return card.stopped ? '이 준비가 중지됐어요.' : '준비를 마쳤어요.';
   }
@@ -52,11 +31,42 @@ String closedPreparationSummary(
       : '준비를 마쳐';
   // Zero-width breaks let a long device list wrap between names.
   final names = devices.join('·\u200B');
-  final last = names.codeUnitAt(names.length - 1);
-  final particle = last >= 0xAC00 && last <= 0xD7A3 && (last - 0xAC00) % 28 != 0
-      ? '을'
-      : '를';
+  final particle = _hasFinalConsonant(names) ? '을' : '를';
   return '$subject $names$particle 원래대로 돌렸어요.';
+}
+
+Set<String> _restoredDeviceNames(
+  AppController app,
+  wire.Card card,
+  wire.Rationale? rationale,
+) {
+  final tasks = rationale?.tasks ?? const <wire.Task>[];
+  final inventory = app.homeInventory ?? app.discovered;
+  return {
+    for (final task in tasks)
+      if (task.cardId == card.cardId &&
+          rationaleLine(task, tasks, card)?.endState == wire.EndState.RESTORED)
+        for (final device in task.devices)
+          _restoreDeviceName(device, inventory),
+  };
+}
+
+String _restoreDeviceName(wire.Device device, wire.Devices? inventory) {
+  final appliance = device.type == 'smart_plug'
+      ? inventory?.devices
+            .where((entry) => entry.id == device.id)
+            .firstOrNull
+            ?.label
+            ?.trim()
+      : null;
+  return appliance == null || appliance.isEmpty
+      ? deviceNames[device.type] ?? '기기'
+      : appliance;
+}
+
+bool _hasFinalConsonant(String text) {
+  final last = text.codeUnitAt(text.length - 1);
+  return last >= 0xAC00 && last <= 0xD7A3 && (last - 0xAC00) % 28 != 0;
 }
 
 void openOrderStory(
@@ -128,24 +138,9 @@ class _StoryData {
     ]..sort((a, b) => DateTime.parse(a.at).compareTo(DateTime.parse(b.at)));
   }
 
-  wire.Observation? get observation {
-    // The browser replay can supply a recorded fixture rationale alongside a
-    // newly dated order. Its old executions and observation describe that run.
-    if (app.fixture && result?.executions.isNotEmpty == true) {
-      final revision = DateTime.parse(card.updatedAt);
-      if (executions.isEmpty ||
-          (!closed &&
-              card.lines.any(_isUpcoming) &&
-              executions.any(
-                (run) => DateTime.parse(run.at).isAfter(revision),
-              ))) {
-        return null;
-      }
-    }
-    return result?.observations
-        .where((entry) => entry.cardId == card.cardId && entry.verdict != null)
-        .firstOrNull;
-  }
+  wire.Observation? get observation => result?.observations
+      .where((entry) => entry.cardId == card.cardId && entry.verdict != null)
+      .firstOrNull;
 
   wire.Task? taskFor(String id) {
     final stored = tasks;
@@ -189,7 +184,6 @@ class _OrderStory extends StatefulWidget {
 
 class _OrderStoryState extends State<_OrderStory> {
   bool _expanded = false;
-  final _past = <Object, _StoryEntry>{};
   late final _request = widget.app.rationale(widget.initialCard.episodeId);
 
   @override
@@ -225,21 +219,6 @@ class _OrderStoryState extends State<_OrderStory> {
     final loading =
         app.loadingRationale(card.episodeId) ||
         request.connectionState != ConnectionState.done;
-    if (!loading) {
-      // Merge completed polls in arrival order. Within one poll, known
-      // execution times order the results. Untimed snapshots keep their phase.
-      for (final entry in _pastEntries(data)) {
-        if (entry.taskId case final id? when entry.moment != null) {
-          _past.remove(('line-state', id, entry.executionState));
-        }
-        _past[entry.id] = entry;
-      }
-    }
-    final past = _past.values;
-    final ran = {
-      for (final entry in past)
-        if (entry.moment != null) entry.taskId,
-    };
     return EvidencePage(
       title: data.title,
       children: [
@@ -283,22 +262,19 @@ class _OrderStoryState extends State<_OrderStory> {
                       ],
                     ),
             ),
-          _TimelineRow(
-            heading: '할 일 ${initial.lines.length}개를 정했어요',
-            detail: initial.lines
-                .map((line) => _lineTitle(line.text))
-                .join(' · '),
-          ),
-          for (final entry in _groupAdjacentEntries(past))
+          _TimelineRow(heading: '할 일 ${initial.lines.length}개를 정했어요'),
+          for (final entry in _storyEntries(data))
             _TimelineRow(
               key: ValueKey(entry.id),
               heading: entry.title,
-              moment: entry.moment,
+              moment: entry.at == null || !entry.showTime
+                  ? null
+                  : '${entry.timePrefix}${seoulDateTime(entry.at!)}',
               detail: entry.detail,
               emphasis: entry.observation != null,
-              extra: entry.observation == null
-                  ? null
-                  : _StoryObservation(data, entry.observation!),
+              extra: entry.observation != null
+                  ? _StoryObservation(data, entry.observation!)
+                  : null,
               onTap: entry.taskId == null
                   ? null
                   : () => _openStoryLine(
@@ -311,7 +287,7 @@ class _OrderStoryState extends State<_OrderStory> {
             ),
           if (!data.closed && !card.stopped)
             for (final line in card.lines)
-              if (_isUpcoming(line) && !ran.contains(line.taskId))
+              if (_isUpcoming(line) && line.endState == null)
                 _TimelineRow(
                   key: ValueKey(line.taskId),
                   heading: _lineTitle(line.text),
@@ -344,51 +320,25 @@ class _StoryEntry {
     required this.id,
     required this.title,
     this.detail,
-    this.moment,
+    this.at,
+    this.showTime = true,
+    this.timePrefix = '',
     this.taskId,
-    this.executionState,
     this.observation,
-    this.group,
   });
 
   final Object id;
   final String title;
   final String? detail;
-  final String? moment;
+  final String? at;
+  final bool showTime;
+  final String timePrefix;
   final String? taskId;
-  final wire.LineState? executionState;
   final wire.Observation? observation;
-  final Object? group;
 }
 
-Iterable<_StoryEntry> _groupAdjacentEntries(
-  Iterable<_StoryEntry> entries,
-) sync* {
-  _StoryEntry? previous;
-  for (final entry in entries) {
-    if (previous != null &&
-        previous.group != null &&
-        previous.group == entry.group) {
-      previous = _StoryEntry(
-        id: previous.id,
-        title: previous.title,
-        detail: [previous.detail, entry.detail].whereType<String>().join(' · '),
-        moment: previous.moment,
-        taskId: previous.taskId,
-        group: previous.group,
-      );
-    } else {
-      if (previous != null) yield previous;
-      previous = entry;
-    }
-  }
-  if (previous != null) yield previous;
-}
-
-Iterable<_StoryEntry> _pastEntries(_StoryData data) sync* {
+Iterable<_StoryEntry> _storyEntries(_StoryData data) sync* {
   final card = data.card;
-  final lines = {for (final line in card.lines) line.taskId: line};
-  final tasks = {for (final task in data.tasks) task.taskId: task};
   final changes = data.app.preparationChanges(card.cardId);
   final observedOff = {
     for (final change in changes)
@@ -406,130 +356,36 @@ Iterable<_StoryEntry> _pastEntries(_StoryData data) sync* {
     );
   }
 
-  final runs = data.executions;
-  final notices = data.episode?.itemTasks ?? const <wire.ItemTaskElement>[];
-  final noticeIds = {
-    for (final item in notices)
-      if ({
-        wire.LineState.DONE,
-        wire.LineState.PARTIAL,
-        wire.LineState.RUNNING,
-        wire.LineState.USER_CHANGED,
-      }.contains(item.state))
-        item.taskId: item,
-  };
-  final timedNotices = <String>{};
-  final timedStates = <(String, wire.LineState)>{};
-  final timed = <(DateTime, _StoryEntry)>[];
-  for (final change in changes) {
-    timed.add((
-      DateTime.parse(change.revision),
+  final runs = <String, List<wire.Execution>>{};
+  for (final run in data.executions) {
+    runs.putIfAbsent(run.taskId, () => []).add(run);
+  }
+  final entries = [
+    for (final change in changes)
       _StoryEntry(
         id: ('plan', change.revision),
         title: '준비를 바꿨어요',
         detail: _changeText(change),
+        at: change.revision,
+        showTime: false,
       ),
-    ));
-  }
-  for (final run in runs) {
-    final time = DateTime.parse(run.at);
-    final moment = seoulDateTime(run.at);
-    if (noticeIds[run.taskId] case final item?) {
-      if (run.status == wire.ExecutionStatus.COMPLETED ||
-          run.status == wire.ExecutionStatus.RUNNING) {
-        timedNotices.add(item.taskId);
-        timed.add((
-          time,
-          _noticeEntry(
-            item,
-            run.at,
-            showing: run.status == wire.ExecutionStatus.RUNNING,
-          ),
-        ));
-      }
-      continue;
-    }
-    final line = lines[run.taskId];
-    final task = tasks[run.taskId];
-    if (line == null && task == null) continue;
-    if (data.app.fixture &&
-        line != null &&
-        _isUpcoming(line) &&
-        time.isAfter(DateTime.parse(card.updatedAt))) {
-      continue;
-    }
-    final state = _executionLineState(run.status);
-    timedStates.add((run.taskId, state));
-    timed.add((
-      time,
-      _StoryEntry(
-        id: ('run', run.taskId, run.device, run.status, time),
-        title: _lineTitle(line?.text ?? task!.line),
-        detail:
-            '${data.deviceName(run.device, task)} · ${_executionLabel(run.status)}',
-        taskId: run.taskId,
-        moment: moment,
-        executionState: state,
-        group: ('run', run.taskId, run.status, _minute(time)),
-      ),
-    ));
-  }
-  final ordered = timed.indexed.toList()
-    ..sort((a, b) {
-      final dateOrder = a.$2.$1.compareTo(b.$2.$1);
-      return dateOrder == 0 ? a.$1.compareTo(b.$1) : dateOrder;
-    });
-  yield* ordered.map((entry) => entry.$2.$2);
-  for (final item in noticeIds.values) {
-    if (!timedNotices.contains(item.taskId)) {
-      yield _noticeEntry(
-        item,
-        null,
-        showing: item.state == wire.LineState.RUNNING,
-      );
-    }
-  }
-  for (final line in card.lines) {
-    if (!_isUpcoming(line) &&
-        line.state != wire.LineState.OFF &&
-        !timedStates.contains((line.taskId, line.state))) {
-      yield _StoryEntry(
-        id: ('line-state', line.taskId, line.state),
-        title: _lineTitle(line.text),
-        detail: [lineLabel(line.state), ?line.note].join(' · '),
-        taskId: line.taskId,
-        executionState: line.state,
-      );
-    }
-  }
-  final restored = card.lines.where(
-    (line) => line.endState == wire.EndState.RESTORED,
-  );
-  for (final line in restored) {
-    yield _StoryEntry(
-      id: ('restored', line.taskId),
-      title: '원래대로 돌렸어요',
-      detail: _lineTitle(line.text),
-      group: 'restored',
-    );
-  }
-  if (restored.isEmpty && data.closed) {
-    yield _StoryEntry(
-      id: 'closed',
-      title: card.stopped ? '준비를 중지했어요' : '준비가 끝났어요',
-    );
-  }
-  for (final line in card.lines) {
-    if (endLabel(line.endState) case final detail?
-        when line.endState != wire.EndState.RESTORED) {
-      yield _StoryEntry(
-        id: ('end', line.taskId, line.endState),
-        title: _lineTitle(line.text),
-        detail: detail,
-        taskId: line.taskId,
-      );
-    }
-  }
+    ..._noticeEntries(data.episode?.itemTasks ?? const [], runs),
+    for (final line in card.lines)
+      if (!_isUpcoming(line) && line.state != wire.LineState.OFF)
+        _lineEntry(line, runs[line.taskId] ?? const []),
+  ];
+  final ordered =
+      [
+        for (final (index, entry) in entries.indexed)
+          if (entry.at case final at?) (DateTime.parse(at), index, entry),
+      ]..sort((a, b) {
+        final dateOrder = a.$1.compareTo(b.$1);
+        return dateOrder == 0 ? a.$2.compareTo(b.$2) : dateOrder;
+      });
+  yield* ordered.map((row) => row.$3);
+  yield* entries.where((entry) => entry.at == null);
+
+  if (_restoreEntry(data) case final entry?) yield entry;
   if (data.observation case final observation?) {
     yield _StoryEntry(
       id: 'observation',
@@ -539,25 +395,163 @@ Iterable<_StoryEntry> _pastEntries(_StoryData data) sync* {
   }
 }
 
-_StoryEntry _noticeEntry(
-  wire.ItemTaskElement item,
-  String? time, {
-  required bool showing,
-}) => _StoryEntry(
-  id: ('notice', item.taskId, showing),
-  title: showing ? '냉장고에 안내를 띄우는 중이에요' : '냉장고에 안내를 띄웠어요',
-  detail: switch (item.kind) {
-    wire.NoticeKind.STORAGE => '${item.item} 보관 방법',
-    wire.NoticeKind.PREP => '${item.item} 준비 방법',
-    null => item.item,
-  },
-  moment: time == null ? null : seoulDateTime(time),
-  group: (
-    'notice',
-    showing,
-    time == null ? null : _minute(DateTime.parse(time)),
-  ),
-);
+_StoryEntry _lineEntry(wire.LineElement line, List<wire.Execution> runs) {
+  final latestByDevice =
+      {for (final run in runs) run.device: run}.values.toList()
+        ..sort((a, b) => DateTime.parse(a.at).compareTo(DateTime.parse(b.at)));
+  final moment = switch (line.state) {
+    wire.LineState.RUNNING => runs.where(_startedExecution).firstOrNull?.at,
+    wire.LineState.DONE
+        when latestByDevice.every(
+          (run) => run.status == wire.ExecutionStatus.COMPLETED,
+        ) =>
+      latestByDevice.lastOrNull?.at,
+    wire.LineState.PARTIAL
+        when latestByDevice.any(
+              (run) => run.status == wire.ExecutionStatus.COMPLETED,
+            ) &&
+            latestByDevice.any((run) => !_startedExecution(run)) &&
+            latestByDevice.every(
+              (run) => run.status != wire.ExecutionStatus.RUNNING,
+            ) =>
+      latestByDevice.last.at,
+    wire.LineState.FAILED || wire.LineState.BLOCKED || wire.LineState.UNKNOWN
+        when latestByDevice.any(
+              (run) => _executionLineState(run.status) == line.state,
+            ) &&
+            latestByDevice.every((run) => !_startedExecution(run)) =>
+      latestByDevice.last.at,
+    // The App reads the device execution time, while S7 gives the change as
+    // a relative number of minutes. Keep the execution time labeled as such.
+    wire.LineState.USER_CHANGED =>
+      runs
+          .where((run) => run.status == wire.ExecutionStatus.COMPLETED)
+          .lastOrNull
+          ?.at,
+    _ => null,
+  };
+  return _StoryEntry(
+    id: line.taskId,
+    title: _lineTitle(line.text),
+    detail: [
+      lineLabel(line.state),
+      if (line.endState != wire.EndState.KEPT_USER_CHANGE) ?line.note,
+    ].join(' · '),
+    taskId: line.taskId,
+    at: moment,
+    timePrefix: line.state == wire.LineState.USER_CHANGED ? '실행 ' : '',
+  );
+}
+
+bool _startedExecution(wire.Execution run) =>
+    run.status == wire.ExecutionStatus.RUNNING ||
+    run.status == wire.ExecutionStatus.COMPLETED;
+
+Iterable<_StoryEntry> _noticeEntries(
+  List<wire.ItemTaskElement> items,
+  Map<String, List<wire.Execution>> runs,
+) sync* {
+  final notices = <(bool, int?), List<({String label, String? at})>>{};
+  for (final item in items) {
+    if (!{
+      wire.LineState.DONE,
+      wire.LineState.PARTIAL,
+      wire.LineState.RUNNING,
+      wire.LineState.USER_CHANGED,
+    }.contains(item.state)) {
+      continue;
+    }
+    final showing = item.state == wire.LineState.RUNNING;
+    final at = runs[item.taskId]
+        ?.where(
+          (run) => showing
+              ? _startedExecution(run)
+              : run.status == wire.ExecutionStatus.COMPLETED,
+        )
+        .firstOrNull
+        ?.at;
+    final minute = at == null ? null : _minute(DateTime.parse(at));
+    final label = switch (item.kind) {
+      wire.NoticeKind.STORAGE => '${item.item} 보관 방법',
+      wire.NoticeKind.PREP => '${item.item} 준비 방법',
+      null => item.item,
+    };
+    notices.putIfAbsent((showing, minute), () => []).add((
+      label: label,
+      at: at,
+    ));
+  }
+  for (final MapEntry(key: (showing, minute), value: items)
+      in notices.entries) {
+    final times = [
+      for (final item in items)
+        if (item.at case final at?) DateTime.parse(at),
+    ]..sort();
+    yield _StoryEntry(
+      id: ('notice', showing, minute),
+      title: showing ? '냉장고에 안내를 띄우는 중이에요' : '냉장고에 안내를 띄웠어요',
+      detail: items.map((item) => item.label).join(' · '),
+      at: times.firstOrNull?.toIso8601String(),
+    );
+  }
+}
+
+_StoryEntry? _restoreEntry(_StoryData data) {
+  final card = data.card;
+  final restored = card.lines.any(
+    (line) => line.endState == wire.EndState.RESTORED,
+  );
+  final kept = <String>{};
+  var keptUnknownDevice = false;
+  final otherOutcomes = <String>[];
+  for (final line in card.lines) {
+    if (line.endState == wire.EndState.KEPT_USER_CHANGE) {
+      final changes = data.observation?.taskFeedback
+          .where((entry) => entry.taskId == line.taskId)
+          .firstOrNull
+          ?.changes;
+      final task = data.taskFor(line.taskId);
+      if (changes?.isNotEmpty == true) {
+        kept.addAll(changes!.map((change) => deviceLabel(change.deviceType)));
+      } else if (task?.devices.singleOrNull case final device?) {
+        kept.add(
+          _restoreDeviceName(
+            device,
+            data.app.homeInventory ?? data.app.discovered,
+          ),
+        );
+      } else {
+        keptUnknownDevice = true;
+      }
+    } else if (endLabel(line.endState) case final detail?
+        when line.endState != wire.EndState.RESTORED) {
+      otherOutcomes.add('${_lineTitle(line.text)} · $detail');
+    }
+  }
+  if (!data.closed &&
+      !restored &&
+      kept.isEmpty &&
+      !keptUnknownDevice &&
+      otherOutcomes.isEmpty) {
+    return null;
+  }
+  final devices = _restoredDeviceNames(data.app, card, data.result);
+  return _StoryEntry(
+    id: 'end',
+    title: restored
+        ? '원래대로 돌렸어요'
+        : data.closed
+        ? (card.stopped ? '준비를 중지했어요' : '준비가 끝났어요')
+        : '되돌리기 결과',
+    detail: [
+      if (devices.isNotEmpty) devices.join(' · '),
+      for (final name in kept)
+        '$name${_hasFinalConsonant(name) ? '은' : '는'} 바꾸신 그대로 두었어요',
+      if (keptUnknownDevice) '바꾸신 기기 설정은 그대로 두었어요',
+      ...otherOutcomes,
+    ].join('\n'),
+  );
+}
 
 int _minute(DateTime time) =>
     time.millisecondsSinceEpoch ~/ Duration.millisecondsPerMinute;
@@ -597,7 +591,12 @@ class _StorySummary extends StatelessWidget {
         ? closedPreparationSummary(data.app, card, data.result)
         : card.stopped
         ? '이 준비가 중지됐어요.'
-        : switch (card.summary.waitingFor) {
+        : switch (card.summary.waitingFor ??
+              card.lines
+                  .where((line) => _isUpcoming(line) && line.endState == null)
+                  .map((line) => line.when?.event)
+                  .whereType<wire.TriggerEvent>()
+                  .firstOrNull) {
             wire.TriggerEvent.GUEST_ARRIVED => '손님 오시기를 기다리고 있어요',
             wire.TriggerEvent.EVENT_END => '일정이 끝나기를 기다리고 있어요',
             wire.TriggerEvent.PACKAGE_BROUGHT_IN => '택배를 집 안으로 들이기를 기다리고 있어요',

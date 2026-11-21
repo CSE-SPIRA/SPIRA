@@ -2038,6 +2038,7 @@ void main() {
     expect(find.text('읽은 품목 9개'), findsOneWidget);
     await tapText(tester, '손님 오기 전 거실 청소');
     expect(find.text('이 일'), findsOneWidget);
+    expect(peer.rationaleReads, 2);
     await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
     await tester.tap(find.byType(BackButton));
@@ -2077,7 +2078,7 @@ void main() {
     await app.sync();
     await tester.pumpAndSettle();
     expect(statusFor('로봇청소기', '이번 준비에 써요 · 파티 시작에 맞춰'), findsOneWidget);
-    expect(peer.rationaleReads, 2);
+    expect(peer.rationaleReads, 3);
   });
 
   testWidgets('our home shows only selected devices when the Hub is offline', (
@@ -2227,7 +2228,6 @@ void main() {
       rationale['executions'] = [];
       rationale['observations'] = [];
       final card = fixture('card.v1.json');
-      (card['summary'] as Map)['waiting_for'] = 'guest_arrived';
       peer.cards = [card];
       final app = controller(peer);
       await openApp(tester, app, size: const Size(390, 760));
@@ -2239,8 +2239,18 @@ void main() {
       expect(find.text('4개 중 0개 끝남'), findsOneWidget);
       expect(find.text('목 21:00'), findsOneWidget);
       expect(find.text('목 21:11'), findsNothing);
+      expect(find.text('토요일 생일 일정'), findsOneWidget);
+      expect(find.text('토 14:00 생일'), findsNothing);
       expect(find.text('비슷한 주문 9/12'), findsOneWidget);
       expect(find.text('손님이 오면'), findsOneWidget);
+      const mood = '손님 오시면 공주 분위기 화면·조명';
+      expect(
+        tester.widget<Text>(find.text(mood)).style?.color,
+        DesignTokens.muted,
+      );
+      expect(find.byIcon(Icons.radio_button_unchecked), findsNWidgets(4));
+      expect(find.text('손님 오기 전 거실 청소'), findsOneWidget);
+      expect(find.textContaining('손님 오기 전 거실 청소 · 아이 안전 모드'), findsNothing);
       expect(find.text('판단을 확인했어요'), findsNothing);
       expect(find.text('이렇게 봤어요'), findsNothing);
 
@@ -2293,6 +2303,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('3개 중 2개 끝남'), findsOneWidget);
       expect(find.text('손님 오시기를 기다리고 있어요'), findsNothing);
+      expect(
+        tester.widget<Text>(find.text(mood)).style?.color,
+        DesignTokens.ink,
+      );
+      expect(find.byIcon(Icons.radio_button_unchecked), findsOneWidget);
 
       final ordered = [
         find.text('주문을 읽었어요'),
@@ -2330,19 +2345,26 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('판단을 확인했어요'), findsNothing);
 
-      // S7 can become available while the card and episode are unchanged.
-      rationale['observations'] = recordedObservation;
-      await tester.pump(const Duration(seconds: 30));
-      await tester.pumpAndSettle();
-      expect(find.text('판단을 확인했어요'), findsOneWidget);
-
       episode['status'] = 'closed';
       await app.sync();
       await tester.pumpAndSettle();
       expect(find.text('끝났어요'), findsOneWidget);
       expect(find.textContaining('파티가 끝나 인덕션'), findsOneWidget);
       expect(find.text('원래대로 돌렸어요'), findsOneWidget);
+      expect(find.text('판단을 확인했어요'), findsNothing);
+
+      // S7 can become available after the card and episode have closed.
+      rationale['observations'] = recordedObservation;
+      final reads = peer.rationaleReads;
+      await tester.pump(const Duration(seconds: 30));
+      await tester.pumpAndSettle();
+      expect(peer.rationaleReads, greaterThan(reads));
       expect(find.text('판단을 확인했어요'), findsOneWidget);
+      expect(find.text(mood), findsOneWidget);
+      expect(find.text('사용자가 변경함'), findsOneWidget);
+      expect(find.text('사용자가 바꾼 상태를 유지함'), findsNothing);
+      expect(find.textContaining('조명은 바꾸신 그대로 두었어요'), findsOneWidget);
+      expect(find.textContaining('인덕션 · 스마트 플러그'), findsOneWidget);
       expect(
         tester.getTopLeft(find.text('원래대로 돌렸어요')).dy,
         lessThan(tester.getTopLeft(find.text('판단을 확인했어요')).dy),
@@ -2391,6 +2413,114 @@ void main() {
       }
     },
   );
+
+  testWidgets('order story replaces a line state and sorts by the latest run', (
+    tester,
+  ) async {
+    final peer = Peer()
+      ..episodes['ep_9031'] = (fixture('episode.json')
+        ..['status'] = 'notified');
+    final rationale = peer.rationales['ep_9031']!;
+    rationale['observations'] = [];
+    const cleaner = '손님 오기 전 거실 청소';
+    Map<String, dynamic> run(
+      String task,
+      String device,
+      String status,
+      String at,
+    ) => {
+      'task_id': task,
+      'device': device,
+      'status': status,
+      'substrate': 'virtual',
+      'at': at,
+    };
+    final starting = run(
+      't_clean#1',
+      'cleaner_01',
+      'running',
+      '2026-10-17T13:17:00+09:00',
+    );
+    rationale['executions'] = [starting];
+    final card = phase(fixture('card.v1.json'), 1);
+    lines(card).first['state'] = 'running';
+    peer.cards = [card];
+    final app = controller(peer);
+    await openApp(tester, app);
+    await tapText(tester, '자세히');
+    expect(find.text(cleaner), findsOneWidget);
+    expect(find.text('토 13:17'), findsOneWidget);
+    expect(find.text('진행 중'), findsOneWidget);
+
+    final next = phase(fixture('card.v1.json'), 2);
+    lines(next)[0]['state'] = 'done';
+    lines(next)[1]['state'] = 'done';
+    peer.cards = [next];
+    rationale['executions'] = [
+      run('t_safe#2', 'plug_kettle', 'completed', '2026-10-17T04:24:00Z'),
+      run('t_clean#1', 'cleaner_01', 'completed', '2026-10-17T13:22:00+09:00'),
+      starting,
+      run('t_safe#2', 'cooktop_01', 'completed', '2026-10-17T13:19:00+09:00'),
+    ];
+    await app.sync();
+    await tester.pumpAndSettle();
+    expect(find.text(cleaner), findsOneWidget);
+    expect(find.text('아이 안전 모드'), findsOneWidget);
+    expect(find.text('진행 중'), findsNothing);
+    expect(find.text('토 13:17'), findsNothing);
+    expect(find.text('토 13:19'), findsNothing);
+    expect(find.text('토 13:22'), findsOneWidget);
+    expect(find.text('토 13:24'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text(cleaner)).dy,
+      lessThan(tester.getTopLeft(find.text('아이 안전 모드')).dy),
+    );
+  });
+
+  testWidgets('live S7 appears with a newly dated order and recorded runs', (
+    tester,
+  ) async {
+    final peer = Peer();
+    final episode = peer.episodes['ep_9031'] = fixture('episode.json')
+      ..['status'] = 'notified'
+      ..['shared_at'] = '2026-11-21T18:03:00+09:00';
+    final rationale = peer.rationales['ep_9031']!;
+    final observations = rationale['observations'] as List;
+    final feedback = (observations.single as Map)['task_feedback'] as List;
+    final change = (feedback[2] as Map)['changes'] as List;
+    (change.single as Map)
+      ..['property'] = 'color'
+      ..['after_start_minutes'] = 1;
+    rationale['observations'] = [];
+    final live = fixture('card.v1.json')
+      ..['starts_at'] = '2026-11-21T18:04:00+09:00'
+      ..['updated_at'] = '2026-11-21T18:04:30+09:00';
+    peer.cards = [live];
+    final app = controller(peer);
+    await openApp(tester, app);
+    await tapText(tester, '자세히');
+    expect(find.text('판단을 확인했어요'), findsNothing);
+
+    rationale['observations'] = observations;
+    peer.cards = [
+      fixture('card.final.json')
+        ..['starts_at'] = live['starts_at']
+        ..['updated_at'] = '2026-11-21T18:06:00+09:00',
+    ];
+    episode['status'] = 'closed';
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar, '토요일 생일 준비'), findsOneWidget);
+    expect(find.text('판단을 확인했어요'), findsOneWidget);
+    expect(find.text('다음 생일 준비 때 참고할게요'), findsOneWidget);
+    expect(
+      find.textContaining('일정 시작 1분 뒤 조명 빛을 2700K로 바꾸셨어요.'),
+      findsOneWidget,
+    );
+    expect(find.text('금 18:05'), findsNothing);
+    expect(find.text('토 13:52'), findsNothing);
+    expect(find.text('토 18:06'), findsNothing);
+  });
 
   testWidgets(
     'WHY replaces an early derived clock with the confirmed run or share time',

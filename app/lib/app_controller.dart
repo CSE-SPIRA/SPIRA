@@ -121,6 +121,7 @@ class AppController extends ChangeNotifier {
   void setOrderStoryOpen(String episodeId, bool open) {
     if (open) {
       _openOrderStories.add(episodeId);
+      if (!loadingRationale(episodeId)) _rationales.remove(episodeId);
     } else {
       _openOrderStories.remove(episodeId);
     }
@@ -772,12 +773,6 @@ class AppController extends ChangeNotifier {
                   .toList(),
             )) {
           _rationales.remove(episode.episodeId);
-        } else if (episode.status != wire.EpisodeStatus.CLOSED &&
-            _openOrderStories.contains(episode.episodeId) &&
-            !loadingRationale(episode.episodeId)) {
-          // An observation or another device result can arrive before the
-          // card's aggregate state changes. Use the existing polling cycle.
-          _rationales.remove(episode.episodeId);
         }
         if (episode.status != wire.EpisodeStatus.CLOSED) {
           _recentClosures.remove(episode.episodeId);
@@ -821,6 +816,12 @@ class AppController extends ChangeNotifier {
         if (_disposed ||
             (cardsFor(episode).isEmpty && episode.itemTasks.isEmpty)) {
           continue;
+        }
+        // S7 and device results can arrive on a later poll, even after the
+        // card and episode have closed and stopped changing.
+        if (_openOrderStories.contains(episode.episodeId) &&
+            !loadingRationale(episode.episodeId)) {
+          _rationales.remove(episode.episodeId);
         }
         unawaited(
           rationale(episode.episodeId)

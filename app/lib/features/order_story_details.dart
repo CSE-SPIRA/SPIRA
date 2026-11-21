@@ -26,8 +26,7 @@ List<_Reason> _judgmentReasons(_StoryData data) {
     if (calendar != null)
       (
         icon: Icons.calendar_today_outlined,
-        chip: '${calendar.day} ${calendar.start} ${calendar.tags.join(' · ')}'
-            .trim(),
+        chip: calendarEvidenceLabel(calendar),
         title:
             '$weekday ${calendar.start}에 ${calendar.tags.isEmpty ? '' : '${calendar.tags.join(' · ')} '}일정',
         detail: [
@@ -412,7 +411,7 @@ class _StoryObservation extends StatelessWidget {
           final device = deviceLabel(change.deviceType);
           final kelvin = change.to is Map ? (change.to as Map)['kelvin'] : null;
           final setting = switch (change.property) {
-            'color_temp' when kelvin is num => '빛을 ${kelvin}K로',
+            'color' || 'color_temp' when kelvin is num => '빛을 ${kelvin}K로',
             'color_temp' => '빛의 색을',
             'brightness' => '밝기를',
             'color' => '색을',
