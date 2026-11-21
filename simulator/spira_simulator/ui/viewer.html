@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>테스트 홈 · {{ home }}</title>
+  <title>{{ home }}</title>
   <link rel="stylesheet" href="/sim/assets/house/tokens.css">
   <link rel="stylesheet" href="/sim/assets/house/fonts.css">
   <link rel="stylesheet" href="/sim/assets/house/house.css">
@@ -13,7 +13,7 @@
 <body class="test-home">
   <main>
     <header class="home-heading">
-      <h1>테스트 홈 · {{ home }}</h1>
+      <h1>{{ home }}</h1>
       {% if peers %}
       <nav aria-label="집 바꾸기">
         {% for label, url in peers %}<a href="{{ url }}">{{ label }}</a>{% endfor %}

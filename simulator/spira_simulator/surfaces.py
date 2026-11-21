@@ -245,16 +245,12 @@ def viewer_world(world: World) -> dict:
             }
         )
     devices = tiles(world, snapshot, changes)
-    physical_default = sum(device["physical"] for device in devices) > len(devices) / 2
-    class_a_default = sum(device["class_a"] for device in devices) > len(devices) / 2
     for device, report in zip(devices, snapshot["devices"], strict=True):
         configured = world.devices[report["target"]]
         device["changed"] = report["target"] in changes or any(
             key in report["values"] and report["values"][key] != prop.initial
             for key, prop in configured.properties.items()
         )
-        device["substrate_exception"] = device["physical"] != physical_default
-        device["class_exception"] = device["class_a"] != class_a_default
         device["visual_values"] = {
             key: report["values"][key]
             for key in HOUSE_VISUAL_PROPERTIES.get(report["device_type"], ())
@@ -265,8 +261,6 @@ def viewer_world(world: World) -> dict:
         "clock_at": now.isoformat(),
         "tiles": devices,
         "entrance": entrance,
-        "physical_default": physical_default,
-        "class_a_default": class_a_default,
     }
 
 

@@ -4,7 +4,14 @@ const liveRegions = new Map(Array.from(document.querySelectorAll("[data-live]"),
 let house;
 let replaceMarkers;
 
+function selectRoom() {
+  for (const room of document.querySelectorAll(".viewer-room")) {
+    room.toggleAttribute("data-selected", location.hash === `#${room.id}`);
+  }
+}
+
 function renderHouse() {
+  selectRoom();
   if (!house) return;
   const markers = document.getElementById("viewer-markers");
   const devices = [...markers.querySelectorAll("[data-device]")];
@@ -26,7 +33,7 @@ async function openHouse() {
   try {
     const { createHouse, replaceHouseMarkers } = await import("/sim/assets/house/house.js");
     replaceMarkers = replaceHouseMarkers;
-    house = createHouse(world);
+    house = createHouse(world, { viewer: true });
     house.focus();
     renderHouse();
     view.classList.add("ready");
@@ -70,4 +77,8 @@ async function refresh() {
 }
 
 if (world) openHouse();
+window.addEventListener("hashchange", () => {
+  selectRoom();
+  document.querySelector(".viewer-room[data-selected]")?.scrollIntoView({ block: "nearest" });
+});
 window.setTimeout(refresh, 1000);

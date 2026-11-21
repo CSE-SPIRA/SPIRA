@@ -13,9 +13,18 @@
   <main>
     <header>
       <h1>Household operator</h1>
+      <p class="metadata">{{ household_id }}</p>
       <a href="/sim/viewer">Open household stage</a>
       <a href="/app">Open appliance app</a>
     </header>
+    <details class="control">
+      <summary>Device substrate and panel reporting</summary>
+      <ul>
+        {% for device in inventory %}
+        <li>{{ device.logical_id }} · {{ "Physical (unqualified)" if device.substrate == "physical" else "Virtual" }} · {{ "Class A (panel reporting assumed)" if device.local_operation_reporting else "Class B" }}</li>
+        {% endfor %}
+      </ul>
+    </details>
     {% if people %}
     <section class="control person-controls" aria-label="Named person controls">
       <h2>Person actions</h2>

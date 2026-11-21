@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { buildChain, houseDevicePresentation } from "../spira_simulator/ui/demo/chain.js";
-import { createLivingLight, layoutHouseLabels, orientHouseCamera, projectHouseLabels } from "../spira_simulator/ui/house/house.js";
+import { createLivingLight, fitViewerCamera, layoutHouseLabels, layoutViewerLabels, orientHouseCamera, projectHouseLabels } from "../spira_simulator/ui/house/house.js";
 import { MeshStandardMaterial, OrthographicCamera, PointLight, Vector3 } from "../spira_simulator/ui/house/three.module.min.js";
 
 const { house: scenes, cameras } = JSON.parse(readFileSync(
@@ -244,30 +244,35 @@ test("focused demo labels reserve space and colliding resting tags drop at all t
   }
 });
 
-test("viewer fits entrance, planned and changed labels ahead of resting tags at all three screen sizes", () => {
-  // Approximate stage anchors and measured-box inputs for the crowded birthday state.
-  const fixtures = [
-    { id: "entrance", required: true, x: .31, y: .275, width: 146, height: 29 },
-    { id: "display_01", required: true, x: .55, y: .25, width: 112, height: 62 },
-    { id: "light_01", required: true, x: .45, y: .33, width: 120, height: 62 },
-    { id: "cooktop_01", required: true, x: .67, y: .4, width: 130, height: 56 },
-    { id: "oven_01", required: true, x: .73, y: .51, width: 208, height: 95 },
-    { id: "fridge_01", required: true, x: .84, y: .40, width: 208, height: 97 },
-    { id: "plug_kettle", required: true, x: .78, y: .46, width: 108, height: 23 },
-    { id: "styler_01", x: .21, y: .34, width: 65, height: 17 },
-    { id: "cleaner_01", x: .59, y: .45, width: 66, height: 17 },
-    { id: "purifier_01", x: .42, y: .32, width: 67, height: 17 },
-  ];
-  for (const [screenWidth] of HOUSE_SCREENS) {
-    const mainWidth = Math.min(screenWidth * .92, 1248);
-    const width = Math.floor(mainWidth) - 2, height = Math.floor(mainWidth / 1.86) - 2;
-    const markers = fixtures.map((box) => ({ ...box, x: box.x * width, y: box.y * height }));
-    const labels = layoutHouseLabels(markers, width, height);
-    const placed = new Set(labels.map(({ id }) => id));
-    assert.ok(markers.filter(({ required }) => required).every(({ id }) => placed.has(id)));
-    assert.ok(placed.has("styler_01"));
-    assert.ok(!placed.has("purifier_01"));
-    assertNoLabelOverlap(labels, width, height);
+test("the viewer fits the house at desktop and phone widths and keeps labels clear of the table", () => {
+  const sizes = {
+    entrance: [134, 28], display_01: [108, 45], light_01: [114, 45], cooktop_01: [96, 45],
+    fridge_01: [208, 64], oven_01: [208, 95], plug_kettle: [116, 45], cleaner_01: [85, 45],
+    purifier_01: [84, 45], styler_01: [110, 45],
+  };
+  for (const [width, height] of [[1470, 824], [1226, 662], [372, 261]]) {
+    const camera = new OrthographicCamera();
+    orientHouseCamera(camera, new Vector3(8.5, 10.6, 17.4), new Vector3(-.10, .76, 0), 1, width / height);
+    fitViewerCamera(camera, width, height);
+    const outline = [[-6.8, -.43, 3.975], [6.8, -.43, -3.975], [-6.72, 2.73, -3.96], [6.8, -.43, 3.975]]
+      .map(point => new Vector3(...point).project(camera));
+    assert.ok(outline.every(({ x, y }) => Math.abs(x) < 1 && Math.abs(y) < 1));
+    assert.ok(outline[1].x - outline[0].x > 1.7);
+    if (width < 720) continue;
+    const { anchors, ...clearance } = projectHouseLabels(camera, width, height, null, true);
+    const markers = Object.entries(sizes).map(([id, [width, height]]) => ({
+      id, ...anchors[id], width, height, required: !["purifier_01", "styler_01"].includes(id),
+    }));
+    const labels = layoutViewerLabels(markers, width, height, clearance);
+    assert.equal(labels.length, markers.length);
+    for (const [index, label] of labels.entries()) {
+      assert.ok(label.top >= 54 && label.bottom <= height - 8);
+      assert.ok(label.left >= 8 && label.right <= width - 8);
+      for (const obstacle of [...Object.values(clearance), ...labels.slice(index + 1)]) {
+        assert.ok(label.right <= obstacle.left || obstacle.right <= label.left ||
+          label.bottom <= obstacle.top || obstacle.bottom <= label.top, label.id);
+      }
+    }
   }
 });
 
