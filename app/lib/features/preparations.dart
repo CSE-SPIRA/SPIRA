@@ -224,7 +224,7 @@ class _PreviewStrip extends StatelessWidget {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               KoreanText(
-                '미리보기 · 계약 테스트 서버',
+                fixturePreviewLabel,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -577,7 +577,7 @@ class _PreparationLine extends StatelessWidget {
     final on = line.state != wire.LineState.OFF;
     final end = line.endState;
     final outcome = endLabel(end);
-    final note = line.note;
+    final note = lineNoteLabel(line.note);
     return Row(
       children: [
         Expanded(
@@ -615,7 +615,7 @@ class _PreparationLine extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             KoreanText(
-                              line.text,
+                              normalizeKelvin(line.text),
                               style: theme.textTheme.titleMedium,
                             ),
                             Wrap(

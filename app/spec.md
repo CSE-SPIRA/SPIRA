@@ -144,13 +144,20 @@ eligibility only and MUST NOT silently revive cancelled work. (PC-5, PC-6)
 closed summary. Show the stored judgment, plan, known changes, fridge guidance,
 executions, restore outcomes, and S7 feedback as they become available through
 the existing App polling and rationale read. Show supplied share and execution
-times and distinguish planned upcoming times and triggers. Untimed entries
-remain untimed. No additional inference. (PC-1, PC-2)
+times and distinguish planned upcoming times and supplied triggers. Order lines
+by their first available execution record, falling back to the planned time.
+Untimed entries remain untimed. The live summary leads with running work, then
+the awaited event or next planned work. For a closed episode, put the S7
+verdict and feedback immediately below the summary. Identify fixture judgment
+with the same preview caption as the main screen. No additional inference.
+(PC-1, PC-2)
 
-**A6-R2.** The judgment expands in place with the intent, the available calendar,
-unusual-item, and similar-order clues, set-aside items, and line needs. A line
-tap opens its own details with its need, timing derivation, execution results,
-and the card's shared intent and slots. If a derived time predates the share,
+**A6-R2.** The judgment opens expanded and can collapse in place. It shows the
+intent and available calendar, unusual-item and similar-order clues. Show
+set-aside items with the read order, and each supplied line need and observed
+change with its timeline entry. A line tap opens its own details with its need,
+timing in a sentence, execution results, observed changes and the card's
+shared intent and slots. If a derived time predates the share,
 use **바로 실행** and the recorded run time or share time for the derivation.
 **전체 근거 보기** opens the compact stored evidence in order: read items and
 quantities, unusual items, similar orders, situation slots and basis, and linked
@@ -209,7 +216,7 @@ exits.
 | APP-AT-08 | Stop a card containing unstarted work, a SPIRA-owned effect, a person-changed effect, and a person-started job. The peer receives contract `stop`; refreshed UI shows cancellation/restoration while preserving both human effects, asks no reason, and leaves item guidance unchanged. | PC-5, PC-6 | A5-R2, A7-R1, A8-R1 |
 | APP-AT-09 | Pause a household with unstarted work, a running effect, and then a newly shared order. The refreshed projection cancels the unstarted work, keeps the running lifecycle, stores the order as paused without judgment, and does not revive cancelled work after resume. | PC-5, PC-6 | A5-R3, A8-R1 |
 | APP-AT-10 | After the peer has only a command acknowledgement, return a card that is not `done`; then return refreshed `done`, `partial`, `failed`, `unknown`, and restore outcomes. The UI does not complete on acknowledgement and renders every supplied state without upgrading unknown evidence. | PC-4, PC-5 | P-R2, A8-R1 |
-| APP-AT-11 | Render the `ep_9031` order story and `ep_9150` stored evidence. Open two distinct line details, expand the judgment, and check execution order, live and closed summaries, S7 feedback, and full evidence. | PC-1, PC-2 | A6-R1, A6-R2 |
+| APP-AT-11 | Render the `ep_9031` order story and `ep_9150` stored evidence. Open two distinct line details, toggle the initially expanded judgment, and check execution order, live and closed summaries, S7 feedback, and full evidence. | PC-1, PC-2 | A6-R1, A6-R2 |
 | APP-AT-12 | Render the plain-groceries episode with `card_ids: []` and item guidance through unreleased, released, and closed states. No preparation card is fabricated, and the guidance lifecycle remains visible. | PC-1, PC-2 | A3-R2, A7-R1 |
 | APP-AT-13 | From settings, open memory, view Server rows, delete one case with a failed response and then a successful response/readback. No edit controls exist; failure remains visible; deletion is claimed only after Server confirmation. | PC-6 | A9-R1 |
 | APP-AT-14 | Run the same scene against the local fixture peer and against a qualified Server profile. Fixture qualification is visible and never presented as real-Server, physical-device, or native-lifecycle evidence. Verify 우리 집 reads the Hub inventory and that browser sample sharing uses `POST /v1/orders`. | PC-4 | P-R2, P-R3 |

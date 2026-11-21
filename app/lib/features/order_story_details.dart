@@ -53,7 +53,9 @@ List<_Reason> _judgmentReasons(_StoryData data) {
     if (total > 0)
       (
         icon: Icons.people_outline,
-        chip: '비슷한 주문 ${matching == null ? '$total건' : '${matching.n}/$total'}',
+        chip: matching == null
+            ? '비슷한 주문 $total건'
+            : '비슷한 주문 $total건 중 ${matching.n}건',
         title: matching == null
             ? '비슷한 주문을 $total건 찾았어요'
             : '비슷한 주문 $total건 중 ${matching.n}건이 ${similarOrderName(matching)}',
@@ -70,9 +72,6 @@ class _ExpandedJudgment extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final intent = data.intent!;
-    final card = data.card;
-    final usual =
-        data.result?.evidence.unusualItems?.usual?.toSet() ?? const <String>{};
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       spacing: DesignTokens.space12,
@@ -85,7 +84,7 @@ class _ExpandedJudgment extends StatelessWidget {
         ),
         if (reasons.isNotEmpty)
           EvidenceSection(
-            '이렇게 봤어요',
+            '판단 근거',
             child: EvidencePanel(
               child: EvidenceRows([
                 for (final reason in reasons)
@@ -120,48 +119,6 @@ class _ExpandedJudgment extends StatelessWidget {
               ]),
             ),
           ),
-        if (data.aside.isNotEmpty)
-          EvidenceCaption(
-            '${usual.containsAll(data.aside) ? '평소에 사던 물건은 따로 봤어요.' : '이번 준비와 따로 봤어요.'} ${data.aside.join(' · ')}',
-          ),
-        EvidenceSection(
-          '그래서 할 일',
-          child: EvidencePanel(
-            child: EvidenceRows([
-              for (final line in card.lines)
-                InkWell(
-                  borderRadius: BorderRadius.circular(DesignTokens.radius8),
-                  onTap: () => _openStoryLine(
-                    Navigator.of(context),
-                    data.app,
-                    card,
-                    line.taskId,
-                    line.text,
-                  ),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      minHeight: DesignTokens.space48,
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: EvidenceRow(
-                            title: _lineTitle(line.text),
-                            detail: data.taskFor(line.taskId)?.need ?? '',
-                          ),
-                        ),
-                        const Icon(
-                          Icons.chevron_right,
-                          size: DesignTokens.size18,
-                          color: DesignTokens.muted,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-            ]),
-          ),
-        ),
       ],
     );
   }
@@ -187,34 +144,23 @@ class _StoryLine extends StatelessWidget {
           .firstOrNull;
       final task = data.taskFor(id);
       final current = line ?? fallback;
-      final text = current?.text ?? task?.line ?? initialText;
+      final text = normalizeKelvin(current?.text ?? task?.line ?? initialText);
       final relation = lineRelationLabel(current, card);
       final runs = data.executions
           .where((entry) => entry.taskId == id)
           .toList();
-      final shared = data.episode?.sharedAt;
-      final planned = current?.when?.time;
-      final firstRun = runs
-          .where(
-            (run) =>
-                run.status == wire.ExecutionStatus.RUNNING ||
-                run.status == wire.ExecutionStatus.COMPLETED,
-          )
-          .firstOrNull;
-      final immediateTime =
-          planned != null &&
-              shared != null &&
-              DateTime.parse(planned).isBefore(DateTime.parse(shared))
-          ? seoulDateTime(firstRun?.at ?? shared)
-          : null;
-      final timing = lineTimeDerivation(
+      final timing = storyLineTiming(
         current,
-        data.calendar == null ? null : card.startsAt,
-        immediateTime: immediateTime,
+        scheduleStart: data.calendar == null ? null : card.startsAt,
+        scheduleName: isPartyPreparation(card) ? '파티' : '일정',
+        sharedAt: data.episode?.sharedAt,
+        runAt: runs.where(_startedExecution).firstOrNull?.at,
       );
       final state = line?.state ?? task?.state ?? fallback?.state;
       final end = endLabel(current?.endState);
-      final note = current?.note;
+      final note = lineNoteLabel(current?.note);
+      final changes = data.changesFor(id);
+      final need = task?.need.trim();
       final intent = data.intent;
       final details = RegExp(r' \((.+)\)$')
           .firstMatch(text)
@@ -256,8 +202,8 @@ class _StoryLine extends StatelessWidget {
             '왜',
             child: EvidencePanel(
               child: KoreanText(
-                task?.need.trim().isNotEmpty == true
-                    ? task!.need
+                need != null && need.isNotEmpty
+                    ? normalizeKelvin(need)
                     : '이 할 일의 자세한 근거를 볼 수 없어요.',
               ),
             ),
@@ -277,12 +223,13 @@ class _StoryLine extends StatelessWidget {
                     detail:
                         '${seoulDateTime(run.at)} · ${_executionLabel(run.status)}',
                   ),
+                for (final change in changes) KoreanText(_changeLabel(change)),
                 if (end != null) KoreanText(end),
-                if (note != null && note.trim().isNotEmpty && note != end)
-                  KoreanText(note),
+                if (note != null && note != end) KoreanText(note),
                 if (runs.isEmpty &&
+                    changes.isEmpty &&
                     end == null &&
-                    (note?.trim().isNotEmpty != true))
+                    note == null)
                   const EvidenceCaption('아직 표시할 실행 기록이 없어요.'),
               ]),
             ),
@@ -332,100 +279,132 @@ class _FullEvidenceLink extends StatelessWidget {
   );
 }
 
+String _changeLabel(wire.Change change) {
+  final device = deviceLabel(change.deviceType);
+  final value = change.to;
+  final kelvin = value is Map ? value['kelvin'] : null;
+  final action = switch ((change.property, value)) {
+    ('color' || 'color_temp', _) when kelvin is num => '${kelvin}K로 바꾸셨어요',
+    ('color_temp', final num temperature) => '${temperature}K로 바꾸셨어요',
+    ('power', true || 'on') => '전원을 켜셨어요',
+    ('power', false || 'off') => '전원을 끄셨어요',
+    (_, final num amount) => '설정값을 $amount로 바꾸셨어요',
+    (_, final String setting) when setting.trim().isNotEmpty =>
+      '‘${normalizeKelvin(setting)}’ 값으로 바꾸셨어요',
+    _ => '설정을 바꾸셨어요',
+  };
+  final minutes = change.afterStartMinutes;
+  final when = switch (minutes) {
+    < 0 => '시작 ${minutes.abs()}분 전',
+    0 => '시작할 때',
+    _ => '시작 $minutes분 뒤',
+  };
+  return '$device · $action · $when';
+}
+
 class _StoryObservation extends StatelessWidget {
-  const _StoryObservation(this.data, this.observation);
+  const _StoryObservation(
+    this.data,
+    this.observation, {
+    this.showHeading = true,
+  });
 
   final _StoryData data;
   final wire.Observation observation;
+  final bool showHeading;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final feedback = observation.taskFeedback;
+    final adjusted = feedback.any(
+      (entry) => entry.user != wire.TaskFeedback.KEPT,
+    );
     final verdict = switch (observation.verdict!) {
+      wire.Verdict.MATCH when adjusted => '판단은 맞았고, 바꾸신 점은 다음에 참고할게요.',
       wire.Verdict.MATCH => '집에서 일어난 일과 판단이 맞았어요.',
       wire.Verdict.STOPPED => '이 준비를 중지하셨어요.',
       wire.Verdict.UNCONFIRMED => '이 준비가 맞았는지 확인하기 어려웠어요.',
     };
     final occasion = data.occasion;
+    final kept = feedback
+        .where((entry) => entry.user == wire.TaskFeedback.KEPT)
+        .length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       spacing: DesignTokens.space4,
       children: [
-        EvidenceCaption(verdict),
-        EvidencePanel(
-          color: DesignTokens.pinkSoft,
-          border: DesignTokens.pinkEdge,
-          radius: DesignTokens.radius12,
-          child: Column(
-            spacing: DesignTokens.space4,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              KoreanText(
-                '다음 ${occasion == null ? '' : '$occasion '}준비 때 참고할게요',
-                style: Theme.of(context).textTheme.titleMedium
-                    ?.copyWith(color: DesignTokens.pinkInk),
+        if (showHeading)
+          Semantics(
+            header: true,
+            child: KoreanText(
+              '판단을 확인했어요',
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: DesignTokens.pinkInk,
               ),
-              for (final feedback in observation.taskFeedback)
-                for (final text in _feedback(feedback))
-                  KoreanText(
-                    '· $text',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-            ],
+            ),
           ),
-        ),
+        EvidenceCaption(verdict),
+        if (feedback.isNotEmpty)
+          EvidencePanel(
+            color: DesignTokens.pinkSoft,
+            border: DesignTokens.pinkEdge,
+            radius: DesignTokens.radius12,
+            child: Column(
+              spacing: DesignTokens.space4,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                KoreanText(
+                  '다음 ${occasion == null ? '' : '$occasion '}준비 때 참고할게요',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: DesignTokens.pinkInk,
+                  ),
+                ),
+                for (final entry in feedback.where(
+                  (entry) => entry.user == wire.TaskFeedback.CHANGED,
+                ))
+                  if (entry.changes case final changes? when changes.isNotEmpty)
+                    for (final change in changes)
+                      EvidenceCaption(_changeLabel(change))
+                  else
+                    EvidenceCaption('${_lineName(entry.taskId)}의 설정을 바꾸셨어요.'),
+                for (final entry in feedback.where(
+                  (entry) => entry.user == wire.TaskFeedback.OFF,
+                ))
+                  EvidenceCaption(_offLabel(entry)),
+                if (kept > 0)
+                  EvidenceCaption('${adjusted ? '나머지 ' : ''}$kept개는 그대로 쓰셨어요'),
+              ],
+            ),
+          ),
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton(
+            style: TextButton.styleFrom(padding: EdgeInsets.zero),
             onPressed: () => openHomeMemory(context, data.app),
-            child: const KoreanText('설정 › 우리 집 기억'),
+            child: const KoreanText('우리 집 기억 보기'),
           ),
         ),
       ],
     );
   }
 
-  Iterable<String> _feedback(wire.TaskFeedbackElement feedback) sync* {
+  String _lineName(String taskId) {
     final line = data.card.lines
-        .where((line) => line.taskId == feedback.taskId)
+        .where((line) => line.taskId == taskId)
         .firstOrNull;
-    final name = _lineTitle(
-      line?.text ?? data.taskFor(feedback.taskId)?.line ?? '이 할 일',
-    );
-    final label = '‘$name’ 항목';
-    switch (feedback.user) {
-      case wire.TaskFeedback.OFF:
-        final when = switch (feedback.when) {
-          wire.OffWhen.BEFORE_RUN => '실행 전에 ',
-          wire.OffWhen.DURING_RUN => '실행 중에 ',
-          null => '',
-        };
-        final date = DateTime.tryParse(feedback.at ?? '');
-        final day = date == null ? '' : '${date.month}월 ${date.day}일 ';
-        yield '$day$label을 $when끄셨어요.';
-      case wire.TaskFeedback.KEPT:
-        yield '$label을 그대로 두셨어요.';
-      case wire.TaskFeedback.CHANGED:
-        final changes = feedback.changes ?? const <wire.Change>[];
-        if (changes.isEmpty) yield '$label의 설정을 바꾸셨어요.';
-        for (final change in changes) {
-          final device = deviceLabel(change.deviceType);
-          final kelvin = change.to is Map ? (change.to as Map)['kelvin'] : null;
-          final setting = switch (change.property) {
-            'color' || 'color_temp' when kelvin is num => '빛을 ${kelvin}K로',
-            'color_temp' => '빛의 색을',
-            'brightness' => '밝기를',
-            'color' => '색을',
-            'power' => '전원 상태를',
-            _ => '설정을',
-          };
-          final minutes = change.afterStartMinutes;
-          final when = switch (minutes) {
-            < 0 => '일정 시작 ${minutes.abs()}분 전',
-            0 => '일정이 시작할 때',
-            _ => '일정 시작 $minutes분 뒤',
-          };
-          yield '$when $device $setting 바꾸셨어요.';
-        }
-    }
+    final name = line?.text ?? data.taskFor(taskId)?.line;
+    return name == null ? '이 항목' : '‘${_lineTitle(name)}’ 항목';
+  }
+
+  String _offLabel(wire.TaskFeedbackElement feedback) {
+    final when = switch (feedback.when) {
+      wire.OffWhen.BEFORE_RUN => '실행 전에 ',
+      wire.OffWhen.DURING_RUN => '실행 중에 ',
+      null => '',
+    };
+    final date = DateTime.tryParse(feedback.at ?? '');
+    final day = date == null ? '' : '${date.month}월 ${date.day}일 ';
+    return '$day${_lineName(feedback.taskId)}을 $when끄셨어요.';
   }
 }

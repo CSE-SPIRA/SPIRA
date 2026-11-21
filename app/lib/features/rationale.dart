@@ -338,11 +338,13 @@ class EvidenceChips extends StatelessWidget {
     super.key,
     this.theme,
     this.onGreen = false,
+    this.onTap,
   });
 
   final List<String> values;
   final String? theme;
   final bool onGreen;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) => Wrap(
@@ -350,28 +352,40 @@ class EvidenceChips extends StatelessWidget {
     runSpacing: DesignTokens.space4,
     children: [
       for (final value in values)
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: value == theme
-                ? DesignTokens.pinkSoft
-                : onGreen
-                ? DesignTokens.greenSoft
-                : DesignTokens.soft,
-            borderRadius: BorderRadius.circular(DesignTokens.radiusPill),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              vertical: DesignTokens.space4,
-              horizontal: DesignTokens.space8,
+        if (onTap != null)
+          ActionChip(
+            label: KoreanText(value),
+            labelStyle: Theme.of(context).textTheme.bodySmall,
+            onPressed: onTap,
+            backgroundColor: DesignTokens.soft,
+            side: BorderSide.none,
+            shape: const StadiumBorder(),
+          )
+        else
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: value == theme
+                  ? DesignTokens.pinkSoft
+                  : onGreen
+                  ? DesignTokens.greenSoft
+                  : DesignTokens.soft,
+              borderRadius: BorderRadius.circular(DesignTokens.radiusPill),
             ),
-            child: KoreanText(
-              value,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: value == theme ? DesignTokens.pinkInk : DesignTokens.ink,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                vertical: DesignTokens.space4,
+                horizontal: DesignTokens.space8,
+              ),
+              child: KoreanText(
+                value,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: value == theme
+                      ? DesignTokens.pinkInk
+                      : DesignTokens.ink,
+                ),
               ),
             ),
           ),
-        ),
     ],
   );
 }
@@ -596,8 +610,7 @@ class _FullEvidenceScreenState extends State<FullEvidenceScreen> {
               for (final event in calendar)
                 EvidenceRow(
                   title: calendarEvidenceLabel(event),
-                  detail:
-                      '${event.day} ${event.start}–${event.day} ${event.end}',
+                  detail: '${event.day} ${event.start}–${event.end}',
                 ),
             ]),
           ),
