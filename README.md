@@ -27,21 +27,12 @@ SPIRA reads an order screenshot, finds similar cases in a synthetic purchase-int
 
 ## Run the demo
 
-Start the fixture stack with `scripts/demo-up --no-shell`. Follow the [Android setup](app/README.md#run-the-live-demo-on-android) to connect SPIRA to the printed Fixture and Hub URLs. The launcher prints the App's **Home key (우리 집)** on its own line, and the operator username and password beside the **집에서 일어나는 일** URL.
+From the repository root, run `scripts/demo-up` with `uv` and Mosquitto installed. Open the first printed URL (default `http://127.0.0.1:8729/`) for the App, Viewer, operator, Hub, and guided replay. Stop with Ctrl-C and relaunch for a fresh run.
 
-To open the household event controls from another device, add `--sim-lan-ip <demo-host-LAN-IPv4>` when starting the demo on a trusted network shared by both devices. For a USB-connected Android phone, you can also forward the Simulator port with `adb reverse tcp:<sim-port> tcp:<sim-port>` and use the printed loopback URL.
-
-1. Open **집에서 일어나는 일** on a second phone or laptop and sign in. Open the Viewer and Hub dashboard at the printed URLs.
-2. Share [`app/assets/example-order.png`](app/assets/example-order.png) or another order screenshot to SPIRA from Android’s share menu. The party is scheduled to start about 90 seconds after sharing.
-3. Press **택배 들이기** any time after sharing. Look for both item notices on the fridge.
-4. Press **손님 도착** during the **손님 맞이** window shown next to the button. The default window runs for 10 minutes from the scheduled party start. Use `--guest-window <seconds>` to change its length. Watch the living-room light and TV in the Viewer.
-5. Press **파티 끝** to end the party and watch SPIRA restore the settings it still owns.
-
-Changing the light through the operator’s person actions during the party shows up as feedback after **파티 끝**.
-
-To reset, stop the stack with Ctrl-C and restart `scripts/demo-up`. Each restart starts clean by default.
-
-Run `scripts/demo-up` to also start the [optional demo shell](demo-shell/README.md), or use [`app/scripts/browser-demo`](app/scripts/browser-demo) for the Flutter App preview.
+- Flutter builds the App preview on the first run. Later runs reuse the cached build for the same sources and Dart defines. If Flutter and a matching build are both unavailable, the rest of the demo still starts.
+- `--export-app DIR` copies the App build and exits. On another machine, run `scripts/demo-up --app-web DIR` to serve that build. Use a build made with the same Dart defines, including the same `--proxy-port` (default 8731).
+- `--no-app` skips the App preview. Use it when starting a stack for [Flutter hot reload](app/README.md#run-in-the-browser). `--no-shell` hides the optional example staging.
+- The local operator opens without a password. To use the operator from another device on a trusted network, add `--sim-lan-ip <demo-host-LAN-IPv4>` and use the URL and password printed in the terminal.
 
 ## Paper
 

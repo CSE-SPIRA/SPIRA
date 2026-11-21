@@ -37,6 +37,18 @@ def operator_app(tmp_path, **kwargs):
     )
 
 
+@pytest.mark.parametrize(("bind_host", "status"), [("127.0.0.1", 200), ("0.0.0.0", 401)])
+def test_demo_operator_auth_follows_bind_address(tmp_path, bind_host, status):
+    # A LAN listener also accepts requests sent to its loopback interface.
+    headers = {"Host": "127.0.0.1", "X-Forwarded-For": "127.0.0.1"}
+    with TestClient(
+        operator_app(tmp_path, bind_host=bind_host), base_url="http://127.0.0.1",
+    ) as client:
+        for route in ("/operator", "/operator/guest-window", "/operator/options"):
+            assert client.get(route, headers=headers).status_code == status
+            assert client.get(route, headers=headers, auth=AUTH).status_code == 200
+
+
 def post(client, endpoint, **payload):
     response = client.post(endpoint, json=payload, auth=AUTH)
     response.raise_for_status()

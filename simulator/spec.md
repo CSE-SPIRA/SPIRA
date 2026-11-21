@@ -86,6 +86,8 @@ created by a prior SPIRA command so that the latter cannot stop it.
 
 ### E4. Operator actions and faults (PC-4, PC-5, PC-6)
 
+In the demo, the enabled operator and its API MUST allow access without credentials for a Simulator bound only to `127.0.0.1`, and MUST require HTTP Basic credentials when bound for LAN access. The server's bind configuration determines this policy.
+
 **E4-R1.** The operator MUST provide package brought in, guest arrival, and event
 end occurrences, plus device changes by resident, child, guest, or external
 automation. For a device action, the operator chooses only who acted; the

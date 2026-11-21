@@ -16,16 +16,12 @@ import time
 from urllib.error import HTTPError
 from urllib.request import ProxyHandler, Request, build_opener
 
+from browser_demo_web import (
+    APP, APP_TOKEN, EPISODE, FLUTTER_REQUIRED, LOOPBACK, cached_web, define_flags,
+    fixture_defines, origin, proxy_command, temporary_root, web_command,
+)
 
-APP = Path(__file__).resolve().parents[1]
-EPISODE = "ep_9031"
-APP_TOKEN = "demo"
-LOOPBACK = "127.0.0.1"
 CLIENT = build_opener(ProxyHandler({}))
-
-
-def origin(port):
-    return f"http://{LOOPBACK}:{port}"
 
 
 def port(value):
@@ -144,13 +140,14 @@ def start_demo(stack, args, log):
     if not launcher.is_file():
         raise RuntimeError(f"demo-up is missing at {launcher}. Check the selected repository checkout.")
     with log.open("w", encoding="utf-8") as output:
-        demo = start(stack, [str(launcher), "--no-shell", "--episode", EPISODE, "--port", str(args.demo_port)],
+        demo = start(stack, [str(launcher), "--no-shell", "--no-app", "--start-port", "0",
+                             "--episode", EPISODE, "--port", str(args.demo_port)],
                      cwd=args.checkout, stdout=output, stderr=subprocess.STDOUT)
 
     def ready():
         if demo.poll() is not None:
             lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
-            diagnostic = "\n".join(line for line in lines[-12:] if not line.startswith("Operator:"))
+            diagnostic = "\n".join(line for line in lines[-12:] if not line.startswith("집에서 일어나는 일:"))
             raise RuntimeError(f"demo-up exited with status {demo.returncode}.\n{diagnostic}")
         return stack_urls(log, args.demo_port)
 
@@ -164,9 +161,7 @@ def run(args):
 
     fixture = json.loads((APP.parent / "contracts/fixtures" / EPISODE / "household.created.json").read_text())
     household, key = fixture["household_id"], fixture["hub_api_key"]
-    temp_root = Path("/private/tmp")
-    if not temp_root.is_dir():
-        temp_root = Path(tempfile.gettempdir())
+    temp_root = temporary_root()
     prefix = f"spira-browser-demo-{os.getuid()}-{args.demo_port}-"
     with ExitStack() as stack:
         temporary = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix=prefix, dir=temp_root)))
@@ -180,11 +175,7 @@ def run(args):
             print(f"{name}: {urls[name]}", flush=True)
         check_stack(urls, household, key)
 
-        proxy = start(stack, [
-            sys.executable, str(APP / "scripts/browser_demo_proxy.py"),
-            f"--fixture={urls['Fixture']}", f"--hub={urls['Hub']}",
-            f"--port={args.proxy_port}", f"--web-port={args.web_port}",
-        ])
+        proxy = start(stack, proxy_command(urls["Fixture"], urls["Hub"], args.proxy_port, args.web_port))
         proxy_url = origin(args.proxy_port)
         web_url = origin(args.web_port)
 
@@ -196,14 +187,7 @@ def run(args):
                 return None
 
         wait_for(proxy_ready, "the browser proxy", timeout=10)
-        defines = [f"--dart-define={name}={value}" for name, value in {
-            "SPIRA_BASE_URL": proxy_url,
-            "SPIRA_HUB_URL": proxy_url,
-            "SPIRA_HOUSEHOLD_ID": household,
-            "SPIRA_PEER": "fixture",
-            "SPIRA_FIXTURE_APP_TOKEN": APP_TOKEN,
-            "SPIRA_FIXTURE_HOME_KEY": key,
-        }.items()]
+        defines = fixture_defines(args.proxy_port, household, key)
 
         def supervise(process):
             while process.poll() is None:
@@ -216,16 +200,16 @@ def run(args):
         if not args.build_serve:
             return supervise(start(stack, [
                 "flutter", "run", "-d", "chrome", "--hot", f"--web-hostname={LOOPBACK}",
-                f"--web-port={args.web_port}", *defines,
+                f"--web-port={args.web_port}", *define_flags(defines),
             ], grouped=False))
 
-        web = temporary / "web"
-        result = supervise(start(stack, ["flutter", "build", "web", f"--output={web}", *defines]))
-        if result:
-            return result
-        server = start(stack, [
-            sys.executable, "-m", "http.server", str(args.web_port), "--bind", LOOPBACK, "--directory", str(web),
-        ])
+        def build(command, cwd):
+            return supervise(start(stack, command, cwd=cwd, env={**os.environ, "TMPDIR": str(temp_root)}))
+
+        web, _ = cached_web(defines, build)
+        if web is None:
+            raise RuntimeError(FLUTTER_REQUIRED)
+        server = start(stack, web_command(web, args.web_port))
 
         def web_ready():
             must_be_running(server, "Web server")

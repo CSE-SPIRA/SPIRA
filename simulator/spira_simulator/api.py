@@ -84,11 +84,16 @@ def create_app(
     profile: Profile | None = None,
     operator_enabled: bool | None = None,
     operator_token: str | None = None,
+    bind_host: str | None = None,
     broker_enabled: bool = True,
     received_source: Source | None = None,
     plan_source: Source | None = None,
     execution_source: Source | None = None,
 ) -> FastAPI:
+    # The launcher supplies its configured listen address. An ASGI request's
+    # local address can be loopback even when the server listens on every interface.
+    operator_loopback = bind_host == "127.0.0.1"
+
     async def jobs(protocol: DeviceProtocol):
         while True:
             await asyncio.sleep(0.2)
@@ -106,7 +111,7 @@ def create_app(
             if operator_token is not None
             else os.getenv("WORLD_OPERATOR_TOKEN")
         )
-        if enabled and not token:
+        if enabled and not operator_loopback and not token:
             raise RuntimeError("WORLD_OPERATOR_TOKEN is required when WORLD_OPERATOR=1")
         config = profile or load_profile(
             Path(os.getenv("WORLD_PROFILE") or DEFAULT_PROFILE)
@@ -135,7 +140,8 @@ def create_app(
             app.state.world = world
             app.state.broker = broker
             app.state.protocol = protocol
-            app.state.operator_token = token if enabled else None
+            app.state.operator_enabled = enabled
+            app.state.operator_token = token
             app.state.peer_viewers = peer_viewers(os.getenv("WORLD_PEER_VIEWERS", ""))
             hub_state = env_source("WORLD_HUB_STATE_URL")
             app.state.evidence_from_hub = hub_state is not None
@@ -173,12 +179,13 @@ def create_app(
         redoc_url=None,
     )
 
-    def require_operator(
-        request: Request, credentials: HTTPBasicCredentials | None = Depends(basic)
-    ):
-        token = request.app.state.operator_token
-        if token is None:
+    async def require_operator(request: Request):
+        if not request.app.state.operator_enabled:
             raise HTTPException(404, "Operator disabled")
+        if operator_loopback:
+            return
+        token = request.app.state.operator_token
+        credentials: HTTPBasicCredentials | None = await basic(request)
         if (
             credentials is None
             or credentials.username != "operator"

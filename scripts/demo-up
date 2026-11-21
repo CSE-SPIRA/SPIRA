@@ -1,9 +1,12 @@
 #!/bin/sh
-# One command for the demo stack. Needs uv and mosquitto.
+# One command for the demo stack and App preview.
 set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
-exec uv run --no-project --python 3.12 \
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONDONTWRITEBYTECODE=1
+if [ -d /private/tmp ]; then export TMPDIR=/private/tmp; fi
+exec uv --quiet run --no-project --python 3.12 \
   --with-requirements hub/requirements.txt \
   --with-requirements hub/tests/fixture_server/requirements.txt \
   --with-editable contracts/generated/python \
