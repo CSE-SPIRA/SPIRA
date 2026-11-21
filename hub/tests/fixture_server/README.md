@@ -41,6 +41,12 @@ family gathering. Plan times use the Server's COM-15 offsets. Turn off the
 cleaning line before running the Hub if the chosen offset puts cleaning in the
 past.
 
+The live launcher passes `--guest-window` (600 seconds by default). This
+opens the guest trigger at the scheduled event start and keeps it open for
+that many seconds. A fixture started directly without that override keeps
+the COM-15 window. In demo mode the linked event in WHY uses the replay's
+scheduled start and duration.
+
 A live `package.brought_in` selects the most recently shared episode with a
 live task still waiting for the package. It releases every such task in that
 episode at the event timestamp and publishes a new plan version. A package

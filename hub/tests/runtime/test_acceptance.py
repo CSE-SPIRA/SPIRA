@@ -1205,21 +1205,21 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
         assert [row["at"] for row in ledger] == sorted(row["at"] for row in ledger)
         assert [(row["label"], row["what"], row["by"], [item["kind"] for item in row["reports"]])
                 for row in ledger] == [
-            ("—", "계획 v1 받음 · 할 일 6", "hub", ["ack"]),
-            ("—", "계획 v2 받음 · 할 일 5 · 청소기 취소", "hub", ["ack"]),
+            ("—", "계획 v1 받음 · 할 일 4 · 품목 안내 2", "hub", ["ack"]),
+            ("—", "계획 v2 받음 · 할 일 3 · 품목 안내 2 · 청소기 취소", "hub", ["ack"]),
             ("현관", "택배 들임", "hub", ["event"]),
-            ("—", "계획 v3 받음 · 할 일 5 · 택배 기다림 끝", "hub", ["ack"]),
+            ("—", "계획 v3 받음 · 할 일 3 · 품목 안내 2 · 택배 기다림 끝", "hub", ["ack"]),
             ("냉장고", "안내 표시", "spira", ["run", "event"]),
             ("냉장고", "안내 표시", "spira", ["run", "event"]),
             ("냉장고", "문 열림", "user", ["event"]),
             ("인덕션", "잠금", "spira", ["run", "event"]),
             ("전기포트", "꺼짐", "spira", ["run", "event"]),
             ("현관", "손님 도착", "hub", ["event"]),
-            ("TV", "어린이 파티 화면", "spira", ["run", "event"]),
-            ("조명", "색조 330°", "spira", ["run", "event"]),
+            ("TV", "공주 화면", "spira", ["run", "event"]),
+            ("조명", "분홍 빛", "spira", ["run", "event"]),
             ("오븐", "170° 20분 대기", "spira", ["run", "event"]),
             ("오븐", "시작", "user", ["event"]),
-            ("조명", "색조 330° → 2700K", "user", ["event"]),
+            ("조명", "분홍 빛 → 2700K", "user", ["event"]),
             ("—", "일정이 끝난 것을 확인", "hub", ["event"]),
             ("인덕션", "일정이 끝난 뒤 되돌림 확인 · 잠금 해제", "spira", ["restore", "event"]),
             ("전기포트", "일정이 끝난 뒤 되돌림 확인 · 켜짐", "spira", ["restore", "event"]),
@@ -1250,9 +1250,9 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
         ))
         newest, earlier, first = ledger_page.split('<details class="ledger-group"')[1:]
         assert 'data-newest open><summary>받은 준비 · 받은 시각 ' in newest
-        assert '>18:05</time> · 할 일 5</summary>' in newest
-        assert ' open>' not in earlier and '>08:40</time> · 할 일 5</summary>' in earlier
-        assert ' open>' not in first and '>21:11</time> · 할 일 6</summary>' in first
+        assert '>18:05</time> · 할 일 3 · 품목 안내 2</summary>' in newest
+        assert ' open>' not in earlier and '>08:40</time> · 할 일 3 · 품목 안내 2</summary>' in earlier
+        assert ' open>' not in first and '>21:11</time> · 할 일 4 · 품목 안내 2</summary>' in first
         assert ledger_page.count('<li class="ledger-row">') == len(ledger) - 1
         assert newest.index('>토 17:50</time>') < newest.index('>토 13:30</time>')
         assert "택배 들임" in newest and "청소기 취소" in earlier
@@ -1265,6 +1265,31 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
             assert f'"/assets/{asset}"' in page
             assert (await hub.dashboard.get(f"/assets/{asset}")).status_code == 200
         await hub.close()
+    run(exercise)
+
+
+def test_dashboard_labels_each_fridge_notice_with_its_item(tmp_path):
+    async def exercise():
+        clock = Clock()
+        items = fixture("episode.json")["item_tasks"]
+        notices = []
+        for item in items:
+            notice = next(task for task in fixture("plan.v1.json")["tasks"] if task["task_id"] == item["task_id"])
+            notice["trigger"].update(released=True, at=clock().isoformat())
+            notice["actions"][0]["value"] = f'{item["item"]} · {item["text"]}'
+            notices.append(notice)
+        hub = Scenario(tmp_path, clock, stub=Stub(clock, *notices))
+        install_birthday(hub)
+        hub.boot()
+        try:
+            await hub.reconcile()
+            await hub.cycle()
+            ledger = (await hub.dashboard.get("/")).text
+            assert "할 일 0 · 품목 안내 2" in ledger
+            assert ledger.count("냉장고 · 딸기 · 안내 표시") == 1
+            assert ledger.count("냉장고 · 휘핑크림 · 안내 표시") == 1
+        finally:
+            await hub.close()
     run(exercise)
 
 

@@ -44,5 +44,9 @@ export const STATE_WORDS = Object.freeze({
   "light_warm": "따뜻한 빛",
   "household_profile": "우리 집 구성",
   "preparation_status_unknown": "자동 준비가 켜져 있는지 아직 알 수 없어요.",
-  "order_without_preparation": "준비할 일 없는 주문"
+  "order_without_preparation": "준비할 일 없는 주문",
+  "scene_kids_party": "공주 화면",
+  "scene_party": "파티 화면",
+  "scene_calm": "잔잔한 화면",
+  "scene_cinema": "영화 화면"
 });

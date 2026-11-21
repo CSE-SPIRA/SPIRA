@@ -8,7 +8,10 @@ HOME_EVENTS = {
     "event_end": ("—", "일정이 끝난 것을 확인"),
 }
 DEVICE_EVENTS = {"started": "시작", "stopped": "멈춤", "completed": "끝남", "door_opened": "문 열림"}
-SCENES = {"kids_party": "어린이 파티", "party": "파티", "calm": "차분한 분위기", "cinema": "영화"}
+LIGHT_HUE_RANGES = (
+    (15, "light_pink"), (45, "light_orange"), (70, "light_yellow"), (165, "light_green"),
+    (255, "light_blue"), (315, "light_purple"), (360, "light_pink"),
+)
 PLAYLISTS = {"calm": "잔잔한 음악", "party": "파티 음악", "family": "가족 음악"}
 RUN_STATUS = {
     "dispatching": "응답 확인 중", "blocked": "실행 보류", "failed": "실행 실패",
@@ -25,10 +28,17 @@ def device_words(device_id, devices):
     return (device.label or DEVICE_NAMES.get(device.type, "기기")) if device else "기기"
 
 
-def plan_words(version, count, task_devices, devices, *, compact=False):
+def task_count_words(count, notices):
+    if count is None:
+        return []
+    if notices is None:
+        return [f"할 일 {count}"]
+    return [f"할 일 {count - notices}", *([f"품목 안내 {notices}"] if notices else [])]
+
+
+def plan_words(version, count, notices, task_devices, devices, *, compact=False):
     what = [f'계획 v{version["plan_version"]} 받음']
-    if count is not None:
-        what.append(f"할 일 {count}")
+    what.extend(task_count_words(count, notices))
     if compact:
         what.clear()  # Receipt and count are already in the group header.
     rejected = version["ack"]["packet"]["rejected_tasks"]
@@ -56,10 +66,14 @@ def property_words(prop, value):
     if prop == "child_lock" and type(value) is bool:
         return STATE_WORDS["locked"] if value else STATE_WORDS["unlocked"]
     if prop == "show_notice":
+        if isinstance(value, str):
+            item, separator, _ = value.partition(" · ")
+            if item and separator:
+                return f'{item} · {STATE_WORDS["notice"]}'
         return STATE_WORDS["normal_screen"] if value is None else STATE_WORDS["notice"]
     if prop in ("play_mood", "scene"):
         if isinstance(value, dict) and isinstance(scene := value.get("scene"), str):
-            return f"{SCENES.get(scene, scene)} 화면"
+            return STATE_WORDS.get(f"scene_{scene}", "분위기 화면")
         if value is None:
             return STATE_WORDS["off"]
     if prop == "play":
@@ -71,8 +85,11 @@ def property_words(prop, value):
     if prop in ("color", "color_temp") and isinstance(value, dict):
         if "kelvin" in value:
             return f'{number_words(value["kelvin"])}K'
-        if "hue" in value:
-            return f'색조 {number_words(value["hue"])}°'
+        if isinstance(hue := value.get("hue"), (float, int)):
+            key = "light_white" if value.get("saturation") == 0 else next(
+                name for upper, name in LIGHT_HUE_RANGES if hue % 360 < upper
+            )
+            return STATE_WORDS[key]
     if prop == "preset" and isinstance(value, dict) and {"temp_c", "minutes"} <= value.keys():
         return f'{number_words(value["temp_c"])}° {number_words(value["minutes"])}분 대기'
     return None
@@ -81,9 +98,11 @@ def property_words(prop, value):
 def run_words(cmd, value, status, *, missing_report=False):
     if cmd == "clean":
         what = STATE_WORDS["cleaned"] if status == "completed" else "청소 시작" if status == "running" else "청소"
-    elif cmd in ("child_lock", "off", "stop", "show_notice"):
+    elif cmd in ("child_lock", "off", "stop"):
         what = {"child_lock": STATE_WORDS["locked"], "off": STATE_WORDS["off"],
-                "stop": "멈춤", "show_notice": STATE_WORDS["notice"]}[cmd]
+                "stop": "멈춤"}[cmd]
+    elif cmd == "show_notice":
+        what = property_words(cmd, value) if value is not None else STATE_WORDS["notice"]
     else:
         prop = {"set_cook_standby": "preset"}.get(cmd, cmd)
         what = property_words(prop, value) or "기기 동작 요청"

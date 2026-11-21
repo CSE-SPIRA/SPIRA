@@ -24,7 +24,9 @@ from .surfaces import (
     device_controls,
     device_name,
     display_time,
+    guest_window_text,
     home_event_controls,
+    home_event_observation,
     peer_viewers,
     tiles,
     viewer_plan,
@@ -209,6 +211,7 @@ def create_app(
             state.world.profile.household_id,
             state.plans,
             state.executions,
+            now=state.world.clock(),
             from_hub=state.evidence_from_hub,
         )
 
@@ -236,7 +239,7 @@ def create_app(
                 "rooms": rooms,
                 "room_names": ROOM_NAMES,
                 "unplaced": planned.items(),
-                "has_preparation": bool(overlay_data["preparation"]),
+                "has_preparation": overlay_data["has_preparation"],
                 "overlay_errors": overlay_data["errors"],
                 "restores": restores,
                 "mqtt_online": mqtt.get("connected", False),
@@ -254,14 +257,28 @@ def create_app(
 
     application.mount("/sim/assets/house", StaticFiles(directory=UI / "house"))
 
+    async def operator_window(request: Request):
+        state = request.app.state
+        return await stage_overlay(
+            state.world.profile.household_id, state.plans, None, now=state.world.clock(),
+        )
+
+    @application.get("/operator/guest-window", dependencies=[Depends(require_operator)])
+    async def operator_guest_window(request: Request):
+        data = await operator_window(request)
+        if data["errors"]:
+            raise HTTPException(503, "Plan source unavailable")
+        return {"label": guest_window_label(data["guest_windows"])}
+
     @application.get("/operator", dependencies=[Depends(require_operator)])
-    def operator(request: Request):
+    async def operator(request: Request):
         world = request.app.state.world
         return templates.TemplateResponse(
             request,
             "operator.html",
             {
                 "home_events": home_event_controls(world),
+                "guest_window": guest_window_label((await operator_window(request))["guest_windows"]),
                 "household_id": world.profile.household_id,
                 "inventory": world.devices.values(),
                 "people": world.profile.demo_people,
@@ -385,7 +402,8 @@ def create_app(
 
     @application.post("/operator/home", dependencies=[Depends(require_operator)])
     def home(body: HomeAction, request: Request):
-        return apply(request, request.app.state.world.home_event, body.action)
+        signals = dispatch(request, request.app.state.world.home_event, body.action)
+        return {"applied": True, **home_event_observation(signals[-1])}
 
     @application.post("/operator/device", dependencies=[Depends(require_operator)])
     def device(body: DeviceAction, request: Request):
@@ -483,11 +501,19 @@ def mqtt_status(request: Request):
     return broker.status() if broker else None
 
 
-def apply(request: Request, action, *args, **kwargs):
+def guest_window_label(windows: list[dict]) -> str:
+    return f"손님 맞이 {guest_window_text(windows[-1])}" if windows else ""
+
+
+def dispatch(request: Request, action, *args, **kwargs):
     try:
-        request.app.state.protocol.dispatch(action, *args, **kwargs)
+        return request.app.state.protocol.dispatch(action, *args, **kwargs)
     except InvalidMutation as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+def apply(request: Request, action, *args, **kwargs):
+    dispatch(request, action, *args, **kwargs)
     return {"applied": True}
 
 

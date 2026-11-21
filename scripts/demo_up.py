@@ -19,8 +19,10 @@ import tempfile
 import time
 import urllib.request
 from contextlib import ExitStack, suppress
+from datetime import datetime
 from ipaddress import IPv4Address
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from spira_contracts.household_created import HouseholdCreated
 
@@ -63,6 +65,18 @@ def reachable(url):
         return response.status == 200
 
 
+def guest_window_text(state):
+    seoul = ZoneInfo("Asia/Seoul")
+    for row in state["waiting"]:
+        trigger = row["trigger"]
+        if trigger.get("event") == "guest_arrived" and (window := trigger.get("window")):
+            return "–".join(
+                datetime.fromisoformat(window[bound]).astimezone(seoul).strftime("%H:%M")
+                for bound in ("from", "to")
+            )
+    return None
+
+
 def run_directory(port, episode):
     temp = Path("/private/tmp") if Path("/private/tmp").exists() else Path(tempfile.gettempdir())
     identity = hashlib.sha256(f"{ROOT}:{port}:{episode}".encode()).hexdigest()[:16]
@@ -84,6 +98,8 @@ def main():
     parser.add_argument("--episode", default="ep_9031", choices=sorted(PROFILES))
     parser.add_argument("--starts-in", type=int, default=90,
                         help="Seconds from upload to the event start in the fixture replay")
+    parser.add_argument("--guest-window", type=int, default=600,
+                        help="Seconds from the replay event start to accept guest arrivals (default 600)")
     parser.add_argument("--keep", action="store_true", help="Resume the previous run on this checkout and port")
     parser.add_argument("--peer-ports", type=int, nargs=3, metavar=("FIXTURE", "MQTT", "HUB"),
                         help="Use these ports for peer services instead of choosing free ports")
@@ -95,6 +111,8 @@ def main():
         parser.error("ports must be between 1 and 65535")
     if not 1 <= args.starts_in <= 3600:
         parser.error("--starts-in must be between 1 and 3600 seconds")
+    if not 1 <= args.guest_window <= 3600:
+        parser.error("--guest-window must be between 1 and 3600 seconds")
     if args.no_shell and args.shell_port is not None:
         parser.error("--shell-port requires the demo shell")
     requests = dict(zip(("fixture", "mqtt", "hub"), args.peer_ports or [0, 0, 0], strict=True))
@@ -175,7 +193,8 @@ def run(args, mosquitto, directory, requests):
     try:
         fixture_cmd = [sys.executable, str(Path(__file__).with_name("demo_fixture.py")),
                        "--episode", args.episode, "--port", str(ports["fixture"]),
-                       "--state", str(logs / "fixture.state"), "--starts-in", str(args.starts_in)]
+                       "--state", str(logs / "fixture.state"), "--starts-in", str(args.starts_in),
+                       "--guest-window", str(args.guest_window)]
         if not args.no_shell:
             fixture_cmd.append("--scene-controls")
         launch("fixture", fixture_cmd, ROOT)
@@ -230,12 +249,23 @@ def run(args, mosquitto, directory, requests):
         operator_origin = f"http://{args.sim_lan_ip or '127.0.0.1'}:{ports['sim']}"
         print(f"{service_urls}"
               f"집에서 일어나는 일: {operator_origin}/operator  (operator / {operator_token})\n"
+              f"Home key (우리 집): {hub_key}\n"
               f"App preview: app/scripts/browser-demo --demo-port {ports['sim']} --stack-log {url_file}\n"
               f"Logs:      {logs}\nCtrl-C to stop.", flush=True)
+        minutes, seconds = divmod(args.guest_window, 60)
+        duration = " ".join(part for part in (f"{minutes}분" if minutes else "",
+                                              f"{seconds}초" if seconds else "") if part)
+        print(f"손님 맞이: 공유 후 약 {args.starts_in}초부터 {duration}", flush=True)
+        window = None
         while not stopping:
             for name, proc in processes:
                 if proc.poll() is not None:
                     raise RuntimeError(f"{name} exited ({proc.returncode}); see {logs / (name + '.log')}")
+            if window is None:
+                with suppress(OSError, ValueError, KeyError):
+                    window = guest_window_text(read_json(urls["hub"] + "/state"))
+                    if window:
+                        print(f"손님 맞이: {window}", flush=True)
             time.sleep(0.5)
     except KeyboardInterrupt:
         pass

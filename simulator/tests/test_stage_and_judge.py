@@ -81,6 +81,7 @@ def test_overlay_reads_authenticated_plan_and_fixture_executions(
     mock_http_source(monkeypatch, handle)
     with TestClient(operator_app(tmp_path)) as client:
         overlay = client.get("/sim/overlay").raise_for_status().json()
+        assert "예정된 집 준비 없음" not in client.get("/sim/viewer").text
 
     assert overlay["errors"] == []
     assert overlay["preparation"] == []
@@ -651,7 +652,16 @@ def test_korean_home_controls_record_the_shells_household_observations(
 
         for label in buttons:
             action = buttons[label].get("data-home-action")
-            post(client, home.get("data-home-endpoint"), action=action)
+            result = post(client, home.get("data-home-endpoint"), action=action).json()
+            assert result == {
+                "applied": True, "at": {
+                    "택배 들이기": "토 14:00", "손님 도착": "토 14:01", "파티 끝": "토 14:02",
+                }[label],
+                "occurred_at": clock().isoformat(),
+                "observation": {
+                    "택배 들이기": "택배 들임", "손님 도착": "손님 있음", "파티 끝": "손님 나감",
+                }[label],
+            }
             if label == "손님 도착":
                 viewer = client.get("/sim/viewer?fragment=true").raise_for_status().text
                 entrance = ElementTree.fromstring(viewer).find(
@@ -685,6 +695,76 @@ def test_korean_home_controls_record_the_shells_household_observations(
             ("토 14:03", "· 손님 있음"),
             ("토 14:02", "· 손님 나감"),
         ]
+
+
+def test_guest_window_is_shared_by_operator_and_viewer_until_missed(tmp_path, monkeypatch, clock):
+    plan = fixture_json("ep_9031/plan.v1.json")
+    mood = next(task for task in plan["tasks"] if task["task_id"] == "t_mood#3")
+    mood["trigger"]["window"] = {
+        "from": "2026-10-17T14:01:00+09:00", "to": "2026-10-17T14:11:00+09:00",
+    }
+    app = operator_app(tmp_path, plan_source=SourceStub(plan))
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.world, "clock", clock)
+        page = client.get("/sim/viewer").text
+        assert "손님 오면 · 14:01–14:11" in page
+        assert "손님 맞이 14:01–14:11" in client.get("/operator", auth=AUTH).text
+        assert client.get("/operator/guest-window", auth=AUTH).json() == {"label": "손님 맞이 14:01–14:11"}
+        clock.advance(11 * 60)
+        assert "실행 안 됨" not in client.get("/sim/viewer").text
+        clock.advance(1)
+        view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
+        for device in ("light_01", "display_01"):
+            marker = view.find(f'.//div[@data-device="{device}"]')
+            assert marker.findtext('p[@class="observed-outcome"]') == "손님이 오지 않아 실행 안 됨"
+            assert marker.find('p[@class="planned"]') is None
+
+
+def test_cleaner_keeps_spira_dot_through_job_completion(tmp_path, monkeypatch, clock):
+    app = operator_app(tmp_path)
+    cleaner = "mqtt:cleaner_01"
+
+    def tile(client):
+        view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
+        return view.find('.//div[@data-device="cleaner_01"]/article')
+
+    with TestClient(app) as client:
+        world = app.state.world
+        monkeypatch.setattr(world, "clock", clock)
+        Wire(world).command(cleaner, {"clean": {"room": "거실"}})
+        running = tile(client)
+        assert running.findtext('p[@class="device-value"]') == "청소 중"
+        assert running.find('h3/span[@class="spira-dot"]') is not None
+        clock.advance(60)
+        world.complete_due()
+        finished = tile(client)
+        assert finished.findtext('p[@class="device-value"]') == "청소 끝"
+        assert finished.find('h3/span[@class="spira-dot"]') is not None
+        post(client, "/operator/device", target=cleaner, actor="resident", actor_name="아빠",
+             values={"clean": {"room": "거실"}})
+        clock.advance(60)
+        world.complete_due()
+        assert tile(client).find('h3/span[@class="spira-dot"]') is None
+        assert "아빠" in tile(client).findtext('p[@class="change-marker"]')
+
+
+def test_fridge_shows_each_observed_notice_and_its_full_text(tmp_path):
+    app = operator_app(tmp_path)
+    notices = [
+        f'{item["item"]} · {item["text"]}' for item in fixture_json("ep_9031/episode.json")["item_tasks"]
+    ]
+    with TestClient(app) as client:
+        wire = Wire(app.state.world)
+        for notice in notices:
+            wire.command("mqtt:fridge_01", {"show_notice": notice})
+        view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
+        fridge = view.find('.//div[@data-device="fridge_01"]/article')
+        buttons = fridge.findall('p[@class="device-value notice-row"]/button')
+        assert [button.findtext("span") for button in buttons] == notices
+        for button, notice in zip(buttons, notices, strict=True):
+            assert button.get("title") == notice
+            detail = fridge.find(f'p[@id="{button.get("popovertarget")}"]')
+            assert detail.get("popover") == "auto" and detail.text == notice
 
 
 def test_sim_at10_read_only_faint_waiting_and_item_only_episode(tmp_path):
@@ -1004,7 +1084,7 @@ def test_sim_at19_live_3d_households_and_household_content(tmp_path, monkeypatch
             assert marker.find("article/h3/small") is None
             assert marker.findtext('article/p[@class="device-value visually-hidden"]') == content
         fridge = view.find('.//div[@data-device="fridge_01"]/article')
-        notice_trigger = fridge.find('p[@class="device-value"]/button')
+        notice_trigger = fridge.find('p[@class="device-value notice-row"]/button')
         assert notice_trigger.get("title") == notice_trigger.findtext("span") == notice
         detail = fridge.find(f'p[@id="{notice_trigger.get("popovertarget")}"]')
         assert detail.get("popover") == "auto" and detail.text == notice
@@ -1072,7 +1152,7 @@ def test_sim_at19_live_3d_households_and_household_content(tmp_path, monkeypatch
         assert view.findtext('.//section[@data-room="entrance"]/h2') == "현관"
 
 
-def test_viewer_planned_rows_show_targets_and_collapse_duplicates(tmp_path):
+def test_viewer_planned_rows_show_targets_and_collapse_duplicates(tmp_path, monkeypatch, clock):
     plan = fixture_json("ep_9031/plan.v3.json")
     light_task = next(task for task in plan["tasks"] if task["task_id"] == "t_mood#3")
     for index, command, value, trigger in (
@@ -1087,15 +1167,17 @@ def test_viewer_planned_rows_show_targets_and_collapse_duplicates(tmp_path):
             "trigger": trigger,
         })
 
-    with TestClient(operator_app(tmp_path, plan_source=SourceStub(plan))) as client:
+    app = operator_app(tmp_path, plan_source=SourceStub(plan))
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.world, "clock", clock)
         view = ElementTree.fromstring(
             client.get("/sim/viewer?fragment=true").raise_for_status().text
         )
         for device, expected in (
-            ("display_01", ["공주 화면 · 손님 오면"]),
+            ("display_01", ["공주 화면 · 손님 오면 · 13:30–17:00"]),
             ("plug_kettle", ["끄기 · 토 13:30"]),
             ("fridge_01", ["안내 표시 · 택배를 들이면"]),
-            ("light_01", ["분홍 빛 · 손님 오면", "따뜻한 빛 · 토 12:40", "흰 빛 · 토 12:41"]),
+            ("light_01", ["분홍 빛 · 손님 오면 · 13:30–17:00", "따뜻한 빛 · 토 12:40", "흰 빛 · 토 12:41"]),
         ):
             rows = view.findall(f'.//div[@data-device="{device}"]/p[@class="planned"]')
             assert ["".join(row.itertext()) for row in rows] == expected
@@ -1164,9 +1246,12 @@ def test_sim_at20_viewer_projects_world_markers_and_no_reasoning(tmp_path, monke
         assert "아빠" not in json.dumps(public, ensure_ascii=False)
         assert overlay["errors"] == []
         for row in overlay["preparation"] + overlay["notices"]:
-            assert set(row) == {
+            fields = {
                 "plan_id", "task_id", "device", "command", "target_value", "wait", "protective",
             }
+            if row["wait"] == "guest_arrived":
+                fields |= {"window", "missed"}
+            assert set(row) == fields
         assert '<span class="planned-clock"> · 토 14:00</span>' in page
         view = ElementTree.fromstring(fragment)
         oven_plan = view.find('.//div[@data-device="oven_01"]/p[@class="planned"]')

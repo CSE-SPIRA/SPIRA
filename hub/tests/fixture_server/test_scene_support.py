@@ -1,12 +1,13 @@
 """HTTP checks for opt-in, wall-clock scene replay."""
 
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
 
 from . import create_app
-from .scene_support import NextOrder
+from .scene_support import NextOrder, live_replay
 from .test_fixture_server import (
     EPISODE,
     HEADERS,
@@ -102,7 +103,45 @@ def test_scene_order_exposes_rationale_at_first_card_poll(episode_id):
     }
     cards = client.cards(since=initial["server_time"])["cards"]
     assert [card["card_id"] for card in cards] == client.fixture("episode.json")["card_ids"]
-    assert client.request("GET", rationale) == client.fixture("rationale.json")
+    actual = client.request("GET", rationale)
+    original = client.fixture("rationale.json")
+    if episode_id == "ep_9031":
+        starts = datetime.fromisoformat(cards[0]["starts_at"]).astimezone(ZoneInfo("Asia/Seoul"))
+        linked = actual["evidence"]["calendar"][0]
+        assert linked["start"] == starts.strftime("%H:%M")
+        assert linked["end"] == (starts + timedelta(seconds=30)).strftime("%H:%M")
+        assert actual["evidence"]["calendar"][1:] == original["evidence"]["calendar"][1:]
+    else:
+        assert actual == original
+
+
+def test_demo_guest_window_and_calendar_agree_across_seoul_midnight():
+    now = datetime.fromisoformat("2026-11-22T23:59:00+09:00")
+    order = NextOrder(episode_id="ep_9031", starts_in_seconds=90, duration_seconds=30)
+    replay = live_replay(order, demo_mode=True, now=now, guest_window=900)
+    starts = now + timedelta(seconds=90)
+    ends = starts + timedelta(seconds=30)
+    mood = next(task for task in replay.plan.tasks if task.task_id == "t_mood#3")
+    assert datetime.fromisoformat(mood.trigger.window.from_) == starts
+    closes = starts + timedelta(seconds=900)
+    assert datetime.fromisoformat(mood.trigger.window.to) == closes
+    assert datetime.fromisoformat(mood.end.or_time) > closes
+    assert replay.calendar.events[0].start == starts.isoformat()
+    assert replay.calendar.events[0].end == ends.isoformat()
+    assert replay.files["rationale.json"]["evidence"]["calendar"][0] == {
+        "id": "c1", "days_after": 1, "day": "월", "tags": ["생일"],
+        "start": "00:00", "end": "00:01",
+    }
+    assert replay.card.text.startswith("월요일 생일")
+    for task, item in zip(replay.plan.tasks[-2:], replay.episode.item_tasks, strict=True):
+        assert task.actions[0].value == f"{item.item} · {item.text}"
+    assert "월요일" in replay.files["rationale.json"]["item_tasks"][0]["text"]
+
+    ordinary = live_replay(order, demo_mode=False, now=now, guest_window=900)
+    assert ordinary.calendar.events[0].start != starts.isoformat()
+    original_window = next(task.trigger.window for task in ordinary.plan.tasks if task.task_id == "t_mood#3")
+    assert datetime.fromisoformat(original_window.from_) == starts - timedelta(minutes=30)
+    assert datetime.fromisoformat(original_window.to) == ends
 
 
 def test_scene_demo_wall_times_and_live_revisions():

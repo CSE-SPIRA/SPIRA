@@ -19,10 +19,11 @@ STATE = {
 }
 
 
-def create_demo_fixture(episode, path, starts_in, scene_controls):
+def create_demo_fixture(episode, path, starts_in, scene_controls, guest_window=None):
     app = create_app(
         episode, demo_mode=True, scene_controls=scene_controls,
         default_scene=NextOrder(episode_id=episode, starts_in_seconds=starts_in),
+        guest_window=guest_window,
     )
     endpoints = {route.name: route.endpoint for route in app.routes}
     cells = {}
@@ -62,9 +63,10 @@ def main():
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--state", type=Path, required=True)
     parser.add_argument("--starts-in", type=int, required=True)
+    parser.add_argument("--guest-window", type=int)
     parser.add_argument("--scene-controls", action="store_true")
     args = parser.parse_args()
-    app = create_demo_fixture(args.episode, args.state, args.starts_in, args.scene_controls)
+    app = create_demo_fixture(args.episode, args.state, args.starts_in, args.scene_controls, args.guest_window)
     uvicorn.run(app, host="127.0.0.1",
                 port=args.port, access_log=False)
 

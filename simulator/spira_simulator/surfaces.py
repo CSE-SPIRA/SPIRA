@@ -12,10 +12,7 @@ from .profile import Device
 from .world import PEOPLE, SEOUL, World
 
 SCENES = {
-    "kids_party": "공주 화면",
-    "party": "파티 화면",
-    "calm": "잔잔한 화면",
-    "cinema": "영화 화면",
+    scene: STATE_WORDS[f"scene_{scene}"] for scene in ("kids_party", "party", "calm", "cinema")
 }
 PLAYLISTS = {"calm": "잔잔한 음악", "party": "파티 음악", "family": "가족 모임 음악"}
 PURIFIER_MODES = {"auto": "자동", "turbo": "터보", "sleep": "취침"}
@@ -106,6 +103,21 @@ def display_time(at: str | datetime) -> str:
     return f"{'월화수목금토일'[local.weekday()]} {local:%H:%M}"
 
 
+def guest_window_text(window: dict) -> str:
+    return "–".join(
+        datetime.fromisoformat(window[bound]).astimezone(SEOUL).strftime("%H:%M")
+        for bound in ("from", "to")
+    )
+
+
+def home_event_observation(fact: dict) -> dict:
+    occurred_at = fact["occurred_at"]
+    _, observation = ENTRANCE_EVENTS.get(
+        fact["event_type"], (None, "집에서 변화를 감지했어요")
+    )
+    return {"at": display_time(occurred_at), "occurred_at": occurred_at, "observation": observation}
+
+
 def home_event_controls(world: World) -> list[dict]:
     controls = {}
     actions_by_signal = defaultdict(list)
@@ -124,15 +136,7 @@ def home_event_controls(world: World) -> list[dict]:
     for fact in facts:
         event_type = fact["event_type"]
         for action in actions_by_signal.get((fact["target"], event_type), ()):
-            occurred_at = fact["occurred_at"]
-            _, observation = ENTRANCE_EVENTS.get(
-                event_type, (None, "집에서 변화를 감지했어요")
-            )
-            controls[action].update(
-                at=display_time(occurred_at),
-                occurred_at=occurred_at,
-                observation=observation,
-            )
+            controls[action].update(home_event_observation(fact))
     return list(controls.values())
 
 
@@ -265,10 +269,18 @@ def viewer_world(world: World) -> dict:
     with world.store.lock:
         now = world.clock()
         snapshot = world.snapshot(for_display=True)
-        changes = {
-            fact["target"]: latest_change(fact) for fact in world.store.latest_truth()
-        }
+        changes = {}
+        for fact in world.store.latest_truth():
+            target = fact["target"]
+            if fact["actor"] == "device_self" and fact["event_type"].endswith(".completed"):
+                fact = world.store.job_start(target, fact["job_id"]) or fact
+            changes[target] = latest_change(fact)
         home_truth = world.store.home_truth(tuple(ENTRANCE_EVENTS))
+        notices = {
+            report["target"]: world.store.fridge_notices(report["target"])
+            for report in snapshot["devices"]
+            if report["observation"] == "current" and report["values"].get("show_notice")
+        }
     entrance = []
     for fact in home_truth:
         sensor, label = ENTRANCE_EVENTS[fact["event_type"]]
@@ -293,6 +305,9 @@ def viewer_world(world: World) -> dict:
             for key in HOUSE_VISUAL_PROPERTIES.get(report["device_type"], ())
             if key in report["values"]
         }
+        notice = report["values"].get("show_notice")
+        if notice:
+            device["notices"] = notices.get(report["target"]) or [notice]
     return {
         "clock": display_time(now),
         "clock_at": now.isoformat(),
@@ -353,8 +368,12 @@ def viewer_plan(data: dict, device_names: dict) -> tuple[dict, list[dict]]:
         action, detail = planned_action(row["command"], row.get("target_value"))
         label = TRIGGER_NAMES.get(wait) or display_time(wait)
         timed = wait not in TRIGGER_NAMES
+        if window := row.get("window"):
+            label = f"{label} · {guest_window_text(window)}"
+        missed = row.get("missed", False)
         entry = planned[row["device"]].setdefault(
-            (action, label, timed), {"action": action, "wait": label, "timed": timed, "details": []}
+            (action, label, timed, missed),
+            {"action": action, "wait": label, "timed": timed, "missed": missed, "details": []},
         )
         if detail and detail not in entry["details"]:
             entry["details"].append(detail)

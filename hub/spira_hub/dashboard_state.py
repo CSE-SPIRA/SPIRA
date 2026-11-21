@@ -137,7 +137,7 @@ def plan_history(store, ack_rows):
         })
         if not saved:
             continue
-        task_counts[plan_id, version] = len(saved["triggers"])
+        task_counts[plan_id, version] = len(saved["triggers"]), saved.get("notice_count")
         step = {"at": received_at, "plan_version": version}
         changes = saved["changes"]
         changed_triggers = {item["task_id"] for item in changes["triggers_changed"]}
@@ -262,11 +262,11 @@ def ledger_view(installation, history, task_counts, tasks, attempts, facts, even
 
     for version in history:
         plan_id, number = version["plan_id"], version["plan_version"]
-        count = task_counts.get((plan_id, number))
-        what = plan_words(version, count, task_devices, devices, compact=compact)
+        count, notices = task_counts.get((plan_id, number), (None, None))
+        what = plan_words(version, count, notices, task_devices, devices, compact=compact)
         add("plan", version["received_at"], "—", what, "hub",
             [delivery_report("ack", f"{plan_id}/{number}", version["ack"])],
-            plan_id=plan_id, plan_version=number, task_count=count)
+            plan_id=plan_id, plan_version=number, task_count=count, notice_count=notices)
 
     # Show an operation and its correlated C-3 reports as one happening.
     event_operations = {fact["event_id"]: fact["operation_id"] for _, fact in facts if "operation_id" in fact}

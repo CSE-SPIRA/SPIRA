@@ -77,7 +77,7 @@ def timestamp(value: str | None):
 
 def create_app(
     episode_id: str = "ep_9031", *, scene_controls: bool = False, demo_mode: bool = False,
-    default_scene: NextOrder | None = None,
+    default_scene: NextOrder | None = None, guest_window: int | None = None,
 ) -> FastAPI:
     replay = Replay(episode_id)
     if default_scene and Replay(default_scene.episode_id).household_id != replay.household_id:
@@ -137,7 +137,10 @@ def create_app(
             timestamp(event.start)
             timestamp(event.end)
         if active_order:
-            apply_scene_calendar(replay, active_order, calendar, demo_mode=demo_mode, now=now)
+            apply_scene_calendar(
+                replay, active_order, calendar, demo_mode=demo_mode, now=now,
+                guest_window=guest_window,
+            )
         elif not live_scenes and calendar == replay.calendar:
             replay.find_calendar_time()
         return response(CalendarResponse(accepted=len(calendar.events)), 202)
@@ -358,6 +361,7 @@ def create_app(
                     now = max(now, replay.clock + timedelta(microseconds=1))
                 upcoming = live_replay(
                     scene, demo_mode=demo_mode, now=now, sequence=scene_counts[template],
+                    guest_window=guest_window,
                 )
                 upcoming.devices = replay.devices
                 upcoming.profile = replay.profile
