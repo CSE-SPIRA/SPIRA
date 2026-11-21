@@ -19,6 +19,7 @@ import tempfile
 import time
 import urllib.request
 from contextlib import ExitStack, suppress
+from ipaddress import IPv4Address
 from pathlib import Path
 
 from spira_contracts.household_created import HouseholdCreated
@@ -40,13 +41,13 @@ def write_demo_installation(path):
     path.write_text(json.dumps(installation, ensure_ascii=False), encoding="utf-8")
 
 
-def choose_ports(requests):
+def choose_ports(requests, sim_host):
     with ExitStack() as stack:
         ports = {}
         for name, requested in sorted(requests.items(), key=lambda item: item[1] == 0):
             listener = stack.enter_context(socket.socket())
             listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            listener.bind(("127.0.0.1", requested))
+            listener.bind((sim_host if name == "sim" else "127.0.0.1", requested))
             listener.listen()
             ports[name] = listener.getsockname()[1]
     return ports
@@ -76,6 +77,8 @@ def run_directory(port, episode):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8730, help="Simulator port (default 8730)")
+    parser.add_argument("--sim-lan-ip", type=IPv4Address, metavar="IP",
+                        help="Expose the Simulator on the demo LAN and print its operator URL at IP")
     parser.add_argument("--shell-port", type=int, help="Demo shell port (default: choose a free port)")
     parser.add_argument("--no-shell", action="store_true", help="Start the live stack without the demo shell")
     parser.add_argument("--episode", default="ep_9031", choices=sorted(PROFILES))
@@ -116,8 +119,9 @@ def run(args, mosquitto, directory, requests):
         logs = directory / latest.read_text(encoding="utf-8").strip()
     else:
         logs = Path(tempfile.mkdtemp(prefix="run-", dir=directory))
+    sim_host = "0.0.0.0" if args.sim_lan_ip else "127.0.0.1"
     try:
-        ports = choose_ports(requests)
+        ports = choose_ports(requests, sim_host)
     except OSError as error:
         sys.exit(f"demo-up could not reserve its ports: {error}")
     urls = {name: f"http://127.0.0.1:{port}" for name, port in ports.items() if name != "mqtt"}
@@ -192,7 +196,7 @@ def run(args, mosquitto, directory, requests):
                ROOT, SPIRA_SERVER_URL=urls["fixture"], SPIRA_HOUSEHOLD=HOUSEHOLD, SPIRA_HUB_KEY=hub_key,
                SPIRA_MQTT_PORT=str(ports["mqtt"]), SPIRA_MQTT_PREFIX=prefix)
 
-        launch("simulator", [sys.executable, "-m", "uvicorn", "spira_simulator.api:app", "--host", "127.0.0.1",
+        launch("simulator", [sys.executable, "-m", "uvicorn", "spira_simulator.api:app", "--host", sim_host,
                              "--port", str(ports["sim"]), "--no-access-log"], ROOT / "simulator",
                MQTT_HOST="127.0.0.1", MQTT_PORT=str(ports["mqtt"]), MQTT_PREFIX=prefix,
                WORLD_DB=str(logs / "world.db"),
@@ -223,8 +227,9 @@ def run(args, mosquitto, directory, requests):
         )
         url_file = logs / "urls.txt"
         url_file.write_text(service_urls, encoding="utf-8")
+        operator_origin = f"http://{args.sim_lan_ip or '127.0.0.1'}:{ports['sim']}"
         print(f"{service_urls}"
-              f"Operator:  {urls['sim']}/operator  (operator / {operator_token})\n"
+              f"집에서 일어나는 일: {operator_origin}/operator  (operator / {operator_token})\n"
               f"App preview: app/scripts/browser-demo --demo-port {ports['sim']} --stack-log {url_file}\n"
               f"Logs:      {logs}\nCtrl-C to stop.", flush=True)
         while not stopping:

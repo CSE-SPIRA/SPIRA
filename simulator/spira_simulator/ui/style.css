@@ -42,6 +42,39 @@ button { cursor: pointer; background: var(--green-soft); margin: .25rem .2rem .2
 textarea { width: 100%; min-height: 5.2rem; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--space-8) 0 var(--space-16); }
 
+.house-events {
+  margin-bottom: var(--space-32);
+  padding: clamp(var(--space-16), 3vw, var(--space-32));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-22);
+  background: var(--surface);
+}
+.house-events h1 { margin-bottom: var(--space-20); font-size: clamp(var(--size-24), 5vw, var(--size-36)); }
+.house-event-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: var(--space-16);
+}
+.house-event button {
+  width: 100%;
+  min-height: var(--space-48);
+  margin: 0;
+  border-radius: var(--radius-12);
+  background: var(--green);
+  color: var(--white);
+  font-size: var(--size-18);
+  font-weight: 600;
+}
+.house-event button:hover { background: var(--green-deep); }
+.house-event button:disabled { opacity: .65; cursor: wait; }
+.house-event p {
+  margin: var(--space-4) 0 0;
+  color: var(--muted);
+  font-size: var(--size-14);
+}
+.house-event-error { color: var(--pink-ink); margin: 0; }
+.house-event-error:not(:empty) { margin-top: var(--space-12); }
+
 .person-controls { margin-bottom: var(--space-16); }
 .person-controls summary { cursor: pointer; padding: var(--space-4) 0; }
 .person-controls form { margin: var(--space-4) 0; }

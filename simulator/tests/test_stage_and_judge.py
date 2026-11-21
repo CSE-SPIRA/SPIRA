@@ -622,6 +622,71 @@ def test_raw_home_signals_and_wall_clock_sim_at18_local_evidence(tmp_path, monke
         assert len(client.get("/operator/truth", auth=AUTH).json()) == len(signals)
 
 
+def test_korean_home_controls_record_the_shells_household_observations(
+    tmp_path, monkeypatch, clock
+):
+    app = operator_app(tmp_path)
+
+    def home_section(client):
+        page = client.get("/operator", auth=AUTH).raise_for_status().text
+        assert '<html lang="ko">' in page
+        assert 'href="/sim/assets/house/tokens.css"' in page
+        _, opening, remainder = page.partition('<section class="house-events"')
+        section, closing, engineering = remainder.partition("</section>")
+        assert "<h1>Household operator</h1>" in engineering
+        return ElementTree.fromstring(opening + section + closing)
+
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.world, "clock", clock)
+        wire = Wire(app.state.world)
+        monkeypatch.setattr(app.state.protocol, "publish", wire.publish)
+        home = home_section(client)
+        assert home.findtext("h1") == "집에서 일어나는 일"
+        assert home.get("data-home-endpoint") == "/operator/home"
+        buttons = {button.text: button for button in home.findall(".//button")}
+        assert list(buttons) == ["택배 들이기", "손님 도착", "파티 끝"]
+        observations = home.findall(".//div[@class='house-event']/p")
+        assert len(observations) == 3
+        assert all("아직 관찰된 일이 없어요" in row.text for row in observations)
+
+        for label in buttons:
+            action = buttons[label].get("data-home-action")
+            post(client, home.get("data-home-endpoint"), action=action)
+            if label == "손님 도착":
+                viewer = client.get("/sim/viewer?fragment=true").raise_for_status().text
+                entrance = ElementTree.fromstring(viewer).find(
+                    ".//ul[@id='entrance-history']"
+                )
+                assert [item.text.strip() for item in entrance][:3] == [
+                    "손님 있음", "문 열림 감지", "초인종 울림",
+                ]
+                assert "data-home-action" not in viewer
+            clock.advance(60)
+
+        assert [frame[1]["event_type"] for frame in wire.frames] == [
+            "camera.package_removed", "doorbell.pressed", "door_lock.opened",
+            "presence.room_occupied", "presence.room_empty",
+        ]
+        viewer = client.get("/sim/viewer?fragment=true").raise_for_status().text
+        assert "손님 나감" in viewer
+        post(
+            client,
+            home.get("data-home-endpoint"),
+            action=buttons["손님 도착"].get("data-home-action"),
+        )
+
+    with TestClient(app) as client:
+        home = home_section(client)
+        observations = home.findall(".//div[@class='house-event']/p")
+        assert [
+            (row.findtext("time"), row.find("time").tail.strip()) for row in observations
+        ] == [
+            ("토 14:00", "· 택배 들임"),
+            ("토 14:03", "· 손님 있음"),
+            ("토 14:02", "· 손님 나감"),
+        ]
+
+
 def test_sim_at10_read_only_faint_waiting_and_item_only_episode(tmp_path):
     source = SourceStub(fixture_json("ep_9031/plan.v1.json"))
     with TestClient(operator_app(tmp_path, plan_source=source)) as client:

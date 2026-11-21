@@ -103,4 +103,25 @@ async function init() {
   }));
 }
 
+const homeEvents = document.querySelector("[data-home-endpoint]");
+if (homeEvents) {
+  const controls = homeEvents.querySelectorAll("[data-home-action]");
+  const status = homeEvents.querySelector('[role="status"]');
+  for (const control of controls) {
+    control.addEventListener("click", async () => {
+      for (const entry of controls) entry.disabled = true;
+      status.textContent = "";
+      try {
+        await request(homeEvents.dataset.homeEndpoint, { action: control.dataset.homeAction });
+      } catch {
+        status.textContent = "집에서 일어난 일을 기록하지 못했어요. 다시 눌러 주세요.";
+        for (const entry of controls) entry.disabled = false;
+        control.focus();
+        return;
+      }
+      window.location.reload();
+    });
+  }
+}
+
 init().catch((error) => { byId("notice").textContent = error.message; });

@@ -24,6 +24,7 @@ from .surfaces import (
     device_controls,
     device_name,
     display_time,
+    home_event_controls,
     peer_viewers,
     tiles,
     viewer_plan,
@@ -260,6 +261,7 @@ def create_app(
             request,
             "operator.html",
             {
+                "home_events": home_event_controls(world),
                 "household_id": world.profile.household_id,
                 "inventory": world.devices.values(),
                 "people": world.profile.demo_people,
