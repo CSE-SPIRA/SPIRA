@@ -95,7 +95,7 @@ up to four lines, `done / total`, the awaited event, and for every line its
 contract state and `when`. Show the schedule as the Seoul weekday and event
 name when available. On the card and in 우리 집, show a line's trigger or its
 relation to the schedule start from the supplied times. Show exact times in
-판단 근거. After a line ends, show the supplied restore outcome when
+the order story and line details. After a line ends, show the supplied restore outcome when
 `end_state` is other than `none`, and preserve the Server display `note`.
 Keep newly closed preparations at the top until the next share or for 30
 minutes. Summarize restoration using only the card's own restored lines.
@@ -140,19 +140,23 @@ eligibility only and MUST NOT silently revive cancelled work. (PC-5, PC-6)
 
 ### A6. WHY
 
-**A6-R1.** WHY MUST show the stored evidence chain without starting a new
-inference. In one scroll, show item types and quantities with unbundled items
-marked, linked calendar evidence, unusual items and their reasons, similar
-order counts by intent and examples with overlapping items, situation slots
-with their evidence, and intent text with the theme highlighted. Then show each
-task's need, line, devices, way, and available card time and state, followed by
-fridge notice text. If the need repeats the line with a small wording change,
-put the need behind **왜 이 일?**. If a derived time predates the share, use
-**바로 실행** and the recorded run time or share time as the result of the
-derivation. Use contract fields only. For no-intent orders, show the
-stored reason and notices and skip empty sections. A line's WHY opens at its
-task and highlights the situation behind its card. Missing rationale remains
-unavailable. (PC-1, PC-2)
+**A6-R1.** A card tap or **자세히** opens the order story, led by its live or
+closed summary. Show the stored judgment, plan, known changes, fridge guidance,
+executions, restore outcomes, and S7 feedback as they become available through
+the existing App polling and rationale read. Show supplied share and execution
+times and distinguish planned upcoming times and triggers. Untimed entries
+remain untimed. No additional inference. (PC-1, PC-2)
+
+**A6-R2.** The judgment expands in place with the intent, the available calendar,
+unusual-item, and similar-order clues, set-aside items, and line needs. A line
+tap opens its own details with its need, timing derivation, execution results,
+and the card's shared intent and slots. If a derived time predates the share,
+use **바로 실행** and the recorded run time or share time for the derivation.
+**전체 근거 보기** opens the compact stored evidence in order: read items and
+quantities, unusual items, similar orders, situation slots and basis, and linked
+calendar. For no-intent orders, keep the stored reason and notices available.
+Missing rationale remains unavailable. S7 feedback links to **우리 집 기억** and
+says it will be considered in future preparations. (PC-1, PC-2)
 
 ### A7. Item guidance
 
@@ -205,7 +209,7 @@ exits.
 | APP-AT-08 | Stop a card containing unstarted work, a SPIRA-owned effect, a person-changed effect, and a person-started job. The peer receives contract `stop`; refreshed UI shows cancellation/restoration while preserving both human effects, asks no reason, and leaves item guidance unchanged. | PC-5, PC-6 | A5-R2, A7-R1, A8-R1 |
 | APP-AT-09 | Pause a household with unstarted work, a running effect, and then a newly shared order. The refreshed projection cancels the unstarted work, keeps the running lifecycle, stores the order as paused without judgment, and does not revive cancelled work after resume. | PC-5, PC-6 | A5-R3, A8-R1 |
 | APP-AT-10 | After the peer has only a command acknowledgement, return a card that is not `done`; then return refreshed `done`, `partial`, `failed`, `unknown`, and restore outcomes. The UI does not complete on acknowledgement and renders every supplied state without upgrading unknown evidence. | PC-4, PC-5 | P-R2, A8-R1 |
-| APP-AT-11 | Render the `ep_9031` and `ep_9150` evidence chains from contract fields. A line's WHY focuses its task and supporting situation. A second open uses the stored rationale. | PC-1, PC-2 | A6-R1 |
+| APP-AT-11 | Render the `ep_9031` order story and `ep_9150` stored evidence. Open two distinct line details, expand the judgment, and check execution order, live and closed summaries, S7 feedback, and full evidence. | PC-1, PC-2 | A6-R1, A6-R2 |
 | APP-AT-12 | Render the plain-groceries episode with `card_ids: []` and item guidance through unreleased, released, and closed states. No preparation card is fabricated, and the guidance lifecycle remains visible. | PC-1, PC-2 | A3-R2, A7-R1 |
 | APP-AT-13 | From settings, open memory, view Server rows, delete one case with a failed response and then a successful response/readback. No edit controls exist; failure remains visible; deletion is claimed only after Server confirmation. | PC-6 | A9-R1 |
 | APP-AT-14 | Run the same scene against the local fixture peer and against a qualified Server profile. Fixture qualification is visible and never presented as real-Server, physical-device, or native-lifecycle evidence. Verify 우리 집 reads the Hub inventory and that browser sample sharing uses `POST /v1/orders`. | PC-4 | P-R2, P-R3 |

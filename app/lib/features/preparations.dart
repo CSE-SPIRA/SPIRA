@@ -4,12 +4,12 @@ import 'package:flutter/material.dart';
 import '../app_controller.dart';
 import '../contracts.dart' as wire;
 import '../design_tokens.g.dart';
-import '../design_vocabulary.g.dart';
 import '../korean_text.dart';
 import '../theme.dart';
 import 'labels.dart';
 import 'order_extraction.dart';
 import 'rationale.dart';
+import 'order_story.dart';
 import 'setup.dart';
 import 'status_badge.dart';
 
@@ -352,7 +352,7 @@ class _OrderPreparation extends StatelessWidget {
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton(
-            onPressed: () => openRationale(context, app, episode.episodeId),
+            onPressed: () => openFullEvidence(context, app, episode.episodeId),
             child: const KoreanText('WHY · 이유 보기'),
           ),
         ),
@@ -376,48 +376,6 @@ class _PreparationCard extends StatelessWidget {
   final AppController app;
   final wire.Card card;
   final bool hero;
-
-  String _closureSummary(wire.Rationale? rationale) {
-    final tasks = rationale?.tasks ?? const <wire.Task>[];
-    final inventory = app.homeInventory ?? app.discovered;
-    final devices = <String>{};
-    for (final task in tasks.where((task) => task.cardId == card.cardId)) {
-      if (rationaleLine(task, tasks, card)?.endState !=
-          wire.EndState.RESTORED) {
-        continue;
-      }
-      for (final device in task.devices) {
-        final appliance = device.type == 'smart_plug'
-            ? inventory?.devices
-                  .where((entry) => entry.id == device.id)
-                  .firstOrNull
-                  ?.label
-                  ?.trim()
-            : null;
-        devices.add(
-          appliance == null || appliance.isEmpty
-              ? deviceNames[device.type] ?? '기기'
-              : appliance,
-        );
-      }
-    }
-    if (devices.isEmpty) {
-      return card.stopped ? '이 준비가 중지됐어요.' : '준비를 마쳤어요.';
-    }
-    final subject = card.stopped
-        ? '준비를 중지해'
-        : isPartyPreparation(card)
-        ? '파티가 끝나'
-        : '준비를 마쳐';
-    // Zero-width breaks let a long device list wrap between names.
-    final names = devices.join('·\u200B');
-    final last = names.codeUnitAt(names.length - 1);
-    final particle =
-        last >= 0xAC00 && last <= 0xD7A3 && (last - 0xAC00) % 28 != 0
-        ? '을'
-        : '를';
-    return '$subject $names$particle 원래대로 돌렸어요.';
-  }
 
   Future<void> _confirmStop(BuildContext context) async {
     final confirmed = await showDialog<bool>(
@@ -481,10 +439,10 @@ class _PreparationCard extends StatelessWidget {
                 Expanded(
                   child: Semantics(
                     header: true,
-                    hint: '판단 근거 열기',
+                    hint: '주문 이야기 열기',
                     child: InkWell(
                       borderRadius: BorderRadius.circular(8),
-                      onTap: () => openRationale(context, app, card.episodeId),
+                      onTap: () => openOrderStory(context, app, card),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 5),
                         child: KoreanText.rich(
@@ -543,6 +501,10 @@ class _PreparationCard extends StatelessWidget {
                       '${eventLabel(event)} 기다리는 중',
                       style: theme.textTheme.bodySmall,
                     ),
+                  TextButton(
+                    onPressed: () => openOrderStory(context, app, card),
+                    child: const KoreanText('자세히'),
+                  ),
                 ],
               ),
             ),
@@ -550,7 +512,7 @@ class _PreparationCard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: KoreanText(
-                  _closureSummary(rationale),
+                  closedPreparationSummary(app, card, rationale),
                   style: theme.textTheme.bodyMedium,
                 ),
               ),
@@ -620,15 +582,10 @@ class _PreparationLine extends StatelessWidget {
       children: [
         Expanded(
           child: Semantics(
-            hint: '판단 근거 열기',
+            hint: '할 일의 준비 이유 열기',
             child: InkWell(
               borderRadius: BorderRadius.circular(8),
-              onTap: () => openRationale(
-                context,
-                app,
-                card.episodeId,
-                focus: (cardId: card.cardId, taskId: line.taskId),
-              ),
+              onTap: () => openOrderStory(context, app, card, line: line),
               child: ConstrainedBox(
                 constraints: const BoxConstraints(minHeight: 48),
                 child: Padding(

@@ -88,10 +88,7 @@ class SettingsScreen extends StatelessWidget {
         contentPadding: EdgeInsets.zero,
         title: const KoreanText('우리 집 기억'),
         trailing: const Icon(Icons.chevron_right),
-        onTap: () => Navigator.push<void>(
-          context,
-          MaterialPageRoute(builder: (_) => _MemoryScreen(app)),
-        ),
+        onTap: () => openHomeMemory(context, app),
       ),
       if (app.discovered?.devices case final devices?
           when devices.isNotEmpty) ...[
@@ -111,6 +108,13 @@ class SettingsScreen extends StatelessWidget {
         ],
       ],
     ],
+  );
+}
+
+void openHomeMemory(BuildContext context, AppController app) {
+  Navigator.push<void>(
+    context,
+    MaterialPageRoute(builder: (_) => _MemoryScreen(app)),
   );
 }
 

@@ -83,9 +83,9 @@ It passes the stack's URL file to `--stack-log`. Use `--demo-port`, `--proxy-por
 the defaults of 8730, 8731, and 8732.
 
 Click **예시 주문으로 공유** in the **미리보기** strip above the tab bar to see
-the screenshot scan, extracted items, and preparation card. Tap a
-preparation line to see its **판단 근거** or open the
-**우리 집** tab to browse the room grids. The preview uploads the bundled PNG
+the screenshot scan, extracted items, and preparation card. Tap **자세히** for the
+order story or a preparation line for its timing and results. Open **우리 집**
+to browse the room grids. The preview uploads the bundled PNG
 to `POST /v1/orders` and skips Android sharing and Google Calendar. The web build
 serves it at `/assets/assets/example-order.png`.
 
@@ -145,7 +145,8 @@ delivery, process recreation, and TalkBack still require an Android runtime.
 | Tabs and app shell | [`main.dart`](lib/main.dart) |
 | Current and past preparations | [`preparations.dart`](lib/features/preparations.dart) |
 | Order scan and extracted items | [`order_extraction.dart`](lib/features/order_extraction.dart) |
-| WHY | [`rationale.dart`](lib/features/rationale.dart) |
+| Order story and line details | [`order_story.dart`](lib/features/order_story.dart), [`order_story_details.dart`](lib/features/order_story_details.dart) |
+| Full evidence and order judgment preview | [`rationale.dart`](lib/features/rationale.dart) |
 | 우리 집 | [`our_home.dart`](lib/features/our_home.dart) |
 | Settings and connection keys | [`settings.dart`](lib/features/settings.dart) |
 | Labels | [`labels.dart`](lib/features/labels.dart) |

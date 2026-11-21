@@ -15,6 +15,7 @@ import 'design_vocabulary.g.dart';
 import 'platform/android_bridge.dart';
 import 'platform/google_calendar.dart';
 import 'platform/home_hub_onboarding.dart';
+import 'preparation_history.dart';
 
 abstract interface class AppStore {
   Future<String?> read(String key);
@@ -113,6 +114,21 @@ class AppController extends ChangeNotifier {
   final _rationales =
       <String, ({Future<wire.Rationale> future, bool loading})>{};
   final _storedRationales = <String, wire.Rationale>{};
+  final _preparationChanges = <String, List<PreparationChange>>{};
+  final _initialPreparations = <String, wire.Card>{};
+  final _openOrderStories = <String>{};
+
+  void setOrderStoryOpen(String episodeId, bool open) {
+    if (open) {
+      _openOrderStories.add(episodeId);
+    } else {
+      _openOrderStories.remove(episodeId);
+    }
+  }
+
+  Iterable<PreparationChange> preparationChanges(String cardId) =>
+      _preparationChanges[cardId] ?? const [];
+  wire.Card? initialPreparation(String cardId) => _initialPreparations[cardId];
   wire.Devices? homeInventory;
   Future<void>? _homeInventoryRefresh;
 
@@ -696,8 +712,17 @@ class AppController extends ChangeNotifier {
                 .isBefore(DateTime.parse(previous.updatedAt))) {
           continue;
         }
-        if (previous == null || _immediateExecutionChanged(previous, card)) {
+        if (previous == null || previous.updatedAt != card.updatedAt) {
           changedRationaleEpisodes.add(card.episodeId);
+          if (previous != null) {
+            final change = PreparationChange.between(previous, card);
+            if (change != null) {
+              _initialPreparations.putIfAbsent(card.cardId, () => previous);
+              _preparationChanges
+                  .putIfAbsent(card.cardId, () => [])
+                  .add(change);
+            }
+          }
         }
         cards[card.cardId] = card;
         if (platform != null && card.notify) {
@@ -737,7 +762,21 @@ class AppController extends ChangeNotifier {
         final previous = episodes[episode.episodeId];
         if (previous?.status != episode.status ||
             !listEquals(previous?.cardIds, episode.cardIds) ||
-            changedRationaleEpisodes.contains(episode.episodeId)) {
+            changedRationaleEpisodes.contains(episode.episodeId) ||
+            !listEquals(
+              previous?.itemTasks
+                  .map((task) => (task.taskId, task.state, task.text))
+                  .toList(),
+              episode.itemTasks
+                  .map((task) => (task.taskId, task.state, task.text))
+                  .toList(),
+            )) {
+          _rationales.remove(episode.episodeId);
+        } else if (episode.status != wire.EpisodeStatus.CLOSED &&
+            _openOrderStories.contains(episode.episodeId) &&
+            !loadingRationale(episode.episodeId)) {
+          // An observation or another device result can arrive before the
+          // card's aggregate state changes. Use the existing polling cycle.
           _rationales.remove(episode.episodeId);
         }
         if (episode.status != wire.EpisodeStatus.CLOSED) {
@@ -797,23 +836,6 @@ class AppController extends ChangeNotifier {
     }
     _change();
     await _deliverNotifications();
-  }
-
-  bool _immediateExecutionChanged(wire.Card previous, wire.Card current) {
-    final sharedAt = episodes[current.episodeId]?.sharedAt;
-    if (sharedAt == null) return false;
-    final shared = DateTime.parse(sharedAt);
-    return current.lines.any((line) {
-      final time = line.when?.time;
-      return time != null &&
-          DateTime.parse(time).isBefore(shared) &&
-          _hasStarted(line.state) &&
-          previous.lines
-                  .where((old) => old.taskId == line.taskId)
-                  .firstOrNull
-                  ?.state !=
-              line.state;
-    });
   }
 
   Future<void> _loadMissingHistory(
