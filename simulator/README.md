@@ -66,7 +66,10 @@ simulator/scripts/demo-up --episode ep_9031
 ```
 
 The launcher uses its own repository root and prints the `/demo`, Hub dashboard,
-and fixture URLs. Use `--port` if the default port 8730 is occupied. Page 1
+and fixture URLs. Each run starts with an empty fixture episode list and new
+Hub and World databases. Pass `--keep` to resume the last stopped run of the
+same checkout, episode and port. Use `--port` if the default port 8730 is occupied.
+Use `--peer-ports FIXTURE MQTT HUB` when the stack must use a reserved port range. Page 1
 projects the Server's reasoning from the contract. Page 2 shows the house in
 3D with the Hub's ledger. Press Ctrl-C to stop the stack. See [DEMO.md](DEMO.md)
 for the demo flow and the [App README](../app/README.md#run-in-the-browser) for

@@ -17,7 +17,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from .demo import mount_demo
-from .design_vocabulary import ROOM_NAMES, STATE_WORDS
+from .design_vocabulary import ROOM_NAMES
 from .mqtt import Broker, DeviceProtocol
 from .profile import DEFAULT_PROFILE, Profile, load_profile
 from .sources import JsonSource, Source, judge, stage_overlay
@@ -235,7 +235,6 @@ def create_app(
                 "peers": request.app.state.peer_viewers,
                 "rooms": rooms,
                 "room_names": ROOM_NAMES,
-                "state_words": STATE_WORDS,
                 "unplaced": planned.values(),
                 "has_preparation": bool(overlay_data["preparation"]),
                 "overlay_errors": overlay_data["errors"],
@@ -262,6 +261,8 @@ def create_app(
             request,
             "operator.html",
             {
+                "household_id": world.profile.household_id,
+                "inventory": world.devices.values(),
                 "people": world.profile.demo_people,
                 "devices": [
                     (

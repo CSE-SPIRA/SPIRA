@@ -693,7 +693,6 @@ async function refreshHouseMarkers() {
     replaceHouseMarkers($("viewer-markers"), markers);
     state.house?.setMarkers(markers);
   }
-  $("device-legend").textContent = fragment.getElementById("device-legend")?.textContent ?? "";
 }
 
 async function refreshHub() {

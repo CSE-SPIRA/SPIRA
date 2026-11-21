@@ -89,7 +89,32 @@ export function orientHouseCamera(camera, eye, aim, zoom, viewport) {
   camera.updateMatrixWorld();
 }
 
-export function projectHouseLabels(camera, width, height, cleanerPosition) {
+// The foundation and the top of the cutaway walls define the visible silhouette.
+const HOUSE_OUTLINE = [
+  ...[-6.8, 6.8].flatMap(x => [-.43, .03].flatMap(y => [-3.975, 3.975].map(z => [x, y, z]))),
+  [-6.72, 2.73, -3.96], [6.72, 2.73, -3.96], [-6.72, 2.73, -1.63],
+].map(position => new THREE.Vector3(...position));
+
+export function fitViewerCamera(camera, width, height) {
+  const compact = width < 720;
+  const sides = compact ? 10 : width * .045;
+  const top = compact ? 42 : 54;
+  const bottom = compact ? 36 : 24;
+  const bounds = new THREE.Box3().setFromPoints(
+    HOUSE_OUTLINE.map(point => point.clone().applyMatrix4(camera.matrixWorldInverse)));
+  const scale = Math.min((width - 2 * sides) / (bounds.max.x - bounds.min.x),
+    (height - top - bottom) / (bounds.max.y - bounds.min.y));
+  if (scale <= 0) return;
+  const center = bounds.getCenter(new THREE.Vector3());
+  center.y += (top - bottom) / (2 * scale);
+  Object.assign(camera, {
+    left: center.x - width / (2 * scale), right: center.x + width / (2 * scale),
+    top: center.y + height / (2 * scale), bottom: center.y - height / (2 * scale),
+  });
+  camera.updateProjectionMatrix();
+}
+
+export function projectHouseLabels(camera, width, height, cleanerPosition, viewer = false) {
   const point = new THREE.Vector3();
   const project = (position) => {
     point.fromArray(position).project(camera);
@@ -111,8 +136,49 @@ export function projectHouseLabels(camera, width, height, cleanerPosition) {
     anchors,
     screen: bounds([x - w / 2, y - h / 2, z], [x + w / 2, y + h / 2, z]),
     pendant: bounds([px - .49, py - .24, pz - .49], [px + .49, py + .65, pz + .49]),
-    floor: bounds([-4.96, .08, -3.54], [1.46, .08, 3.72]),
+    floor: viewer ? bounds([-3.95, .08, -.95], [.4, .67, 2.8])
+      : bounds([-4.96, .08, -3.54], [1.46, .08, 3.72]),
+    ...(viewer ? { table: bounds([2.57, .08, .65], [5.75, 1.05, 3.04]) } : {}),
   };
+}
+
+export function layoutViewerLabels(markers, width, height, clearance) {
+  const gap = 8;
+  const clamp = THREE.MathUtils.clamp;
+  const placed = [];
+  const obstacles = Object.values(clearance).filter(Boolean);
+  const ordered = [...markers].sort((a, b) => Number(b.required) - Number(a.required) || a.y - b.y);
+  for (const box of ordered) {
+    const { id, x, y, width: w, height: h } = box;
+    if (w > width - 2 * gap || h > height - 54 - gap) continue;
+    const side = id === "light_01" ? clearance.pendant : null;
+    const table = id === "oven_01" ? clearance.table : null;
+    const above = [x - w / 2, y - h - 12];
+    const candidates = [
+      ...(side ? [[side.left - w - gap, y - h / 2]] : []),
+      above, [x - w - gap, y - h - gap], [x + gap, y - h - gap],
+      [x - w - gap, y - h / 2], [x + gap, y - h / 2], [x - w / 2, y + gap],
+      ...(table ? [[table.right + gap, y + gap], [table.right + gap, y + h / 2]] : []),
+    ];
+    const blockers = [...obstacles, ...placed];
+    const alternatives = [];
+    for (const other of blockers) {
+      alternatives.push([above[0], other.top - h - gap], [other.left - w - gap, above[1]],
+        [other.right + gap, above[1]], [above[0], other.bottom + gap]);
+    }
+    const distance = ([left, top]) => (left - above[0]) ** 2 + (top - above[1]) ** 2;
+    candidates.push(...alternatives.sort((a, b) => distance(a) - distance(b)));
+    for (const [candidateX, candidateY] of candidates) {
+      const left = clamp(candidateX, gap, width - w - gap);
+      const top = clamp(candidateY, 54, height - h - gap);
+      const right = left + w, bottom = top + h;
+      if (blockers.some(other => left < other.right + gap && right > other.left - gap &&
+          top < other.bottom + gap && bottom > other.top - gap)) continue;
+      placed.push({ ...box, left, top, right, bottom });
+      break;
+    }
+  }
+  return placed;
 }
 
 export function layoutHouseLabels(markers, viewWidth, viewHeight, { screen, pendant, floor } = {}) {
@@ -164,12 +230,15 @@ export function layoutHouseLabels(markers, viewWidth, viewHeight, { screen, pend
 
 export function replaceHouseMarkers(current, next) {
   const focused = current.contains(document.activeElement) ? document.activeElement.id : "";
+  const openNotice = CSS.supports("selector(:popover-open)") &&
+    current.querySelector(".notice-detail:popover-open")?.id;
   current.replaceWith(next);
   if (focused) document.getElementById(focused)?.focus({ preventScroll: true });
+  if (openNotice) document.getElementById(openNotice)?.showPopover();
 }
 
 // The fixed I1 cutaway. View direction and entrance cues are separate from device values.
-export function createHouse(stage, { decorateLabel } = {}) {
+export function createHouse(stage, { decorateLabel, viewer = false } = {}) {
   const motion = matchMedia("(prefers-reduced-motion: reduce)");
   const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
   renderer.shadowMap.enabled = true;
@@ -821,13 +890,14 @@ export function createHouse(stage, { decorateLabel } = {}) {
   function placeLabels() {
     // Measure in stage pixels, before the outer frame scales to the screen.
     const inline = viewWidth >= 720;
-    const { anchors, screen, pendant: shade, floor } = projectHouseLabels(camera, viewWidth, viewHeight,
-      jobRunning ? cleaner.position : null);
+    const { anchors, screen, pendant: shade, floor, table } = projectHouseLabels(camera, viewWidth, viewHeight,
+      jobRunning ? cleaner.position : null, viewer);
     const clearance = {
       screen: display.visible ? screen : null,
       pendant: pendant.visible ? shade : null,
       floor: roomLighting.livingLevel.value > 0 || roomLighting.tvLevel.value > 0 ? floor : null,
     };
+    if (viewer) clearance.table = table;
     for (const [id, label] of labels) {
       if (Object.hasOwn(anchors, id)) label.classList.toggle("anchored", inline);
     }
@@ -837,16 +907,26 @@ export function createHouse(stage, { decorateLabel } = {}) {
       return [{ id, label, focused, required: focused || label.hasAttribute("data-required"),
         ...anchors[id], width: label.offsetWidth, height: label.offsetHeight }];
     });
-    const placements = inline ? layoutHouseLabels(markers, viewWidth, viewHeight, clearance) : [];
+    const layout = viewer ? layoutViewerLabels : layoutHouseLabels;
+    const placements = inline ? layout(markers, viewWidth, viewHeight, clearance) : [];
     const placed = new Set(placements.map(({ label }) => label));
     for (const { id, label, required } of markers) {
       label.classList.toggle("anchored", placed.has(label));
-      label.classList.toggle("unplaced", inline && !required && !placed.has(label));
-      label.classList.toggle("theme", readings.get(id)?.theme === true);
+      label.classList.toggle("unplaced", inline && !viewer && !required && !placed.has(label));
+      label.classList.toggle("theme", !viewer && readings.get(id)?.theme === true);
     }
     for (const { label, x, y, left, right, top, bottom, height } of placements) {
       label.style.left = `${left}px`;
       label.style.top = `${top}px`;
+      if (viewer) {
+        const startX = THREE.MathUtils.clamp(x, left, right);
+        const startY = THREE.MathUtils.clamp(y, top, bottom);
+        label.style.setProperty("--leader-x", `${startX - left}px`);
+        label.style.setProperty("--leader-top", `${startY - top}px`);
+        label.style.setProperty("--leader-length", `${Math.hypot(x - startX, y - startY)}px`);
+        label.style.setProperty("--leader-angle", `${Math.atan2(y - startY, x - startX)}rad`);
+        continue;
+      }
       const crosses = Object.values(clearance).some((area) => area && x >= area.left && x <= area.right &&
         Math.min(top, y) < area.bottom && Math.max(bottom, y) > area.top);
       const length = x < left || x > right || crosses ? 0 : Math.max(top - y, y - bottom, 0);
@@ -915,6 +995,7 @@ export function createHouse(stage, { decorateLabel } = {}) {
 
   function orient() {
     orientHouseCamera(camera, currentCamera, currentTarget, zoom, viewHeight ? viewWidth / viewHeight : 1);
+    if (viewer && viewWidth && viewHeight) fitViewerCamera(camera, viewWidth, viewHeight);
   }
 
   function frame(now) {

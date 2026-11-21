@@ -742,11 +742,15 @@ def test_sim_at16_mixed_stage_labels_virtual_assumption_provisional(tmp_path):
         view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
         for device, exceptions in (
             ("light_01", []),
-            ("light_02", ["실물 기기 · 미검증", "패널 조작을 알려 주지 않아요"]),
-            ("light_03", ["패널 조작을 알려 주지 않아요"]),
+            ("light_02", ["실물 기기 · 미검증"]),
+            ("light_03", []),
         ):
             heading = view.find(f'.//div[@data-device="{device}"]/article/h3')
             assert [mark.text for mark in heading.findall("small")] == exceptions
+        operator = client.get("/operator", auth=AUTH).raise_for_status().text
+        assert "light_01 · Virtual · Class A (panel reporting assumed)" in operator
+        assert "light_02 · Physical (unqualified) · Class B" in operator
+        assert "light_03 · Virtual · Class B" in operator
         for target in ("tapo:light_02", "matter:light_03"):
             assert tiles[target]["local_operation_reporting"] is False
             assert app.state.world.read(target)["local_operation"] is False
@@ -893,8 +897,11 @@ def test_sim_at19_live_3d_households_and_household_content(tmp_path, monkeypatch
         clock.advance(60)
         page = client.get("/sim/viewer").raise_for_status().text
         assert f'<a href="{other_home}">부모님 댁</a>' in page
-        assert "javascript:" not in page and "테스트 홈 · 지아네" in page
+        assert "javascript:" not in page and "<h1>지아네</h1>" in page
         assert "h_042" not in page
+        assert "h_042" in client.get("/operator", auth=AUTH).raise_for_status().text
+        assert "SPIRA가 설정했어요" in page and "아직 실행 전이에요" in page
+        assert "패널 조작을 알려 준다고 가정해요" not in page
         view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
         clock_text = view.find(".//time")
         assert clock_text.text == "토 14:01"
@@ -914,7 +921,6 @@ def test_sim_at19_live_3d_households_and_household_content(tmp_path, monkeypatch
             "oven_01": "170° · 19분 남음 · 굽는 중",
             "light_01": "분홍 330/45/70",
             "display_01": "공주 화면",
-            "fridge_01": notice,
         }.items():
             assert (
                 view.findtext(
@@ -928,7 +934,11 @@ def test_sim_at19_live_3d_households_and_household_content(tmp_path, monkeypatch
             assert marker.find("article/h3").get("title") == content
             assert marker.find("article/h3/small") is None
             assert marker.findtext('article/p[@class="device-value visually-hidden"]') == content
-        assert view.findtext('.//p[@id="device-legend"]') == "기본은 모의 기기예요. 패널 조작을 알려 준다고 가정해요."
+        fridge = view.find('.//div[@data-device="fridge_01"]/article')
+        notice_trigger = fridge.find('p[@class="device-value"]/button')
+        assert notice_trigger.get("title") == notice_trigger.findtext("span") == notice
+        detail = fridge.find(f'p[@id="{notice_trigger.get("popovertarget")}"]')
+        assert detail.get("popover") == "auto" and detail.text == notice
         assert view.findtext('.//h3[@id="entrance-summary"]') == "손님 있음 · 이전 3건"
         assert view.find('.//h3[@id="entrance-summary"]').get("tabindex") == "0"
         assert [
@@ -971,7 +981,7 @@ def test_sim_at19_live_3d_households_and_household_content(tmp_path, monkeypatch
         page = client.get("/sim/viewer").text
         assert (
             f'<a href="{first_home}">지아네</a>' in page
-            and "테스트 홈 · 부모님 댁" in page
+            and "<h1>부모님 댁</h1>" in page
         )
         view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
         assert {
@@ -1058,12 +1068,13 @@ def test_sim_at20_viewer_projects_world_markers_and_no_reasoning(tmp_path, monke
         assert visual_values["fridge_01"] == {"show_notice": None}
         for device, kind, expected in (
             ("light_01", "person", "아빠 · 가전 앱"),
-            ("display_01", "spira", "SPIRA"),
+            ("display_01", "spira", None),
             ("plug_kettle", "unknown", "누가 바꿨는지 모름"),
         ):
             tile = view.find(f'.//div[@data-device="{device}"]/article')
             assert tile.get("data-change") == kind
             assert tile.findtext('p[@class="change-marker"]') == expected
+            assert (tile.find('h3/span[@class="spira-dot"]') is not None) == (kind == "spira")
         forbidden = [
             *notices,
             *[item["name"] for item in episode["items"]],

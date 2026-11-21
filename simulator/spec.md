@@ -109,8 +109,9 @@ waiting work MUST be shown only as a visually faint, distinct overlay. Stale,
 missing, or unavailable observations MUST remain visibly so; disconnection MUST
 NOT change World state.
 
-**E5-R2.** The viewer MUST identify virtual versus physical substrate per device,
-show Class A local-operation reporting as an explicit assumption, and avoid any
+**E5-R2.** The viewer MUST mark physical devices and display their qualification
+status. The operator MUST identify substrate per device and show Class A
+local-operation reporting as an explicit assumption. The viewer MUST avoid any
 aggregate claim that virtual success qualifies a physical device.
 
 **E5-R3.** A no-preparation episode, such as ordinary groceries, MUST be able to
@@ -209,9 +210,9 @@ qualification are separate from selecting it as the target. All other reference
 devices may remain virtual, and the full reference flow MUST remain demonstrable
 with virtual devices only.
 
-**E8-R2.** A virtual fallback MUST be labelled virtual and MUST NOT impersonate
-the physical target. Each displayed device and result MUST retain its actual
-substrate and qualification status.
+**E8-R2.** A virtual fallback MUST be labelled virtual in the operator
+inventory and MUST NOT impersonate the physical target. Displayed device
+metadata and results MUST use the actual substrate and qualification status.
 
 <a id="e9"></a>
 
@@ -240,7 +241,7 @@ passing claim until an implementation change supplies bounded evidence.
 | SIM-AT-09 | Inject stale, missing, and unavailable readback after a command | Each condition is explicit while independent World state persists; none is shown as verified completion | E2-R1, E4-R3, E5-R1 | PC-4 | Required |
 | SIM-AT-10 | Open the stage for an active plan and an ordinary-groceries episode | Observed state is filled, waiting work is faint, stale state is marked, and the groceries episode adds no preparation; viewer interaction creates no effect | E5-R1, E5-R3 | PC-2, PC-4 | Required |
 | SIM-AT-14 | Send a multi-property command containing one invalid property | The command is rejected and every value and witness remains unchanged | E2-R3 | PC-4 | Required |
-| SIM-AT-16 | Compose physical Tapo, virtual Class A, and virtual Matter devices | Every tile/result shows physical or virtual per device; assumptions are labelled; Tapo and Matter report `local_operation=false`; no physical qualification is inferred | E5-R2, E6-R2, E8-R1, E8-R2 | PC-4, PC-5, PC-6 | **Provisional only for the Class A comparison, pending PQ-01** |
+| SIM-AT-16 | Compose physical Tapo, virtual Class A, and virtual Matter devices | The viewer marks physical devices; the operator identifies each device's substrate and reporting assumption; Tapo and Matter report `local_operation=false`; no physical qualification is inferred | E5-R2, E6-R2, E8-R1, E8-R2 | PC-4, PC-5, PC-6 | **Provisional only for the Class A comparison, pending PQ-01** |
 | SIM-AT-18 | Run the demo with Server `DEMO_MODE=1` | App/Hub/Simulator observations use offset wall-clock timestamps; shortened waits come from Server data and no virtual demo-clock control is present | E9-R1 | PC-4 | Required |
 | SIM-AT-19 | Open both households' viewers during the birthday scene | Each shows a 3D household with devices in their rooms and home events at the entrance; device labels read as content (oven temperature and time, light colour, display scene, fridge notice); weekday and wall-clock time are shown; a link reaches the other home | E5-R4, E5-R5, E5-R7 | PC-4 | Required |
 | SIM-AT-20 | Inspect the viewer page and its data during an active plan | No item, intent, rationale, card text, Hub `by` or judge verdict appears; overlays carry device, action and trigger or time only | E5-R6 | PC-4, PC-5 | Required |

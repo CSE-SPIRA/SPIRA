@@ -225,7 +225,7 @@ h1{font-size:var(--size-60);line-height:1.11;letter-spacing:-.065em;font-weight:
 .house-view .viewer-marker[data-device]:not([data-resting]) .planned,
 .house-view .viewer-marker[data-device][data-resting]:has(.planned) .home-device:not(:has(.observation-warning,.substrate)){display:none}
 .house-view .planned{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.house-view .device-legend{position:absolute;bottom:12px;left:17px;right:17px;font-size:var(--size-16);pointer-events:none}
+.house-view .notice-trigger{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .house-view .entrance-history{padding:var(--space-8)}
 .marker-trace{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;color:var(--muted);font-size:var(--size-15);font-weight:400}
 .ledger{display:flex;flex-direction:column;grid-column:2;grid-row:2;padding:20px 20px 12px;border:1px solid var(--line);border-radius:var(--radius-22);background:var(--surface);overflow:hidden}
@@ -280,7 +280,7 @@ h1{font-size:var(--size-60);line-height:1.11;letter-spacing:-.065em;font-weight:
 .plan-list li { grid-template-columns:172px minmax(0,1fr); }
 .plan-list small { display:block;color:var(--muted); }
 .plan-card + .plan-card { margin-top:20px; }
-#home.introducing .room-key, #home.introducing .device-legend { opacity:0; }
+#home.introducing .room-key { opacity:0; }
 #home[aria-busy="true"] #timeline { opacity:.6; }
 #ledger { min-height:0;overflow:auto; }
 .ledger-row p { margin-left:63px; }
