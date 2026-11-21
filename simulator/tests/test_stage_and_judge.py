@@ -16,6 +16,7 @@ from spira_simulator.sources import JsonSource
 from spira_simulator.world import DEVICE_SCHEMA, World
 
 AUTH = ("operator", uuid4().hex)
+GUEST_WINDOW_EXPLANATION = "이 시간 안에 손님이 오면 켜져요. 지나면 실행하지 않아요."
 
 
 class SourceStub:
@@ -706,18 +707,46 @@ def test_guest_window_is_shared_by_operator_and_viewer_until_missed(tmp_path, mo
     app = operator_app(tmp_path, plan_source=SourceStub(plan))
     with TestClient(app) as client:
         monkeypatch.setattr(app.state.world, "clock", clock)
-        page = client.get("/sim/viewer").text
-        assert "손님 오면 · 14:01–14:11" in page
-        assert "손님 맞이 14:01–14:11" in client.get("/operator", auth=AUTH).text
-        assert client.get("/operator/guest-window", auth=AUTH).json() == {"label": "손님 맞이 14:01–14:11"}
+        operator_label = "손님 맞이 14:01–14:11"
+        operator_status = {"label": operator_label, "detail": GUEST_WINDOW_EXPLANATION}
+        assert "손님 오면 · 14:01–14:11" in client.get("/sim/viewer").raise_for_status().text
+        operator_page = client.get("/operator", auth=AUTH).raise_for_status().text
+        assert f'id="guest-window" class="guest-window">{operator_label}</span>' in operator_page
+        assert f'aria-live="polite">{GUEST_WINDOW_EXPLANATION}</small>' in operator_page
+        assert client.get("/operator/guest-window", auth=AUTH).json() == operator_status
+        post(client, "/operator/home", action="guests_arrive")  # Before the window opens.
         clock.advance(11 * 60)
         assert "실행 안 됨" not in client.get("/sim/viewer").text
+        assert client.get("/operator/guest-window", auth=AUTH).json() == operator_status
         clock.advance(1)
         view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
         for device in ("light_01", "display_01"):
             marker = view.find(f'.//div[@data-device="{device}"]')
             assert marker.findtext('p[@class="observed-outcome"]') == "손님이 오지 않아 실행 안 됨"
             assert marker.find('p[@class="planned"]') is None
+        passed = "손님 맞이 시간이 지났어요"
+        operator_page = client.get("/operator", auth=AUTH).raise_for_status().text
+        assert f'aria-live="polite">{passed}</small>' in operator_page
+        assert GUEST_WINDOW_EXPLANATION not in operator_page
+        assert client.get("/operator/guest-window", auth=AUTH).json() == {
+            "label": operator_label, "detail": passed,
+        }
+        post(client, "/operator/home", action="guests_arrive")  # After the window closes.
+        assert client.get("/operator/guest-window", auth=AUTH).json()["detail"] == passed
+
+
+def test_operator_guest_window_keeps_in_window_arrival(tmp_path, monkeypatch, clock):
+    plan = fixture_json("ep_9031/plan.v1.json")
+    app = operator_app(tmp_path, plan_source=SourceStub(plan))
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.world, "clock", clock)
+        clock.advance(3 * 60 * 60)  # The fixture window closes at 17:00, inclusively.
+        post(client, "/operator/home", action="guests_arrive")
+        clock.advance(1)
+        post(client, "/operator/home", action="guests_arrive")
+        assert client.get("/operator/guest-window", auth=AUTH).json() == {
+            "label": "손님 맞이 13:30–17:00", "detail": "",
+        }
 
 
 def test_cleaner_keeps_spira_dot_through_job_completion(tmp_path, monkeypatch, clock):
@@ -1212,9 +1241,16 @@ def test_viewer_planned_rows_show_targets_and_collapse_duplicates(tmp_path, monk
             rows = view.findall(f'.//div[@data-device="{device}"]/p[@class="planned"]')
             assert ["".join(row.itertext()) for row in rows] == expected
 
+        display = view.find('.//div[@data-device="display_01"]')
+        display_button = display.find('p[@class="planned"]/button')
+        assert display_button.get("title") == GUEST_WINDOW_EXPLANATION
+        assert display.findtext(
+            f'p[@id="{display_button.get("popovertarget")}"][@popover="auto"]'
+        ) == GUEST_WINDOW_EXPLANATION
+
         light = view.find('.//div[@data-device="light_01"]')
         details = [
-            "색조 330° · 채도 45% · 밝기 70%\n색조 350° · 채도 65% · 밝기 80%",
+            f"색조 330° · 채도 45% · 밝기 70%\n색조 350° · 채도 65% · 밝기 80%\n{GUEST_WINDOW_EXPLANATION}",
             "2700K",
             "6500K",
         ]

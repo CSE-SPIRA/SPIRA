@@ -2,8 +2,9 @@
   {% set label %}{% if unplaced %}기기 · {% endif %}{{ entry.action }}{% if entry.timed %}<span class="planned-clock"> · {{ entry.wait }}</span>{% else %} · {{ entry.wait }}{% endif %}{% endset %}
   {% if entry.missed %}
   <p class="observed-outcome">손님이 오지 않아 실행 안 됨</p>
-  {% elif entry.details %}
-  {% set detail = entry.details | join('\n') %}
+  {% elif entry.details or entry.window_note %}
+  {% set details = entry.details + ([entry.window_note] if entry.window_note else []) %}
+  {% set detail = details | join('\n') %}
   <p class="planned"><button id="{{ detail_id }}-trigger" class="planned-trigger" type="button" title="{{ detail }}" popovertarget="{{ detail_id }}">{{ label }}</button></p>
   <p id="{{ detail_id }}" class="planned-detail" popover="auto">{{ detail }}</p>
   {% else %}

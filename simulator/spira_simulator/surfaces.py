@@ -110,6 +110,31 @@ def guest_window_text(window: dict) -> str:
     )
 
 
+def guest_window_status(world: World, windows: list[dict]) -> dict[str, str]:
+    if not windows:
+        return {"label": "", "detail": ""}
+
+    window = windows[-1]
+    label = f"손님 맞이 {guest_window_text(window)}"
+    closes = datetime.fromisoformat(window["to"])
+    if world.clock() <= closes:
+        return {"label": label, "detail": STATE_WORDS["guest_window_explanation"]}
+
+    opens = datetime.fromisoformat(window["from"])
+    signals = {
+        (signal.target, signal.event_type)
+        for signal in world.profile.home_signals.get("guests_arrive", ())
+    }
+    with world.store.lock:
+        facts = world.store.home_truth(tuple({event_type for _, event_type in signals}))
+    arrived = any(
+        (fact["target"], fact["event_type"]) in signals
+        and opens <= datetime.fromisoformat(fact["occurred_at"]) <= closes
+        for fact in facts
+    )
+    return {"label": label, "detail": "" if arrived else STATE_WORDS["guest_window_passed"]}
+
+
 def home_event_observation(fact: dict) -> dict:
     occurred_at = fact["occurred_at"]
     _, observation = ENTRANCE_EVENTS.get(
@@ -373,7 +398,14 @@ def viewer_plan(data: dict, device_names: dict) -> tuple[dict, list[dict]]:
         missed = row.get("missed", False)
         entry = planned[row["device"]].setdefault(
             (action, label, timed, missed),
-            {"action": action, "wait": label, "timed": timed, "missed": missed, "details": []},
+            {
+                "action": action,
+                "wait": label,
+                "timed": timed,
+                "missed": missed,
+                "details": [],
+                "window_note": STATE_WORDS["guest_window_explanation"] if window else None,
+            },
         )
         if detail and detail not in entry["details"]:
             entry["details"].append(detail)
