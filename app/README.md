@@ -23,8 +23,9 @@ in debug builds.
 flutter run -d <android-device-id> --dart-define-from-file=.env
 ```
 
-If the peer returns 401, open the key button and enter the App's bearer token
-for that session. The token stays in memory. Keep tokens out of the Dart defines.
+If the peer returns 401, choose **서버 접속 토큰 입력** in **설정** and enter the
+App's bearer token for that session. During initial setup, use the key button
+in the toolbar. The token stays in memory. Keep tokens out of the Dart defines.
 Use Android's share menu to send one to three JPG or PNG screenshots to SPIRA.
 
 Optional Dart defines:
@@ -34,7 +35,7 @@ Optional Dart defines:
 - `SPIRA_DISCOVERY_JSON` supplies a C-2 device manifest for reviewing available
   actions in setup. Setup selections stay on this device.
 - `SPIRA_HUB_URL` supplies the Hub's HTTP(S) origin. Enter the home key from
-  **우리 집 접속 키 입력** in the toolbar. The App also uses the key returned
+  **우리 집 접속 키 입력** in **설정**. The App also uses the key returned
   when it creates a new home in the current session. The key stays in memory.
   **우리 집** reads the Hub's devices by room and marks those used by the card
   and the order's item tasks. If the Hub list is unavailable, it shows the
@@ -72,7 +73,8 @@ with that file. Use `--demo-port`, `--proxy-port`, and `--web-port` to change
 the defaults of 8730, 8731, and 8732.
 
 Click **예시 주문으로 공유** to see the screenshot scan, extracted items, and
-preparation card. Open **왜?** or **우리 집** on the card. This preview uses the
+preparation card. Tap a preparation line to see its **판단 근거** or open the
+**우리 집** tab to browse the room grids. This preview uses the
 demo shell's sample order and skips Android sharing and Google Calendar. It
 displays the same bundled PNG it uploads to the demo route. The web build
 serves it at `/assets/assets/example-order.png`.
@@ -116,9 +118,12 @@ defines for manual and real-server runs.
 | Change | File |
 | --- | --- |
 | Colours and fonts | [`theme.dart`](lib/theme.dart) |
-| Preparation card | [`preparations.dart`](lib/features/preparations.dart) |
+| Tabs and app shell | [`main.dart`](lib/main.dart) |
+| Current and past preparations | [`preparations.dart`](lib/features/preparations.dart) |
+| Order scan and extracted items | [`order_extraction.dart`](lib/features/order_extraction.dart) |
 | WHY | [`rationale.dart`](lib/features/rationale.dart) |
 | 우리 집 | [`our_home.dart`](lib/features/our_home.dart) |
+| Settings and connection keys | [`settings.dart`](lib/features/settings.dart) |
 | Labels | [`labels.dart`](lib/features/labels.dart) |
 
 ## Checks

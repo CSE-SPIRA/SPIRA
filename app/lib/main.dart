@@ -8,6 +8,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'api/app_api.dart';
 import 'app_controller.dart';
 import 'contracts.dart' as wire;
+import 'features/our_home.dart';
 import 'features/preparations.dart';
 import 'features/settings.dart';
 import 'features/setup.dart';
@@ -107,6 +108,7 @@ class _Home extends StatefulWidget {
 
 class _HomeState extends State<_Home> with WidgetsBindingObserver {
   AppController get app => widget.app;
+  _HomeTab _tab = _HomeTab.preparations;
 
   @override
   void initState() {
@@ -146,63 +148,157 @@ class _HomeState extends State<_Home> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: app,
-    builder: (context, _) => Scaffold(
-      backgroundColor: app.step == SetupStep.ready
-          ? Theme.of(context).colorScheme.surface
-          : null,
-      appBar: AppBar(
-        title: const Text('SPIRA'),
-        backgroundColor: app.step == SetupStep.ready
-            ? Theme.of(context).colorScheme.surface
-            : null,
-        actions: [
-          if (app.needsToken)
-            IconButton(
-              tooltip: '서버 접속 토큰 입력',
-              onPressed: _token,
-              icon: const Icon(Icons.key),
-            ),
-          if (app.step == SetupStep.ready && app.homeHub != null)
-            IconButton(
-              tooltip: '우리 집 접속 키 입력',
-              onPressed: () => _token(hub: true),
-              icon: const Icon(Icons.vpn_key_outlined),
-            ),
-          if (app.step == SetupStep.ready)
-            IconButton(
-              tooltip: '설정',
-              icon: const Icon(Icons.settings_outlined),
-              onPressed: () => Navigator.push<void>(
-                context,
-                MaterialPageRoute(builder: (_) => SettingsScreen(app)),
+    builder: (context, _) {
+      final ready = !app.starting && app.step == SetupStep.ready;
+      final surface = ready ? Theme.of(context).colorScheme.surface : null;
+      return Scaffold(
+        backgroundColor: surface,
+        appBar: AppBar(
+          title: const Text('SPIRA'),
+          backgroundColor: surface,
+          actions: [
+            if (!ready && app.needsToken)
+              IconButton(
+                tooltip: '서버 접속 토큰 입력',
+                onPressed: _token,
+                icon: const Icon(Icons.key),
               ),
-            ),
-        ],
-      ),
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: PeerLabel(app.fixture),
-            ),
-            Expanded(
-              child: app.starting
-                  ? const Center(
-                      child: CircularProgressIndicator(
-                        semanticsLabel: '앱 시작 중',
-                      ),
-                    )
-                  : app.step == SetupStep.ready
-                  ? Preparations(app)
-                  : SetupScreen(app),
-            ),
           ],
         ),
-      ),
-    ),
+        body: SafeArea(
+          bottom: !ready,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: PeerLabel(app.fixture),
+              ),
+              Expanded(
+                child: app.starting
+                    ? const Center(
+                        child: CircularProgressIndicator(
+                          semanticsLabel: '앱 시작 중',
+                        ),
+                      )
+                    : ready
+                    ? Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          // Keep the preparation scroll and extraction alive
+                          // while another tab is visible.
+                          Offstage(
+                            offstage: _tab != _HomeTab.preparations,
+                            child: ExcludeFocus(
+                              excluding: _tab != _HomeTab.preparations,
+                              child: Preparations(app),
+                            ),
+                          ),
+                          if (_tab == _HomeTab.ourHome) OurHome(app),
+                          if (_tab == _HomeTab.settings)
+                            SettingsScreen(
+                              app,
+                              onServerToken: _token,
+                              onHomeKey: () => _token(hub: true),
+                            ),
+                        ],
+                      )
+                    : SetupScreen(app),
+              ),
+            ],
+          ),
+        ),
+        bottomNavigationBar: ready
+            ? _TabBar(
+                key: const ValueKey('home-tabs'),
+                selected: _tab,
+                onSelect: (tab) => setState(() => _tab = tab),
+              )
+            : null,
+      );
+    },
   );
+}
+
+enum _HomeTab {
+  preparations('준비', Icons.checklist_rounded),
+  ourHome('우리 집', Icons.home_outlined),
+  settings('설정', Icons.settings_outlined);
+
+  const _HomeTab(this.label, this.icon);
+
+  final String label;
+  final IconData icon;
+}
+
+class _TabBar extends StatelessWidget {
+  const _TabBar({super.key, required this.selected, required this.onSelect});
+
+  final _HomeTab selected;
+  final ValueChanged<_HomeTab> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return SafeArea(
+      minimum: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        heightFactor: 1,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 380),
+          child: Material(
+            color: appPaper,
+            elevation: 4,
+            shadowColor: colors.primary.withValues(alpha: .22),
+            shape: StadiumBorder(
+              side: BorderSide(color: colors.outlineVariant),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(5),
+              child: Row(
+                children: [
+                  for (final tab in _HomeTab.values)
+                    Expanded(
+                      child: Semantics(
+                        selected: tab == selected,
+                        child: TextButton(
+                          onPressed: () => onSelect(tab),
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(0, 48),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 4,
+                            ),
+                            backgroundColor: tab == selected
+                                ? colors.primaryContainer
+                                : null,
+                            foregroundColor: tab == selected
+                                ? colors.primary
+                                : colors.onSurfaceVariant,
+                            textStyle: theme.textTheme.bodySmall?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(tab.icon, size: 20),
+                              Text(tab.label, textAlign: TextAlign.center),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _TokenDialog extends StatefulWidget {

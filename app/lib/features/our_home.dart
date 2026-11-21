@@ -1,5 +1,3 @@
-import 'dart:async';
-
 // ignore: deprecated_member_use
 import 'package:flutter/material.dart';
 
@@ -7,159 +5,223 @@ import '../app_controller.dart';
 import '../contracts.dart' as wire;
 import '../theme.dart';
 import 'labels.dart';
-import 'settings.dart';
 import 'setup.dart';
 
-void openOurHome(BuildContext context, AppController app, wire.Card card) {
-  final home = (
-    app
-        .rationale(card.episodeId)
-        .then<wire.Rationale?>((result) => result, onError: (Object _) => null),
-    app.homeHub?.fetchDevices(app.household!) ?? Future<wire.Devices?>.value(),
-  ).wait;
-  Navigator.push<void>(
-    context,
-    MaterialPageRoute(
-      builder: (_) => _OurHome(app: app, card: card, home: home),
-    ),
-  );
-}
-
-class _OurHome extends StatelessWidget {
-  const _OurHome({required this.app, required this.card, required this.home});
+class OurHome extends StatefulWidget {
+  const OurHome(this.app, {super.key});
 
   final AppController app;
-  final wire.Card card;
-  final Future<(wire.Rationale?, wire.Devices?)> home;
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('우리 집')),
-    body: SafeArea(
-      top: false,
-      child: FutureBuilder<(wire.Rationale?, wire.Devices?)>(
-        future: home,
-        builder: (context, snapshot) {
-          final (result, inventory) = snapshot.data ?? (null, null);
-          final selected = <String, wire.Device>{
-            for (final task in result?.tasks ?? const <wire.Task>[])
-              if (task.cardId == card.cardId)
-                for (final device in task.devices) device.id: device,
-          };
-          final itemDeviceIds = <String>{};
-          final executions = result?.executions ?? const <wire.Execution>[];
-          for (final task
-              in result?.itemTasks ?? const <wire.ItemTaskElement>[]) {
-            final itemExecutions = executions.where(
-              (execution) => execution.taskId == task.taskId,
-            );
-            // The current item notice kinds (prep and storage) use the fridge.
-            if (itemExecutions.isEmpty && task.kind != null) {
-              final fridge = inventory?.devices
-                  .where((device) => device.type == 'fridge')
-                  .singleOrNull;
-              if (fridge != null) itemDeviceIds.add(fridge.id);
-            }
-            for (final execution in itemExecutions) {
-              itemDeviceIds.add(execution.device);
-              if (inventory == null && task.kind != null) {
-                selected.putIfAbsent(
-                  execution.device,
-                  () => wire.Device(
-                    id: execution.device,
-                    type: 'fridge',
-                    room: null,
-                  ),
-                );
-              }
-            }
-          }
-          final devices = [
-            if (inventory == null)
-              for (final device in selected.values)
-                (
-                  id: device.id,
-                  type: device.type,
-                  room: device.room,
-                  label: null,
-                )
-            else
-              for (final device in inventory.devices)
-                (
-                  id: device.id,
-                  type: device.type,
-                  room: device.room,
-                  label: device.label,
-                ),
-          ];
+  State<OurHome> createState() => _OurHomeState();
+}
 
-          final rooms = <String, List<Widget>>{};
-          for (final (:id, :type, :room, :label) in devices) {
-            final roomName = room?.trim();
-            final name = label?.trim();
-            rooms
-                .putIfAbsent(
-                  roomName == null || roomName.isEmpty ? '방 미확인' : roomName,
-                  () => [],
-                )
-                .add(
-                  _HomeDevice(
-                    name: name == null || name.isEmpty
-                        ? _homeDeviceLabel(type)
-                        : name,
-                    type: type,
-                    selected: result == null
-                        ? null
-                        : selected.containsKey(id) ||
-                              itemDeviceIds.contains(id),
-                  ),
-                );
-          }
-          final roomNames = {
-            '현관',
-            '거실',
-            '주방',
-            ...rooms.keys,
-          }.where(rooms.containsKey).toList();
-          final theme = Theme.of(context);
-          final intent = result?.intents
-              .where((intent) => intent.cardId == card.cardId)
-              .firstOrNull;
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-            children: [
-              Align(
-                alignment: Alignment.centerLeft,
-                child: PeerLabel(app.fixture),
+class _OurHomeState extends State<OurHome> {
+  AppController get app => widget.app;
+
+  Future<wire.Devices?>? _inventory;
+  wire.Episode? _order;
+  Future<wire.Rationale>? _rationale;
+
+  @override
+  void initState() {
+    super.initState();
+    _inventory = _fetchInventory();
+    _updateOrder();
+  }
+
+  @override
+  void didUpdateWidget(OurHome oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _updateOrder();
+  }
+
+  Future<wire.Devices?>? _fetchInventory() =>
+      app.homeHub?.fetchDevices(app.household!);
+
+  void _updateOrder({bool retry = false}) {
+    final latest = app.orderedEpisodes.firstOrNull;
+    final order =
+        app.currentPreparationOrder ??
+        (latest?.status != wire.EpisodeStatus.CLOSED &&
+                (latest?.itemTasks.isNotEmpty ?? false)
+            ? latest
+            : null);
+    if (order == null) {
+      _order = null;
+      _rationale = null;
+      return;
+    }
+    final cached = app.requestedRationale(order.episodeId);
+    if (cached != null) {
+      _rationale = cached;
+    } else if (retry ||
+        order.episodeId != _order?.episodeId ||
+        order.status != _order?.status) {
+      _rationale = app.rationale(order.episodeId);
+    }
+    _order = order;
+  }
+
+  Future<void> _refresh() async {
+    final inventory = _fetchInventory();
+    setState(() {
+      _inventory = inventory;
+      _updateOrder(retry: true);
+    });
+    await Future.wait([app.sync(), ?inventory]);
+  }
+
+  Map<String, ({wire.Device device, Set<String> times})> _selectedDevices(
+    wire.Devices? inventory,
+    wire.Rationale? rationale,
+  ) {
+    final selected = <String, ({wire.Device device, Set<String> times})>{};
+    final order = _order;
+    if (order == null) return selected;
+
+    final cards = {for (final card in app.cardsFor(order)) card.cardId: card};
+    for (final task in rationale?.tasks ?? const <wire.Task>[]) {
+      final card = cards[task.cardId];
+      if (card == null) continue;
+      final line = card.lines
+          .where((line) => line.taskId == task.taskId)
+          .firstOrNull;
+      final time = lineTimeLabel(line);
+      for (final device in task.devices) {
+        final entry = selected.putIfAbsent(
+          device.id,
+          () => (device: device, times: {}),
+        );
+        if (time != null) entry.times.add(time);
+      }
+    }
+
+    final fridge = inventory?.devices
+        .where((device) => device.type == 'fridge')
+        .singleOrNull;
+    for (final task in order.itemTasks) {
+      final executions =
+          rationale?.executions.where(
+            (execution) => execution.taskId == task.taskId,
+          ) ??
+          const <wire.Execution>[];
+      final ids = {for (final execution in executions) execution.device};
+      // Item notices have no device ID before execution. Fridge notices
+      // can only be associated with an unambiguous inventory match.
+      if (ids.isEmpty && task.kind != null && fridge != null) {
+        ids.add(fridge.id);
+      }
+      for (final id in ids) {
+        if (inventory == null && task.kind == null) continue;
+        selected.putIfAbsent(
+          id,
+          () => (
+            device: wire.Device(id: id, type: 'fridge', room: null),
+            times: {},
+          ),
+        );
+      }
+    }
+    return selected;
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<wire.Devices?>(
+    future: _inventory,
+    builder: (context, inventory) => FutureBuilder<wire.Rationale>(
+      future: _rationale,
+      builder: (context, rationale) {
+        final loading =
+            inventory.connectionState == ConnectionState.waiting ||
+            rationale.connectionState == ConnectionState.waiting;
+        // A new rationale must never highlight devices from the previous order.
+        final result = rationale.data?.episodeId == _order?.episodeId
+            ? rationale.data
+            : null;
+        final selected = _selectedDevices(inventory.data, result);
+        final devices = [
+          if (inventory.data case final manifest?)
+            for (final device in manifest.devices)
+              (
+                id: device.id,
+                type: device.type,
+                room: device.room,
+                label: device.label,
+              )
+          else
+            for (final entry in selected.values)
+              (
+                id: entry.device.id,
+                type: entry.device.type,
+                room: entry.device.room,
+                label: null,
               ),
-              const SizedBox(height: 12),
-              Text.rich(
-                highlightTheme(
-                  card.text,
-                  intent?.situation.theme,
-                  theme.colorScheme.onSecondaryContainer,
+        ];
+        final rooms = <String, List<Widget>>{};
+        final selectionKnown = _order == null || result != null;
+        for (final (:id, :type, :room, :label) in devices) {
+          final roomName = room?.trim();
+          final name = label?.trim();
+          final times = selected[id]?.times;
+          rooms
+              .putIfAbsent(
+                roomName == null || roomName.isEmpty ? '방 미확인' : roomName,
+                () => [],
+              )
+              .add(
+                _HomeDevice(
+                  key: ValueKey(id),
+                  name: name == null || name.isEmpty
+                      ? _homeDeviceLabel(type)
+                      : name,
+                  type: type,
+                  selected: times != null,
+                  status: switch (times) {
+                    final times? when times.isNotEmpty =>
+                      '선택됨 · ${times.join(' · ')}',
+                    _ when times != null => '선택됨',
+                    _ when selectionKnown => '쉬는 중',
+                    _ => '준비 미확인',
+                  },
                 ),
-                style: theme.textTheme.titleLarge,
-              ),
-              const SizedBox(height: 8),
-              if (snapshot.connectionState != ConnectionState.done)
-                const LinearProgressIndicator(semanticsLabel: '준비 기기 확인 중')
-              else if (result == null)
-                const StatusMessage('이번 준비에 선택된 기기를 확인할 수 없어요.')
-              else if (inventory == null && devices.isNotEmpty)
-                const StatusMessage('집 기기 목록을 받지 못해 이번 준비에 선택된 기기만 보여 드려요.'),
-              if (devices.isNotEmpty) ...[
-                Text('확인한 기기 ${devices.length}대'),
-                const SizedBox(height: 12),
-                _RoomMap(roomNames: roomNames, rooms: rooms),
-              ] else if (inventory != null)
-                const Text('집에 등록된 기기가 없어요.')
-              else if (result != null)
-                const Text('이번 준비에 선택된 기기가 없어요.'),
+              );
+        }
+
+        final theme = Theme.of(context);
+        return RefreshIndicator(
+          onRefresh: _refresh,
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+            children: [
+              Text('우리 집', style: theme.textTheme.headlineMedium),
+              if (devices.isNotEmpty)
+                Text(
+                  '확인한 기기 ${devices.length}대',
+                  style: theme.textTheme.bodySmall,
+                ),
+              if (loading)
+                const LinearProgressIndicator(semanticsLabel: '우리 집 기기 확인 중')
+              else ...[
+                if (!selectionKnown)
+                  const StatusMessage('이번 준비에 선택된 기기를 확인할 수 없어요.'),
+                if (inventory.data == null)
+                  StatusMessage(
+                    devices.isEmpty
+                        ? '집 기기 목록을 받지 못했어요.'
+                        : '집 기기 목록을 받지 못해 이번 준비에 선택된 기기만 보여 드려요.',
+                  )
+                else if (devices.isEmpty)
+                  const StatusMessage('집에 등록된 기기가 없어요.'),
+              ],
+              for (final room in {'현관', '거실', '주방', ...rooms.keys})
+                if (rooms[room] case final cards?)
+                  _RoomGrid(name: room, cards: cards),
             ],
-          );
-        },
-      ),
+          ),
+        );
+      },
     ),
   );
 }
@@ -171,84 +233,44 @@ String _homeDeviceLabel(String type) => switch (type) {
   _ => deviceLabel(type, unknownLabel: '기기'),
 };
 
-class _RoomMap extends StatelessWidget {
-  const _RoomMap({required this.roomNames, required this.rooms});
+class _RoomGrid extends StatelessWidget {
+  const _RoomGrid({required this.name, required this.cards});
 
-  final List<String> roomNames;
-  final Map<String, List<Widget>> rooms;
+  final String name;
+  final List<Widget> cards;
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-    const wall = 5.0;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(13),
-      child: ColoredBox(
-        color: colors.primary,
-        child: Padding(
-          padding: const EdgeInsets.all(wall),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final narrow =
-                  constraints.maxWidth < 300 ||
-                  MediaQuery.textScalerOf(context).scale(13) > 18;
-              final columns = narrow || roomNames.length == 1
-                  ? 1
-                  : constraints.maxWidth >= 520 && roomNames.length >= 3
-                  ? 3
-                  : 2;
-              return Column(
-                spacing: wall,
-                children: [
-                  for (
-                    var start = 0;
-                    start < roomNames.length;
-                    start += columns
-                  )
-                    IntrinsicHeight(
-                      child: Row(
-                        spacing: wall,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          for (final name
-                              in roomNames.skip(start).take(columns))
-                            Expanded(
-                              child: ColoredBox(
-                                color: name == '거실'
-                                    ? colors.primaryContainer
-                                    : colors.surfaceContainerHighest,
-                                child: Padding(
-                                  padding: const EdgeInsets.all(8),
-                                  child: Column(
-                                    spacing: 7,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
-                                    children: [
-                                      Semantics(
-                                        header: true,
-                                        child: Text(
-                                          name,
-                                          style: theme.textTheme.titleMedium,
-                                        ),
-                                      ),
-                                      ...rooms[name]!,
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                ],
-              );
-            },
-          ),
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 18),
+    child: Column(
+      spacing: 8,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Semantics(
+          header: true,
+          child: Text(name, style: Theme.of(context).textTheme.titleMedium),
         ),
-      ),
-    );
-  }
+        LayoutBuilder(
+          builder: (context, constraints) {
+            const gap = 8.0;
+            final minWidth = MediaQuery.textScalerOf(context).scale(144);
+            final columns = ((constraints.maxWidth + gap) / (minWidth + gap))
+                .floor()
+                .clamp(1, 4);
+            final width =
+                (constraints.maxWidth - gap * (columns - 1)) / columns;
+            return Wrap(
+              spacing: gap,
+              runSpacing: gap,
+              children: [
+                for (final card in cards) SizedBox(width: width, child: card),
+              ],
+            );
+          },
+        ),
+      ],
+    ),
+  );
 }
 
 class _HomeDevice extends StatelessWidget {
@@ -256,11 +278,14 @@ class _HomeDevice extends StatelessWidget {
     required this.name,
     required this.type,
     required this.selected,
+    required this.status,
+    super.key,
   });
 
   final String name;
   final String type;
-  final bool? selected;
+  final bool selected;
+  final String status;
 
   @override
   Widget build(BuildContext context) {
@@ -274,46 +299,59 @@ class _HomeDevice extends StatelessWidget {
       'oven' => Icons.countertops_outlined,
       'fridge' => Icons.kitchen_outlined,
       'smart_plug' => Icons.power_outlined,
+      'styler' => Icons.checkroom_outlined,
+      'purifier' => Icons.air,
       _ => Icons.devices_other,
     };
-    final foreground = selected == true
-        ? colors.primary
-        : colors.onSurfaceVariant;
+    final foreground = selected ? colors.primary : colors.onSurfaceVariant;
     return MergeSemantics(
       child: Container(
-        constraints: const BoxConstraints(minHeight: 39),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+        constraints: const BoxConstraints(minHeight: 66),
         decoration: BoxDecoration(
-          color: selected == false
-              ? colors.surfaceContainerHighest
-              : colors.surface,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(
-            color: selected == true ? colors.outline : colors.outlineVariant,
-          ),
+          color: selected ? colors.primaryContainer : appPaper,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colors.outlineVariant),
         ),
-        child: Row(
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
           children: [
-            Icon(icon, size: 18, color: foreground),
-            const SizedBox(width: 5),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            if (selected)
+              PositionedDirectional(
+                start: 0,
+                top: 0,
+                bottom: 0,
+                width: 3,
+                child: ColoredBox(color: colors.primary),
+              ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+              child: Row(
                 children: [
-                  Text(
-                    name,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: foreground,
-                      fontWeight: selected == true ? FontWeight.w600 : null,
+                  Icon(icon, size: 20, color: foreground),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          name,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: foreground,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Text(
+                          status,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: foreground,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  if (selected != null)
-                    Text(
-                      selected! ? '준비에 선택됨' : '쉬는 중',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: foreground,
-                      ),
-                    ),
                 ],
               ),
             ),

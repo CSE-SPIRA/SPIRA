@@ -20,15 +20,17 @@ class OrderExtraction extends StatefulWidget {
     required this.awaitingEpisode,
     required this.onComplete,
     required this.rationale,
+    required this.edit,
     required this.child,
   });
 
   final wire.Episode? episode;
   final List<Uint8List> images;
-  final String status;
+  final String? status;
   final bool awaitingEpisode;
   final ValueChanged<List<Uint8List>> onComplete;
   final Future<wire.Rationale>? rationale;
+  final Widget? edit;
   final Widget child;
 
   bool get hasRows =>
@@ -81,10 +83,8 @@ class _OrderExtractionState extends State<OrderExtraction>
       _scanWindow = null;
       if (widget.images.isNotEmpty) _reveal.reset();
     }
-    if (!widget.hasRows) {
+    if (!widget.hasRows || widget.images.isNotEmpty) {
       _expanded = false;
-    } else if (!oldWidget.hasRows && widget.images.isEmpty) {
-      _expanded = true;
     }
     _advance();
   }
@@ -114,7 +114,6 @@ class _OrderExtractionState extends State<OrderExtraction>
         _reveal.isCompleted) {
       return;
     }
-    _expanded = widget.hasRows;
     if (_reduceMotion || !widget.hasRows) {
       _reveal.value = 1;
     } else {
@@ -141,14 +140,16 @@ class _OrderExtractionState extends State<OrderExtraction>
           final episode = widget.episode;
           final previewing = widget.images.isNotEmpty && !_reveal.isCompleted;
           final revealing = previewing && _reveal.isAnimating;
+          final expanded = _expanded || revealing;
           final progress = revealing ? appEase.transform(_reveal.value) : 1.0;
           final preview = revealing ? 1 - progress : 1.0;
+          final status = previewing && episode != null
+              ? '주문을 읽고 있어요.'
+              : widget.status;
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              StatusMessage(
-                previewing && episode != null ? '주문을 읽고 있어요.' : widget.status,
-              ),
+              if (status != null) StatusMessage(status),
               if (previewing)
                 ClipRect(
                   child: Align(
@@ -170,19 +171,19 @@ class _OrderExtractionState extends State<OrderExtraction>
                   Align(
                     alignment: Alignment.centerLeft,
                     child: Semantics(
-                      expanded: _expanded,
+                      expanded: expanded,
                       child: TextButton.icon(
                         onPressed: revealing
                             ? null
                             : () => setState(() => _expanded = !_expanded),
                         icon: Icon(
-                          _expanded ? Icons.expand_less : Icons.expand_more,
+                          expanded ? Icons.expand_less : Icons.expand_more,
                         ),
                         label: Text('읽은 품목 ${episode.itemCount}개'),
                       ),
                     ),
                   ),
-                  if (_expanded)
+                  if (expanded)
                     ClipRect(
                       child: Align(
                         alignment: Alignment.topCenter,
@@ -194,6 +195,8 @@ class _OrderExtractionState extends State<OrderExtraction>
                         ),
                       ),
                     ),
+                  if (_expanded && !previewing && widget.edit != null)
+                    Align(alignment: Alignment.centerLeft, child: widget.edit),
                 ] else if (episode.itemCount > 0)
                   Text('읽은 품목 ${episode.itemCount}개'),
               if (!previewing) following!,

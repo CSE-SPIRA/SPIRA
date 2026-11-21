@@ -315,9 +315,30 @@ Future<void> paintOrderPreview(WidgetTester tester) async {
   await tester.pump();
 }
 
-Future<void> settings(WidgetTester tester) async {
-  await tester.tap(find.byTooltip('설정'));
+Future<void> tapTab(WidgetTester tester, String label) async {
+  await tester.tap(
+    find.descendant(
+      of: find.byKey(const ValueKey('home-tabs')),
+      matching: find.text(label),
+    ),
+  );
   await tester.pumpAndSettle();
+}
+
+Future<void> settings(WidgetTester tester) => tapTab(tester, '설정');
+
+Future<void> openPreparationWhy(WidgetTester tester, Peer peer) =>
+    tapText(tester, peer.cards.first['text'] as String);
+
+Finder get preparationMenu => find.byType(PopupMenuButton<bool>);
+
+Future<void> openStopConfirmation(WidgetTester tester) async {
+  final menu = preparationMenu.first;
+  await tester.ensureVisible(menu);
+  await tester.pumpAndSettle();
+  await tester.tap(menu);
+  await tester.pumpAndSettle();
+  await tapText(tester, '이 준비 중지');
 }
 
 Future<void> connectCalendar(WidgetTester tester, AppController app) async {
@@ -466,6 +487,9 @@ void main() {
           expect(find.byType(Image), findsNothing);
           expect(find.byType(Card), findsOneWidget);
         }
+        expect(find.text('읽은 품목 3개'), findsOneWidget);
+        expect(find.text('수량 미확인'), findsNothing);
+        await tapText(tester, '읽은 품목 3개');
         for (final text in [
           '딸기',
           '설향 딸기 500g (냉장)',
@@ -481,7 +505,7 @@ void main() {
         expect(find.text(maskedName), findsNothing);
         await tapText(tester, '읽은 품목 3개');
         expect(find.text('수량 미확인'), findsNothing);
-        await tapText(tester, 'WHY · 이유 보기');
+        await openPreparationWhy(tester, peer);
         expect(find.text('주문에서 읽은 것'), findsOneWidget);
         expect(find.text('수량 미확인'), findsOneWidget);
         expect(find.text('가린 물건 1개'), findsOneWidget);
@@ -541,7 +565,10 @@ void main() {
         expect(find.text('읽은 품목 9개'), findsNothing);
         expect(orderScan, reducedMotion ? findsNothing : findsOneWidget);
         await tester.pump(const Duration(milliseconds: 100));
-        expect(find.text('설향 딸기 500g (냉장)'), findsOneWidget);
+        expect(
+          find.text('설향 딸기 500g (냉장)'),
+          reducedMotion ? findsNothing : findsOneWidget,
+        );
         expect(orderScan, findsNothing);
         if (!reducedMotion) {
           expect(find.byType(Image), findsOneWidget);
@@ -554,7 +581,8 @@ void main() {
         }
         expect(find.byType(Image), findsNothing);
         expect(find.byType(Card), findsOneWidget);
-        expect(find.text('준비를 확인했어요.'), findsOneWidget);
+        expect(find.text('읽은 품목 9개'), findsOneWidget);
+        expect(find.text('설향 딸기 500g (냉장)'), findsNothing);
 
         await tester.pumpWidget(const SizedBox.shrink());
         await openApp(tester, preview());
@@ -866,6 +894,7 @@ void main() {
       await app.sync();
       await tester.pumpAndSettle();
       expect(find.text('읽은 품목 9개'), findsOneWidget);
+      await tapText(tester, '읽은 품목 9개');
       await tapText(tester, '읽은 품목 수정');
       await tester.enterText(find.byType(TextFormField).at(0), '딸기 상품');
       await tester.enterText(find.byType(TextFormField).at(1), '3');
@@ -914,7 +943,8 @@ void main() {
       final app = controller(peer);
       await openApp(tester, app);
       expect(find.byType(Card), findsNWidgets(2));
-      expect(find.text('이 준비 중지'), findsNWidgets(2));
+      expect(preparationMenu, findsNWidgets(2));
+      expect(find.text('이 준비 중지'), findsNothing);
       expect(find.text('승인'), findsNothing);
       expect(find.text('0/4 준비'), findsOneWidget);
       expect(find.text('손님 도착 기다리는 중'), findsOneWidget);
@@ -984,15 +1014,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('마지막으로 확인한 정보'), findsOneWidget);
       expect(
-        tester
-            .widget<OutlinedButton>(
-              find.ancestor(
-                of: find.text('이 준비 중지').first,
-                matching: find.byType(OutlinedButton),
-              ),
-            )
-            .onPressed,
-        isNull,
+        tester.widget<PopupMenuButton<bool>>(preparationMenu.first).enabled,
+        isFalse,
       );
     },
   );
@@ -1125,7 +1148,10 @@ void main() {
         peer.cards = [updated];
         return Peer.response(updated);
       };
-      await tapText(tester, '항목 끄기');
+      final toggle = find.byType(Switch);
+      expect(tester.widget<Switch>(toggle).value, isTrue);
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
       expect(peer.reactions.single.$1, 'nc_331');
       expect(peer.reactions.single.$2, {
         'reaction': 'line_off',
@@ -1133,8 +1159,10 @@ void main() {
       });
       expect(find.text('꺼짐'), findsOneWidget);
       expect(find.text('0/0 준비'), findsOneWidget);
-      expect(find.text('이 준비 중지'), findsOneWidget);
-      await tapText(tester, '항목 켜기');
+      expect(preparationMenu, findsOneWidget);
+      expect(tester.widget<Switch>(toggle).value, isFalse);
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
       expect(peer.reactions.last.$1, 'nc_331');
       expect(peer.reactions.last.$2, {
         'reaction': 'line_on',
@@ -1145,8 +1173,7 @@ void main() {
       peer.cards = [running];
       await app.sync();
       await tester.pumpAndSettle();
-      expect(find.text('항목 켜기'), findsNothing);
-      expect(find.text('항목 끄기'), findsNothing);
+      expect(toggle, findsNothing);
       expect(find.text('진행 중'), findsOneWidget);
       expect(find.textContaining('잘못'), findsNothing);
       expect(find.textContaining('모두 중지'), findsNothing);
@@ -1180,9 +1207,15 @@ void main() {
 
       final receipt = Completer<http.Response>();
       peer.reaction = (_) => receipt.future;
-      await tester.tap(find.text('이 준비 중지'));
+      await openStopConfirmation(tester);
+      expect(find.text('이 준비를 중지할까요?'), findsOneWidget);
+      expect(peer.reactions, isEmpty);
+      await tapText(tester, '취소');
+      expect(peer.reactions, isEmpty);
+      await openStopConfirmation(tester);
+      await tester.tap(find.text('중지'));
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 50));
+      await tester.pumpAndSettle();
       expect(find.textContaining('중지 요청 확인 중'), findsOneWidget);
       expect(peer.reactions.single.$1, 'nc_331');
       expect(peer.reactions.single.$2, {'reaction': 'stop'});
@@ -1268,14 +1301,44 @@ void main() {
         {'paused': false},
       ]);
       expect(find.text('자동 준비 켜짐'), findsOneWidget);
-      await tester.tap(find.byType(BackButton));
-      await tester.pumpAndSettle();
+      await tapTab(tester, '준비');
       expect(find.text('취소됨'), findsNWidgets(3));
       expect(find.text('진행 중'), findsOneWidget);
       expect(find.textContaining('주문을 판단하지 않았어요'), findsOneWidget);
       expect(find.byType(Card), findsOneWidget);
     },
   );
+
+  testWidgets('earlier orders are collapsed below the current preparation', (
+    tester,
+  ) async {
+    final peer = Peer();
+    final previous = fixture('card.v1.json');
+    final current = fixture('card.found.json', episode: 'ep_9120');
+    peer.episodes['ep_9031'] = fixture('episode.json');
+    peer.episodes['ep_9120'] = fixture('episode.json')
+      ..['episode_id'] = 'ep_9120'
+      ..['shared_at'] = '2026-11-05T21:00:08+09:00'
+      ..['status'] = 'notified'
+      ..['card_ids'] = [current['card_id']]
+      ..['item_tasks'] = [];
+    peer.cards = [previous, current];
+    await openApp(tester, controller(peer), size: const Size(412, 900));
+
+    final currentCard = find.byKey(ValueKey(current['card_id'] as String));
+    final previousCard = find.byKey(ValueKey(previous['card_id'] as String));
+    final history = find.text('지난 준비');
+    expect(currentCard, findsOneWidget);
+    expect(previousCard, findsNothing);
+    expect(
+      tester.getBottomLeft(currentCard).dy,
+      lessThan(tester.getTopLeft(history).dy),
+    );
+    await tapText(tester, '지난 준비');
+    expect(previousCard, findsOneWidget);
+    await tapText(tester, '지난 준비');
+    expect(previousCard, findsNothing);
+  });
 
   testWidgets('card lines use the Server trigger in Seoul time', (
     tester,
@@ -1302,6 +1365,9 @@ void main() {
     peer.episodes['ep_9031'] = fixture('episode.json');
     final card = fixture('card.v1.json');
     lines(card).first['checked'] = false;
+    for (final line in lines(card)) {
+      line['state'] = 'done';
+    }
     peer.cards = [card];
     final rationale = peer.rationales.remove('ep_9031')!;
     final app = controller(peer);
@@ -1354,7 +1420,7 @@ void main() {
       lines(card)[1]['when'] = {'time': '2026-10-18T00:15:00+09:00'};
       peer.cards = [card];
       await openApp(tester, controller(peer), size: const Size(390, 760));
-      await tapText(tester, 'WHY · 이유 보기');
+      await openPreparationWhy(tester, peer);
 
       expect(find.text('토 14:00 일정 → 90분 전 → 토 12:30'), findsOneWidget);
       expect(find.text('토 14:00 일정 → 615분 후 → 일 00:15'), findsOneWidget);
@@ -1442,22 +1508,27 @@ void main() {
       configuredHousehold: 'h_042',
       homeHub: homeHub,
     );
-    await openApp(tester, app, size: const Size(390, 760));
-    await tester.tap(find.byTooltip('우리 집 접속 키 입력'));
-    await tester.pumpAndSettle();
+    await openApp(tester, app, size: const Size(412, 820));
+    expect(find.text('우리 집 접속 키 입력'), findsNothing);
+    await settings(tester);
+    await tapText(tester, '우리 집 접속 키 입력');
     await tester.enterText(find.byType(TextField), 'test-home-key');
     await tapText(tester, '연결');
+    await tapTab(tester, '우리 집');
+    expect(find.text('확인한 기기 9대'), findsOneWidget);
+    expect(find.text('쉬는 중'), findsNWidgets(9));
+    await tapTab(tester, '준비');
     await tester.tap(find.text('예시 주문으로 공유'));
     await tester.pump();
     await paintOrderPreview(tester);
     await tester.pump(const Duration(milliseconds: 2400));
     await tester.pumpAndSettle();
-    await tapText(tester, '읽은 품목 9개');
-    await tapText(tester, '왜?');
+    expect(find.text('읽은 품목 9개'), findsOneWidget);
+    await tapText(tester, '손님 오기 전 거실 청소');
     expect(find.text('판단 근거'), findsOneWidget);
     await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
-    await tapText(tester, '우리 집');
+    await tapTab(tester, '우리 집');
 
     Finder statusFor(String device, String status) => find.descendant(
       of: find.ancestor(
@@ -1471,19 +1542,27 @@ void main() {
     expect(find.text('주방'), findsOneWidget);
     expect(find.text('현관'), findsOneWidget);
     expect(find.text('확인한 기기 9대'), findsOneWidget);
-    expect(statusFor('로봇청소기', '준비에 선택됨'), findsOneWidget);
-    expect(statusFor('냉장고', '준비에 선택됨'), findsOneWidget);
+    expect(statusFor('로봇청소기', '선택됨 · 토 12:30'), findsOneWidget);
+    expect(statusFor('TV', '선택됨 · 손님이 오면'), findsOneWidget);
+    expect(statusFor('냉장고', '선택됨'), findsOneWidget);
     expect(statusFor('공기청정기', '쉬는 중'), findsOneWidget);
     expect(statusFor('스타일러', '쉬는 중'), findsOneWidget);
-    expect(find.text('준비에 선택됨'), findsNWidgets(7));
-
-    await tester.tap(find.byType(BackButton));
+    expect(find.textContaining('선택됨'), findsNWidgets(7));
+    expect(find.byType(Switch), findsNothing);
+    expect(
+      tester.getTopLeft(find.byKey(const ValueKey('light_01'))).dy,
+      tester.getTopLeft(find.byKey(const ValueKey('cleaner_01'))).dy,
+    );
+    await tapTab(tester, '준비');
+    expect(find.byType(Card), findsNWidgets(2));
+    await tapTab(tester, '우리 집');
+    expect(statusFor('로봇청소기', '선택됨 · 토 12:30'), findsOneWidget);
+    final rescheduled = phase(peer.cards.first, 1);
+    lines(rescheduled).first['when'] = {'time': '2026-10-17T12:45:00+09:00'};
+    peer.cards = [rescheduled, peer.cards.last];
+    await app.sync();
     await tester.pumpAndSettle();
-    await tester.drag(find.byType(ListView), const Offset(0, -600));
-    await tester.pumpAndSettle();
-    await tapText(tester, '우리 집', index: 1);
-    expect(statusFor('냉장고', '준비에 선택됨'), findsOneWidget);
-    expect(statusFor('로봇청소기', '쉬는 중'), findsOneWidget);
+    expect(statusFor('로봇청소기', '선택됨 · 토 12:45'), findsOneWidget);
     expect(peer.rationaleReads, 1);
   });
 
@@ -1508,12 +1587,12 @@ void main() {
       ),
       size: const Size(390, 760),
     );
-    await tapText(tester, '우리 집');
+    await tapTab(tester, '우리 집');
 
     expect(find.text('거실'), findsOneWidget);
     expect(find.text('주방'), findsOneWidget);
     expect(find.text('확인한 기기 7대'), findsOneWidget);
-    expect(find.text('준비에 선택됨'), findsNWidgets(7));
+    expect(find.textContaining('선택됨'), findsNWidgets(7));
     expect(find.text('쉬는 중'), findsNothing);
     expect(find.text('냉장고'), findsOneWidget);
     expect(find.textContaining('집 기기 목록을 받지 못해'), findsOneWidget);
@@ -1527,7 +1606,7 @@ void main() {
       peer.cards = [fixture('card.v1.json')];
       final app = controller(peer);
       await openApp(tester, app, size: const Size(390, 760));
-      await tapText(tester, 'WHY · 이유 보기');
+      await openPreparationWhy(tester, peer);
 
       final headings = [
         '주문에서 읽은 것',
@@ -1611,7 +1690,7 @@ void main() {
       expect(find.text('행사 끝을 확인하지 못해 안전 설정을 그대로 두었어요.'), findsOneWidget);
       await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
-      await tapText(tester, 'WHY · 이유 보기');
+      await openPreparationWhy(tester, peer);
       expect(peer.rationaleReads, 1);
     },
   );
@@ -1623,7 +1702,7 @@ void main() {
     peer.episodes['ep_9031'] = fixture('episode.json');
     peer.cards = [fixture('card.v1.json')];
     await openApp(tester, controller(peer), size: const Size(390, 760));
-    await tapText(tester, '왜?', index: 2);
+    await tapText(tester, '손님 오시면 공주 분위기 화면·조명');
 
     expect(find.text('선택한 할 일').hitTestable(), findsOneWidget);
     final mood = find.text('손님 오시면 공주 분위기 화면·조명');
@@ -1654,7 +1733,7 @@ void main() {
         ..['when'] = {'time': '2026-10-17T12:45:00+09:00'};
       peer.cards = [card];
       await openApp(tester, controller(peer), size: const Size(390, 760));
-      await tapText(tester, '왜?');
+      await tapText(tester, '거실 청소 다시 켜기');
 
       expect(find.text('선택한 할 일').hitTestable(), findsOneWidget);
       expect(find.text('거실 청소 다시 켜기').hitTestable(), findsOneWidget);
@@ -1685,7 +1764,7 @@ void main() {
       (intent['situation'] as Map)['guests'] = null;
 
       await openApp(tester, controller(peer));
-      await tapText(tester, 'WHY · 이유 보기');
+      await openPreparationWhy(tester, peer);
       expect(find.text('연결된 일정'), findsNothing);
       expect(find.text('c1'), findsNothing);
       expect(find.text('손님'), findsOneWidget);
@@ -1880,9 +1959,12 @@ void main() {
         await openApp(tester, app);
         tester.view.physicalSize = const Size(360, 1150);
         await tester.pumpAndSettle();
-        final stop = find.bySemanticsLabel(RegExp(r'이 준비 중지 · 토요일 생일'));
+        final menu = find.byTooltip('준비 더보기 · ${active['text']}');
         final off = find.bySemanticsLabel(RegExp(r'손님 오기 전 거실 청소 끄기'));
-        expect(stop, findsOneWidget);
+        expect(
+          tester.getSemantics(menu).getSemanticsData().tooltip,
+          startsWith('준비 더보기 · 토요일 생일'),
+        );
         expect(off, findsOneWidget);
         peer.reaction = (_) async {
           final disabling = peer.reactions.last.$2['reaction'] == 'line_off';
@@ -1898,7 +1980,7 @@ void main() {
           peer.cards = [next];
           return Peer.response(next);
         };
-        await tester.ensureVisible(find.text('항목 끄기'));
+        await tester.ensureVisible(find.byType(Switch));
         await tester.pumpAndSettle();
         await tester.tap(off);
         await tester.pumpAndSettle();
@@ -1909,9 +1991,8 @@ void main() {
         expect(off, findsOneWidget);
         final receipt = Completer<http.Response>();
         peer.reaction = (_) => receipt.future;
-        await tester.ensureVisible(find.text('이 준비 중지'));
-        await tester.pumpAndSettle();
-        await tester.tap(stop);
+        await openStopConfirmation(tester);
+        await tester.tap(find.text('중지'));
         await tester.pump();
         await tester.ensureVisible(find.text('이 준비의 중지 요청 확인 중…'));
         await tester.pumpAndSettle();

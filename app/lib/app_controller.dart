@@ -122,6 +122,15 @@ class AppController extends ChangeNotifier {
         card,
   ];
 
+  wire.Episode? get currentPreparationOrder {
+    for (final (index, episode) in orderedEpisodes.indexed) {
+      // Keep the latest order's card visible after its work ends.
+      if (index > 0 && episode.status == wire.EpisodeStatus.CLOSED) continue;
+      if (cardsFor(episode).isNotEmpty) return episode;
+    }
+    return null;
+  }
+
   List<Uint8List> orderImages(String episodeId) =>
       _orderCaptures[episodeId]?.first ?? const [];
 
