@@ -87,7 +87,7 @@ def check_stack(urls, household, key):
         if error.code in (404, 405):
             raise RuntimeError(
                 "The Hub devices route GET /home/onboarding/devices is missing. "
-                "Use a --checkout containing both demo-up and the Hub changes from hub/seen-view-ui."
+                "Use a checkout containing demo-up and the Hub devices route."
             ) from error
         raise RuntimeError(f"The Hub devices route returned HTTP {error.code}.") from error
     if inventory.get("household_id") != household or "devices" not in inventory:
@@ -146,7 +146,7 @@ def must_be_running(process, name):
 def start_demo(stack, args, log):
     launcher = args.checkout / "simulator/scripts/demo-up"
     if not launcher.is_file():
-        raise RuntimeError(f"demo-up is missing at {launcher}. Pass --checkout with simulator/demo-shell and hub/seen-view-ui.")
+        raise RuntimeError(f"demo-up is missing at {launcher}. Check the selected repository checkout.")
     with log.open("w", encoding="utf-8") as output:
         demo = start(stack, [str(launcher), "--episode", EPISODE, "--port", str(args.demo_port)],
                      cwd=args.checkout, stdout=output, stderr=subprocess.STDOUT)
@@ -242,7 +242,8 @@ def run(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--checkout", type=Path, default=APP.parent, help="repository checkout containing demo-up and the Hub route")
+    parser.add_argument("--checkout", type=Path, default=APP.parent,
+                        help="checkout for the demo stack (defaults to this script's repository root)")
     parser.add_argument("--build-serve", action="store_true", help="build and serve web without opening Chrome")
     parser.add_argument("--stack-log", type=Path, help="demo-up output for reusing a manually started stack")
     parser.add_argument("--demo-port", type=port, default=8730)

@@ -8,10 +8,9 @@ pause/resume. Settings contains this-home memory and case deletion.
 
 ## Run locally
 
-Use Flutter 3.50 and the Android SDK. Start the contract fixture Server from its
-own checkout using the Hub owner's launcher and expose its App API to Android.
-For G0, that process belongs to `hub/tests/fixture_server`. The App has no
-bundled fixture Server. The fixture launch command is provided with H10-R1.
+Use Flutter 3.50 and the Android SDK. Start the contract fixture Server from
+the same checkout and expose its App API to Android. See the
+[fixture Server command in the Hub README](../hub/README.md#contract-fixture-server).
 
 From `app/`, set `SPIRA_BASE_URL` in a local `.env` to the peer's Android-accessible
 origin. Set `SPIRA_PEER=fixture` for H10-R1 or `SPIRA_PEER=server` for a team Server
@@ -53,18 +52,18 @@ Optional Dart defines:
 
 ## Run in the browser
 
-From `app/`, point the launcher at a checkout containing `demo-up` and the Hub's
-read-only devices route, such as `hub/seen-view-ui`. It needs Python 3.9+, `uv`,
-`mosquitto`, Flutter, and Chrome for hot reload.
+Run the App, Hub, Simulator, and fixture Server from one checkout. The launcher
+needs Python 3.9+, `uv`, `mosquitto`, Flutter, and Chrome for hot reload.
+Run the following command from the repository root.
 
 ```sh
-scripts/browser-demo --checkout /path/to/hub-seen-view-ui-checkout
+app/scripts/browser-demo
 ```
 
-Add `--build-serve` to build the app and serve it at `http://127.0.0.1:8732/`
-without opening Chrome. Omit `--checkout` if this worktree has both stack
-changes. The launcher starts the local fixture stack and proxy and supplies
-the committed fixture placeholders, so you can skip both token dialogs.
+Add `--build-serve` for a headless build served at `http://127.0.0.1:8732/`.
+The launcher defaults `--checkout` to the repository root containing the script.
+It starts the local fixture stack and proxy and supplies the committed fixture
+placeholders, so you can skip both token dialogs.
 Press Ctrl-C to stop the processes the launcher started.
 
 The launcher reuses a running stack on the demo port if it has its URL output.
@@ -81,13 +80,13 @@ serves it at `/assets/assets/example-order.png`.
 
 ### Manual fallback
 
-Start the fixture stack from the stack checkout's repository root.
+Start the fixture stack from the repository root.
 
 ```sh
 simulator/scripts/demo-up --episode ep_9031
 ```
 
-From this worktree's `app/` directory, start the local proxy so Chrome can reach
+From `app/` in the same checkout, start the local proxy so Chrome can reach
 the three services. Replace the three example URLs with the **Fixture**, **Hub**,
 and **Demo** lines printed by `demo-up`. The `/health` and `/demo` suffixes are OK.
 

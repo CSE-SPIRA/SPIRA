@@ -58,7 +58,19 @@ Counts cover the first valid command arrival for each operation ID, including re
 
 ## Demo
 
-`simulator/scripts/demo-up` starts the fixture Server, an MQTT broker, the Hub and the Simulator from this checkout and prints the `/demo` address: page 1 projects the Server's reasoning from the contract, page 2 shows the house in 3D with the Hub's ledger. See [DEMO.md](DEMO.md).
+Run the fixture Server, MQTT broker, Hub, and Simulator together from the
+repository root of one checkout.
+
+```bash
+simulator/scripts/demo-up --episode ep_9031
+```
+
+The launcher uses its own repository root and prints the `/demo`, Hub dashboard,
+and fixture URLs. Use `--port` if the default port 8730 is occupied. Page 1
+projects the Server's reasoning from the contract. Page 2 shows the house in
+3D with the Hub's ledger. Press Ctrl-C to stop the stack. See [DEMO.md](DEMO.md)
+for the demo flow and the [App README](../app/README.md#run-in-the-browser) for
+the Flutter browser preview from this checkout.
 
 ## Tests
 
