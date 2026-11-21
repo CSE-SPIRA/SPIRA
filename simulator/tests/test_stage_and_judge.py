@@ -1008,7 +1008,7 @@ def test_sim_at19_live_3d_households_and_household_content(tmp_path, monkeypatch
         assert notice_trigger.get("title") == notice_trigger.findtext("span") == notice
         detail = fridge.find(f'p[@id="{notice_trigger.get("popovertarget")}"]')
         assert detail.get("popover") == "auto" and detail.text == notice
-        assert view.findtext('.//h3[@id="entrance-summary"]') == "손님 있음 · 이전 3건"
+        assert view.findtext('.//h3[@id="entrance-summary"]') .startswith("손님 있음 · 토 ")
         assert view.find('.//h3[@id="entrance-summary"]').get("tabindex") == "0"
         assert [
             (row.get("data-signal"), row.text.strip())
@@ -1033,10 +1033,10 @@ def test_sim_at19_live_3d_households_and_household_content(tmp_path, monkeypatch
         assert person_marker.get("data-resting") is None
         assert person_marker.findtext('article/p[@class="device-value"]') == "2700K"
         assert person_marker.findtext('article/p[@class="change-marker"]') == "아빠 · 기기 패널"
-        assert view.findtext('.//h3[@id="entrance-summary"]') == "손님 나감 · 이전 4건"
+        assert view.findtext('.//h3[@id="entrance-summary"]') .startswith("손님 나감 · 토 ")
         post(client, "/operator/home", action="guests_arrive")
         view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
-        assert view.findtext('.//h3[@id="entrance-summary"]') == "손님 있음 · 이전 7건"
+        assert view.findtext('.//h3[@id="entrance-summary"]') .startswith("손님 있음 · 토 ")
         history = view.findall('.//ul[@id="entrance-history"]/li')
         assert len(history) == 8
         assert sum(row.text.strip() == "손님 있음" for row in history) == 2

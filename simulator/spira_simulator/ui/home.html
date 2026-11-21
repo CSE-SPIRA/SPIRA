@@ -68,7 +68,7 @@
             <div class="home-device">
               {% if entrance %}
               {% set latest = entrance[-1] %}
-              <h3 id="entrance-summary" tabindex="0">{{ latest.label }}{% if entrance | length > 1 %} · 이전 {{ entrance | length - 1 }}건{% endif %}</h3>
+              <h3 id="entrance-summary" tabindex="0">{{ latest.label }} · {{ latest.at }}</h3>
               <ul id="entrance-history" class="entrance-history" tabindex="0" aria-label="현관 관찰 기록">
                 {% for fact in entrance | reverse %}<li data-signal="{{ fact.signal }}">{{ fact.label }} <time datetime="{{ fact.occurred_at }}">{{ fact.at }}</time></li>{% endfor %}
               </ul>
