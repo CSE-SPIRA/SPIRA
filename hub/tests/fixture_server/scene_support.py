@@ -71,8 +71,11 @@ def schedule_templates(
     for name in (plan_name, card_name):
         replay.files[name] = substitute(replay.files[name], replacements)
     if demo_mode and guest_window is not None:
+        # Only the window's end is widened for the demo; it opens as the Server's S5 writes it
+        # (schedule start - guest_window_before_min).
         closes = starts + timedelta(seconds=guest_window)
-        window = {"from": starts.isoformat(), "to": closes.isoformat()}
+        opens = starts - timedelta(minutes=offsets["guest_window_before_min"])
+        window = {"from": opens.isoformat(), "to": closes.isoformat()}
         for task in replay.files[plan_name]["tasks"]:
             if task["trigger"].get("event") != "guest_arrived":
                 continue
@@ -113,6 +116,10 @@ def rebase_linked_calendar(replay: Replay, starts: datetime, ends: datetime, sha
     for item in rationale.get("item_tasks", []):
         if item.get("text"):
             item["text"] = item["text"].replace(original_day, new_day)
+    for task in replay.files["plan.v1.json"]["tasks"]:
+        for action in task["actions"]:
+            if action["cmd"] == "show_notice" and isinstance(action.get("value"), str):
+                action["value"] = action["value"].replace(original_day, new_day)
 
 
 def live_replay(
@@ -144,15 +151,9 @@ def live_replay(
     plan["sent_at"] = now.isoformat()
     if demo_mode:
         notice_after = server_numbers()["demo"]["notice_after_door_min"]
-        item_tasks = {item.task_id: item for item in replay.episode.item_tasks}
         for task in plan["tasks"]:
             if task["end"].get("on") == "fridge.door_opened":
                 task["end"]["after"] = f"{notice_after}m"
-            item = item_tasks.get(task["task_id"])
-            if task["source"] == "item" and item and item.item:
-                for action in task["actions"]:
-                    if action["cmd"] == "show_notice":
-                        action["value"] = f"{item.item} · {item.text or action['value']}"
     replay.live = True
     replay.clock = now
     replay.set_plan(replay.load(Plan, "plan.v1.json"))

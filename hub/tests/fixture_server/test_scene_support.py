@@ -6,9 +6,11 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
+from spira_contracts.plan import Plan
 from spira_contracts.reaction import Reaction
 
 from . import create_app
+from .replay import Replay
 from .scene_support import NextOrder, live_replay
 from .test_fixture_server import (
     EPISODE,
@@ -127,7 +129,7 @@ def test_demo_guest_window_and_calendar_agree_across_seoul_midnight(duration, ca
     starts = now + timedelta(seconds=65)
     ends = starts + timedelta(seconds=duration)
     mood = next(task for task in replay.plan.tasks if task.task_id == "t_mood#3")
-    assert datetime.fromisoformat(mood.trigger.window.from_) == starts
+    assert datetime.fromisoformat(mood.trigger.window.from_) == starts - timedelta(minutes=1)
     closes = starts + timedelta(seconds=900)
     assert datetime.fromisoformat(mood.trigger.window.to) == closes
     assert datetime.fromisoformat(mood.end.or_time) > closes
@@ -138,8 +140,10 @@ def test_demo_guest_window_and_calendar_agree_across_seoul_midnight(duration, ca
         "start": "00:00", "end": calendar_end,
     }
     assert replay.card.text.startswith("월요일 생일")
-    for task, item in zip(replay.plan.tasks[-2:], replay.episode.item_tasks, strict=True):
-        assert task.actions[0].value == f"{item.item} · {item.text}"
+    recorded = Replay("ep_9031").load(Plan, "plan.v1.json").tasks[-2:]
+    for task, source in zip(replay.plan.tasks[-2:], recorded, strict=True):
+        # The Server's notice text is kept; only the weekday word follows the shifted date.
+        assert task.actions[0].value == source.actions[0].value.replace("토요일", "월요일")
     assert "월요일" in replay.files["rationale.json"]["item_tasks"][0]["text"]
 
     ordinary = live_replay(order, demo_mode=False, now=now, guest_window=900)

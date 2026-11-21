@@ -328,10 +328,13 @@ def run(args, mosquitto, directory, requests, hub_key, defines):
             print(f"App preview: app/scripts/browser-demo --demo-port {ports['sim']} "
                   f"--proxy-port {args.proxy_port} --web-port {args.web_port} --stack-log {url_file}")
         print(f"Logs:      {logs}\nCtrl-C to stop.")
-        minutes, seconds = divmod(args.guest_window, 60)
+        # The window opens guest_window_before_min (demo: 1 minute, server/config/numbers.yaml)
+        # before the party and closes --guest-window seconds after it starts.
+        opens = max(args.starts_in - 60, 0)
+        minutes, seconds = divmod(args.starts_in + args.guest_window - opens, 60)
         duration = " ".join(part for part in (f"{minutes}분" if minutes else "",
                                               f"{seconds}초" if seconds else "") if part)
-        print(f"손님 맞이: 공유 후 약 {args.starts_in}초부터 {duration}", flush=True)
+        print(f"손님 맞이: 공유 후 약 {opens}초부터 {duration}", flush=True)
         while not stopping:
             for name, proc in processes:
                 if proc.poll() is not None:
