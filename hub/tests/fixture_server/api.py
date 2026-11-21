@@ -437,6 +437,7 @@ def create_app(
             )
         if snapshot.live:
             refresh_observations()
+            rationale.executions = snapshot.rationale_executions()
             rationale.observations = [snapshot.observation] if snapshot.observation else []
         return response(rationale)
 

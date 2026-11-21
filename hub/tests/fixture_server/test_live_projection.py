@@ -31,6 +31,51 @@ def birthday(monkeypatch):
     return client, advance, plan
 
 
+def test_live_rationale_uses_reported_execution_times(birthday):
+    client, advance, plan = birthday
+    rationale = f"{EPISODE}/rationale"
+    route = "/v1/hub/executions"
+    assert client.request("GET", rationale)["executions"] == []
+
+    result = client.fixture("executions.json")[2]
+    safety = datetime.fromisoformat(plan["tasks"][1]["trigger"]["time"])
+    reported_at = safety + timedelta(seconds=5)
+    advance(reported_at)
+    result.update(plan_version=plan["plan_version"], at=reported_at.isoformat())
+    assert client.request("POST", route, json=result) == {"duplicate": False}
+    expected = {field: result[field] for field in ("task_id", "device", "status", "substrate", "at")}
+    assert client.request("GET", rationale)["executions"] == [expected]
+
+
+def test_live_rationale_keeps_the_latest_final_result_per_device(birthday):
+    client, advance, plan = birthday
+    rationale = f"{EPISODE}/rationale"
+    route = "/v1/hub/executions"
+    first, second = client.fixture("executions.json")[2:4]
+    safety = datetime.fromisoformat(plan["tasks"][1]["trigger"]["time"])
+    completed_at = safety + timedelta(seconds=10)
+    advance(completed_at)
+    result = dict(first, plan_version=plan["plan_version"], at=completed_at.isoformat())
+    running = dict(result, result_id="rs_safety_running", status="running", at=safety.isoformat())
+    running.pop("observed")
+    client.request("POST", route, json=running)
+    assert client.request("GET", rationale)["executions"] == []
+
+    client.request("POST", route, json=result)
+    stale = dict(running, result_id="rs_safety_failed", status="failed")
+    client.request("POST", route, json=stale)
+    other_device = dict(second, plan_version=plan["plan_version"], at=completed_at.isoformat())
+    client.request("POST", route, json=other_device)
+    restore = client.fixture("executions.json")[-1]
+    client.request("POST", route, json=dict(
+        restore, plan_version=plan["plan_version"], at=(completed_at + timedelta(seconds=5)).isoformat(),
+    ))
+    assert client.request("GET", rationale)["executions"] == [
+        {field: report[field] for field in ("task_id", "device", "status", "substrate", "at")}
+        for report in (result, other_device)
+    ]
+
+
 def test_birthday_line_progress_and_end_follow_hub_17(birthday):
     client, advance, plan = birthday
     request = client.request

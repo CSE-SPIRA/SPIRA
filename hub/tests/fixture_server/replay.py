@@ -15,7 +15,7 @@ from spira_contracts.execution_result import ExecutionResult, RestoreResult, Run
 from spira_contracts.household_created import HouseholdCreated
 from spira_contracts.memory import Memory
 from spira_contracts.plan import Cancelled, EventTrigger, Plan
-from spira_contracts.rationale import Observation
+from spira_contracts.rationale import Execution, Observation
 from spira_contracts.reaction import Reaction
 
 from .observation import ObservationWindow
@@ -195,6 +195,23 @@ class Replay:
 
     def started(self, task_id: str):
         return self.started_at(task_id) is not None
+
+    def rationale_executions(self) -> list[Execution]:
+        finals = (
+            packet for result in self.results.values()
+            if isinstance(packet := result.root, RunResult)
+            and packet.status != ExecutionStatus.RUNNING
+        )
+        latest: dict[tuple[str, str], RunResult] = {}
+        for packet in sorted(finals, key=lambda packet: datetime.fromisoformat(packet.at)):
+            latest[packet.task_id, packet.device] = packet
+        return [
+            Execution(
+                task_id=packet.task_id, device=packet.device, status=packet.status,
+                substrate=packet.substrate, at=packet.at,
+            )
+            for packet in latest.values()
+        ]
 
     def cancel_tasks(self, task_ids: set[str], *, restore_started: bool):
         cancelled = [
