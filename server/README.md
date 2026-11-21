@@ -74,7 +74,7 @@ With `--kb on`, `checks.txt` has "S2 KB searched" (fails when the KB search fail
 | File | Content |
 | --- | --- |
 | `kb_search.tsv` | Every searched case in sim order: sim, calendar and household bonus, score, above the floor, rank among the used cases, representative, intent, items, situation, an empty `ox` column for marking "really similar?" |
-| `kb_sweep.txt` | Sim by rank, cases above the floor, sim range of the used cases, cases in the used set only because of the bonus, best sim per intent; the same cases summarised again for floors 0.5–0.7 × caps 20–200; the same search at `KB_SAMPLE` 0.25 and 0.5 (two more read-only queries, no LLM) |
+| `kb_sweep.txt` | Sim by rank, cases above the floor, sim range of the used cases, cases in the used set only because of the bonus, best sim per intent; what S3 saw against the KB base rate; the same cases summarised again for floors 0.5–0.75 × caps 20–200; the same search at `KB_SAMPLE` 0.25 and 0.5 (two more read-only queries, no LLM) |
 
 `orders/`, `out/` and `dev/home.yaml` are git-ignored. The household in `home.yaml` is deleted and written again on
 every run.

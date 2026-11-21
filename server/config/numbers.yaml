@@ -11,7 +11,7 @@ history_d: 90
 routine_min: 3
 spike: 2.0
 type_sim: 0.85
-sim_floor: 0.6          # tuned
+sim_floor: 0.70         # tuned (R48: 0.70 ~ a third of an 8-item basket shared)
 min_similar: 5          # tuned
 w_cal: 0.05             # tuned
 w_house: 0.03           # tuned
@@ -20,6 +20,7 @@ max_use: 50
 cover: 0.8
 none_min: 0.10
 max_reps: 3
+base_refresh_min: 60    # KB base rates are counted again after this (R48)
 max_bundles: 2
 max_lines: 4
 hold_d: 14

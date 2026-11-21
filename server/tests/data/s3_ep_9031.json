@@ -75,21 +75,28 @@
       },
       "kb_neighbors": {
         "similar_count": 12,
+        "base_total": 30000,
         "intent_counts": [
           {
             "intent_id": "kid_birthday_party",
             "name": "아이 생일 파티",
-            "n": 9
+            "n": 9,
+            "share": 0.75,
+            "base_share": 0.02
           },
           {
             "intent_id": "home_baking",
             "name": "홈베이킹",
-            "n": 2
+            "n": 2,
+            "share": 0.1667,
+            "base_share": 0.03
           },
           {
             "intent_id": "none",
             "name": "의도 없음",
-            "n": 1
+            "n": 1,
+            "share": 0.0833,
+            "base_share": 0.64
           }
         ],
         "examples": [

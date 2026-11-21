@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import statistics
+import time
 from collections import Counter
 from datetime import datetime, timedelta
 
@@ -23,7 +24,7 @@ from ..db.engine import kb_engine, session_scope
 from ..db.models import CalendarEvent, Episode, Household, OrderItem
 from ..kb import embedding
 from ..kb.lists import KbLists, get_lists
-from ..kb.search import KbCase, KbUnavailable, search
+from ..kb.search import KbCase, KbUnavailable, base_counts, search
 from ..settings import Settings, get_settings
 
 log = logging.getLogger(__name__)
@@ -135,7 +136,26 @@ def kb_neighbors(types: list[str], calendar: list[dict], household_types: list[s
     cases = search(kb_engine(), q, kb_version_number=settings.kb_version_number, sample=settings.kb_sample,
                    limit=n.search_limit)
     return summarize_neighbors(cases, types, calendar, household_types, home=settings.home_context == "on", n=n,
-                               lists=lists, sim_floor=n.sim_floor, max_use=n.max_use)
+                               lists=lists, sim_floor=n.sim_floor, max_use=n.max_use, base=base_rates(settings, n))
+
+
+_BASE: dict[tuple[int, float], tuple[float, dict[str, int]]] = {}
+
+
+def base_rates(settings: Settings, n) -> dict[str, int]:
+    """Cases per intent among the searchable KB cases (R48), counted once and again after `base_refresh_min`: the
+    KB grows under the same version while it is built."""
+    key = (settings.kb_version_number, settings.kb_sample)
+    hit = _BASE.get(key)
+    if hit and time.monotonic() - hit[0] < n.base_refresh_min * 60:
+        return hit[1]
+    counts = base_counts(kb_engine(), kb_version_number=key[0], sample=key[1])
+    _BASE[key] = (time.monotonic(), counts)
+    return counts
+
+
+def reset_base_cache() -> None:
+    _BASE.clear()
 
 
 def context_bonus(c: KbCase, cal_tags: set[str], house: set[str], home: bool, n) -> tuple[float, float]:
@@ -159,8 +179,11 @@ def rank_similar(cases: list[KbCase], calendar: list[dict], household_types: lis
 
 
 def summarize_neighbors(cases: list[KbCase], types: list[str], calendar: list[dict], household_types: list[str], *,
-                        home: bool, n, lists: KbLists, sim_floor: float, max_use: int) -> tuple[dict, list[str]]:
-    """The kb_neighbors block from searched cases (§8.3). dry_run.py calls this again with other floors and caps."""
+                        home: bool, n, lists: KbLists, sim_floor: float, max_use: int,
+                        base: dict[str, int] | None = None) -> tuple[dict, list[str]]:
+    """The kb_neighbors block from searched cases (§8.3). dry_run.py calls this again with other floors and caps.
+    With `base` (cases per intent in the whole KB) each count also carries `share` and `base_share`, and `none`
+    always has a row (R48)."""
     similar_n = sum(1 for c in cases if c.sim > sim_floor)
     if similar_n < n.min_similar:
         return {"similar_count": similar_n, "note": "비슷한 사례가 거의 없음"}, []
@@ -184,12 +207,17 @@ def summarize_neighbors(cases: list[KbCase], types: list[str], calendar: list[di
             "case_household_types": list(c.household.get("types") or []),
             "overlap": {"k": len(shared), "n": len(c.items), "items": shared},
         })
-    return {
-        "similar_count": len(ranked),
-        "intent_counts": [{"intent_id": i, "name": lists.intent_name(i), "n": counts[i]} for i in order],
-        "examples": examples,
-        "note": None,
-    }, [c.case_id for c in ranked]
+    rows = [{"intent_id": i, "name": lists.intent_name(i), "n": counts[i]} for i in order]
+    block: dict = {"similar_count": len(ranked), "intent_counts": rows, "examples": examples, "note": None}
+    if base:
+        total = sum(base.values())
+        if "none" not in counts:
+            rows.append({"intent_id": "none", "name": lists.intent_name("none"), "n": 0})
+        for r in rows:
+            r["share"] = round(r["n"] / len(ranked), 4)
+            r["base_share"] = round(base.get(r["intent_id"], 0) / total, 4)
+        block["base_total"] = total
+    return block, [c.case_id for c in ranked]
 
 
 def pick_reps(order: list[str], counts: Counter, total: int, cover: float, none_min: float, max_reps: int) -> list[str]:

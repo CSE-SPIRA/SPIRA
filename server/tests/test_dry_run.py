@@ -179,7 +179,7 @@ def test_kb_on_writes_search_table_and_sweep(tmp_path, env):
     code, out = _kb_run(tmp_path, env)
     checks = (out / "checks.txt").read_text(encoding="utf-8")
     assert code == 0, checks
-    assert "[ok] S2 KB searched — 15 cases, 12 above 0.6, used 12, top sim" in checks
+    assert "[ok] S2 KB searched — 15 cases, 12 above 0.7, used 12, top sim" in checks
     rows = [r.split("\t") for r in (out / "kb_search.tsv").read_text(encoding="utf-8").splitlines()]
     assert rows[0] == dry_run.TSV_COLUMNS and len(rows) == 16
     col = {name: k for k, name in enumerate(rows[0])}
@@ -193,9 +193,11 @@ def test_kb_on_writes_search_table_and_sweep(tmp_path, env):
     assert all(r[col["cal_bonus"]] == "0.05" for r in body if r[col["calendar_tags"]] == "생일")   # c1 생일
     assert all(r[col["ox"]] == "" for r in body)
     sweep = (out / "kb_sweep.txt").read_text(encoding="utf-8")
-    assert "floor 0.60 cap  50: above  12, used  12 | kid_birthday_party 9 · home_baking 2 · none 1 " \
+    assert "floor 0.70 cap  50: above  12, used  12 | kid_birthday_party 9 · home_baking 2 · none 1 " \
            "| reps kid_birthday_party, home_baking  <- now" in sweep
-    assert "floor 0.60 cap  20" in sweep and "floor 0.70 cap 200" in sweep
+    assert "floor 0.60 cap  20" in sweep and "floor 0.75 cap 200" in sweep
+    assert "S3 counts (share here / share in the KB of 15): kid_birthday_party 9 (75% / 60%) · " \
+           "home_baking 2 (17% / 13%) · none 1 (8% / 27%)" in sweep
     assert "sample 0.25:" in sweep and "sample 0.5 :" in sweep and "sample 1.0 :" in sweep
 
 

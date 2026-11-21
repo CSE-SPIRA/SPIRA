@@ -89,8 +89,7 @@ def build_intent_message(context: dict, items: list[dict]) -> str:
         if kb.get("note") or not kb.get("intent_counts"):
             parts.append("\n".join([k["header"], prompts.fill(k["few"], N=kb.get("similar_count", 0))]))
         else:
-            counts = " · ".join(f"{c['name']} {c['n']}" for c in kb["intent_counts"])
-            lines = [k["header"], k["how"], "", prompts.fill(k["counts"], N=kb["similar_count"], COUNTS=counts)]
+            lines = [k["header"], k["how"], "", *kb_count_lines(kb, k)]
             for i, ex in enumerate(kb["examples"], start=1):
                 sit = ex.get("situation") or {}
                 lines += ["", prompts.fill(
@@ -103,6 +102,22 @@ def build_intent_message(context: dict, items: list[dict]) -> str:
                     TYPES=", ".join(ex.get("case_household_types") or []) or none_word)]
             parts.append("\n".join(lines))
     return "\n\n".join(parts) + "\n"
+
+
+def _pct(x: float) -> str:
+    return "1% 미만" if 0 < x < 0.005 else f"{round(x * 100)}%"
+
+
+def kb_count_lines(kb: dict, k: dict) -> list[str]:
+    """Counts of the kept cases; with base rates one line per intent, `none` last (R48)."""
+    rows = kb["intent_counts"]
+    if "base_total" not in kb:
+        return [prompts.fill(k["counts"], N=kb["similar_count"],
+                             COUNTS=" · ".join(f"{c['name']} {c['n']}" for c in rows))]
+    rows = [r for r in rows if r["intent_id"] != "none"] + [r for r in rows if r["intent_id"] == "none"]
+    return [prompts.fill(k["counts_header"], N=kb["similar_count"], TOTAL=f"{kb['base_total']:,}"),
+            *(prompts.fill(k["count_line"], NAME=r["name"], N=r["n"], SHARE=_pct(r["share"]),
+                           BASE=_pct(r["base_share"])) for r in rows)]
 
 
 # ----------------------------------------------------------------------------------------------- schema (§9.4)
