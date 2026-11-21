@@ -2,7 +2,6 @@
 
 from datetime import datetime, timedelta, timezone
 from typing import Literal
-from zoneinfo import ZoneInfo
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -10,9 +9,9 @@ from spira_contracts.calendar import Calendar
 from spira_contracts.card import Card
 from spira_contracts.plan import Plan
 
+from .observation import SEOUL
 from .replay import CONTRACTS, Replay
 
-SEOUL = ZoneInfo("Asia/Seoul")
 WEEKDAYS = "월화수목금토일"
 
 
@@ -47,6 +46,9 @@ def schedule_templates(
 ):
     numbers = server_numbers()
     offsets = numbers["demo"] if demo_mode else numbers
+    replay.observation_window.scheduled_start = starts
+    replay.observation_window.end_due = ends + timedelta(minutes=offsets["end_fallback_min"])
+    replay.observation_window.guest_lead = timedelta(minutes=offsets["guest_window_before_min"])
     card = replay.load(Card, card_name)
     source_start = datetime.fromisoformat(card.starts_at)
     source_end = next(

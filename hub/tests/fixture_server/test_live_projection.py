@@ -1,6 +1,7 @@
 """Live App-facing state changes from the HUB-17 event and result bodies."""
 
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -65,6 +66,7 @@ def test_birthday_line_progress_and_end_follow_hub_17(birthday):
         ))
 
     assert poll["cards"][0]["summary"] == {"done": 0, "total": 4, "waiting_for": None}
+    assert request("GET", f"{EPISODE}/rationale")["observations"] == []
     assert client.react(client.fixture("reactions.json")[0])["lines"][0]["state"] == "off"
     assert card_change()["summary"] == {"done": 0, "total": 3, "waiting_for": None}
     assert event("ev_9101", sent + timedelta(seconds=4))["plans_changed"] is True
@@ -101,14 +103,40 @@ def test_birthday_line_progress_and_end_follow_hub_17(birthday):
     event("ev_9410", starts + timedelta(seconds=50), payload=dict(light_change, by="unknown"))
     assert client.cards(since=poll["server_time"])["cards"] == []
     events["ev_9410"]["event_id"] = "ev_light_user"
-    event("ev_9410", starts + timedelta(seconds=51))
+    event("ev_9410", starts + timedelta(seconds=71))
     assert card_change()["lines"][2]["state"] == "user_changed"
+    assert request("GET", f"{EPISODE}/rationale")["observations"] == []
+    assert request("GET", f"{APP_HOUSEHOLD}/memory")["intents"] == []
 
     when = end + timedelta(seconds=15)
     # C-4 can arrive ahead of the C-3 event which establishes the end.
     result("rs_5090", when)
     assert client.cards(since=poll["server_time"])["cards"] == []
     event("ev_9500", end)
+    observation, = request("GET", f"{EPISODE}/rationale")["observations"]
+    assert observation["card_id"] == "nc_331"
+    assert observation["verdict"] == "match"
+    cleaning, safety_feedback, mood_feedback, oven_feedback = observation["task_feedback"]
+    off_date = sent.astimezone(ZoneInfo("Asia/Seoul")).date()
+    assert cleaning == {
+        "task_id": "t_clean#1", "actions": [["cleaner", "clean"]], "user": "off",
+        "when": "before_run", "at": off_date.isoformat(),
+    }
+    assert safety_feedback["user"] == oven_feedback["user"] == "kept"
+    assert safety_feedback["actions"] == [["cooktop", "child_lock"], ["smart_plug:전기포트", "off"]]
+    assert mood_feedback["user"] == "changed"
+    assert mood_feedback["changes"] == [{
+        "device_type": "light", "property": "color_temp", "to": light_change["to"],
+        "after_start_minutes": 1,
+    }]
+    memory, = request("GET", f"{APP_HOUSEHOLD}/memory")["intents"]
+    assert memory["episodes"] == [{
+        "case_id": "home_h_042_ep_9031_1", "date": safety.astimezone(ZoneInfo("Asia/Seoul")).date().isoformat(),
+        "verdict": "match",
+    }]
+    assert memory["off_lines"][0]["until"] == (off_date + timedelta(days=180)).isoformat()
+    assert memory["changed"][0]["device_type"] == "light"
+    assert "2700 K" in memory["changed"][0]["change"]
     mood = card_change()["lines"][2]
     assert (mood["state"], mood["end_state"]) == ("user_changed", "kept_user_change")
     assert request("GET", EPISODE)["status"] == "notified"
@@ -116,7 +144,47 @@ def test_birthday_line_progress_and_end_follow_hub_17(birthday):
     final = card_change()
     assert [line["end_state"] for line in final["lines"]] == [None, "restored", "kept_user_change", "none"]
     assert request("GET", EPISODE)["status"] == "closed"
+    assert request("GET", f"{EPISODE}/rationale")["observations"] == [observation]
+    assert request("GET", f"{APP_HOUSEHOLD}/memory")["intents"] == [memory]
+
+
+@pytest.mark.parametrize("signal", ["guest_arrived", "oven.started", None])
+def test_observation_keeps_lines_and_uses_confirmation_signals(birthday, signal):
+    client, advance, plan = birthday
+    start = datetime.fromisoformat(plan["tasks"][3]["trigger"]["time"])
+    events = {event["type"]: event for event in client.fixture("events.json")}
+    requests = client.request
+    advance(start)
+    if signal is not None:
+        requests("POST", "/v1/hub/events", json=[dict(events[signal], at=start.isoformat())])
+    end = start + timedelta(minutes=1)
+    requests("POST", "/v1/hub/events", json=[dict(events["event_end"], at=end.isoformat())])
+    observation, = requests("GET", f"{EPISODE}/rationale")["observations"]
+    assert observation["verdict"] == ("match" if signal else "unconfirmed")
+    assert [feedback["user"] for feedback in observation["task_feedback"]] == ["kept"] * 4
+
+
+def test_observation_closes_at_fallback_with_a_line_switched_off_during_run(birthday):
+    client, advance, plan = birthday
+    safe = plan["tasks"][1]
+    start = datetime.fromisoformat(safe["trigger"]["time"])
+    fallback = datetime.fromisoformat(safe["end"]["or_time"])
+    advance(start)
+    request = client.request
+    run = client.fixture("executions.json")[2]
+    request("POST", "/v1/hub/executions", json=dict(run, at=start.isoformat(), plan_version=1))
+    client.react({"reaction": "line_off", "task_id": safe["task_id"]})
+    advance(fallback - timedelta(seconds=1))
+    assert request("GET", f"{EPISODE}/rationale")["observations"] == []
+    advance(fallback)
+    assert request("GET", f"{APP_HOUSEHOLD}/memory")["intents"][0]["episodes"][0]["verdict"] == "unconfirmed"
+    observation, = request("GET", f"{EPISODE}/rationale")["observations"]
+    safety = observation["task_feedback"][1]
+    assert (safety["user"], safety["when"]) == ("off", "during_run")
+    case_id = "home_h_042_ep_9031_1"
+    request("DELETE", f"{APP_HOUSEHOLD}/memory/{{case_id}}", 204, path={"case_id": case_id})
     assert request("GET", f"{APP_HOUSEHOLD}/memory")["intents"] == []
+    assert request("GET", f"{EPISODE}/rationale")["observations"] == [observation]
 
 
 @pytest.mark.parametrize("status,reason,expected", [
@@ -259,3 +327,4 @@ def test_stop_waits_for_the_started_lines_restore(birthday):
     card = client.cards(since=stopped["updated_at"])["cards"][0]
     assert (card["lines"][1]["state"], card["lines"][1]["end_state"]) == ("stopped", "restored")
     assert client.request("GET", EPISODE)["status"] == "closed"
+    assert client.request("GET", f"{EPISODE}/rationale")["observations"][0]["verdict"] == "stopped"

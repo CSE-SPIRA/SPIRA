@@ -37,6 +37,8 @@ To open the household event controls from another device, add `--sim-lan-ip <dem
 4. Press **손님 도착** during the **손님 맞이** window shown next to the button. The default window runs for 10 minutes from the scheduled party start. Use `--guest-window <seconds>` to change its length. Watch the living-room light and TV in the Viewer.
 5. Press **파티 끝** to end the party and watch SPIRA restore the settings it still owns.
 
+Changing the light through the operator’s person actions during the party shows up as feedback after **파티 끝**.
+
 To reset, stop the stack with Ctrl-C and restart `scripts/demo-up`. Each restart starts clean by default.
 
 Run `scripts/demo-up` to also start the [optional demo shell](demo-shell/README.md), or use [`app/scripts/browser-demo`](app/scripts/browser-demo) for the Flutter App preview.

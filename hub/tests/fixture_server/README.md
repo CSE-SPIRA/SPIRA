@@ -62,15 +62,16 @@ earlier episode details, committed rationale snapshots and cards until
 restart. Each template uses its committed episode and card IDs on first use.
 Repeating a template with a new order allocates fresh IDs to retain history.
 
+Live rationale starts with empty observations. At party end or the fallback
+deadline, the fixture uses the received events, execution results and card
+reactions to publish S7 feedback and household memory immediately.
+
 `GET /_fixture/scene/acks` uses the fixture Hub key from onboarding and returns
 the active episode's acknowledgements by version. `GET /_fixture/receipts`
 retains its original shape across orders.
 
 ## Open questions
 
-- Live episode closure follows the card lines. The S7 memory, verdict and
-  confirmation-signal projection belongs to the Server. Fixed birthday
-  replay still serves its committed final transcript and memory.
 - The family fixture has no committed rationale or episode item-detail
   snapshot. A calendar match uses the committed event identity and title.
 - The scene controls normally serve the newest episode's plan. When §12.4
