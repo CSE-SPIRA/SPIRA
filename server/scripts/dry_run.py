@@ -323,7 +323,7 @@ def run(images_dir: Path, home_path: Path, kb: str, now: datetime | None, out_di
 
 # ------------------------------------------------------------------------------------------- KB search (§8.3)
 
-FLOORS = (0.5, 0.55, 0.6, 0.65, 0.7)
+FLOORS = (0.5, 0.55, 0.6, 0.65, 0.7, 0.75)
 CAPS = (20, 30, 50, 100, 200)
 SAMPLES = (0.25, 0.5)
 TSV_COLUMNS = ["rank", "case_id", "sim", "cal_bonus", "house_bonus", "score", "above_floor", "used_rank", "rep",
@@ -348,6 +348,9 @@ def kb_outputs(out: Path, rec: RecordingSearch, ep, types: list[str], settings, 
     reps = {e["case_id"] for e in nb.get("examples", [])}
     write_kb_tsv(out / "kb_search.tsv", cases, calendar, house, home, n, reps)
     lines = sweep_lines(cases, types, calendar, house, home, n, settings, call)
+    if nb.get("base_total"):                         # what S3 saw (R48): share of the kept cases vs the whole KB
+        lines[3:3] = ["S3 counts (share here / share in the KB of " + f"{nb['base_total']}): " + " · ".join(
+            f"{r['intent_id']} {r['n']} ({r['share']:.0%} / {r['base_share']:.0%})" for r in nb["intent_counts"]), ""]
     (out / "kb_sweep.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     above = sum(1 for c in cases if c.sim > n.sim_floor)
     top = f"{cases[0].sim:.3f}" if cases else "-"

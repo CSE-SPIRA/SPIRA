@@ -3,6 +3,7 @@
 from collections import Counter
 
 import pytest
+from sqlalchemy import text
 
 from spira_server.db.engine import kb_engine, session_scope
 from spira_server.db.models import Episode
@@ -92,30 +93,80 @@ def test_kb_neighbours_counts_and_examples(kb):
     ctx = s2_context.build_context(ep)
     nb = ctx["for_intent"]["kb_neighbors"]
     assert nb["similar_count"] == 12 and nb["note"] is None
-    assert nb["intent_counts"] == [
-        {"intent_id": "kid_birthday_party", "name": "아이 생일 파티", "n": 9},
-        {"intent_id": "home_baking", "name": "홈베이킹", "n": 2},
-        {"intent_id": "none", "name": "의도 없음", "n": 1},
+    assert nb["intent_counts"] == [                          # R48: share of the kept 12, base share of the KB 15
+        {"intent_id": "kid_birthday_party", "name": "아이 생일 파티", "n": 9, "share": 0.75, "base_share": 0.6},
+        {"intent_id": "home_baking", "name": "홈베이킹", "n": 2, "share": 0.1667, "base_share": 0.1333},
+        {"intent_id": "none", "name": "의도 없음", "n": 1, "share": 0.0833, "base_share": 0.2667},
     ]
+    assert nb["base_total"] == 15
     # 9/12 = 75 % < 80 % -> home baking added; none 1/12 = 8 % < 10 % -> not shown
     assert [e["intent_id"] for e in nb["examples"]] == ["kid_birthday_party", "home_baking"]
     ex = nb["examples"][0]
     assert set(ex) == {"case_id", "items", "intent_id", "intent_text", "situation", "calendar_tags",
                        "case_household_types", "overlap"}
     assert ex["calendar_tags"] == ["생일"]                    # the c1 tag bonus puts a tagged case first
-    assert ex["overlap"]["k"] == len(ex["overlap"]["items"]) == 5 and ex["overlap"]["n"] == 6
+    assert ex["overlap"]["k"] == len(ex["overlap"]["items"]) == 6 and ex["overlap"]["n"] == 7
     assert ex["overlap"]["items"] == sorted(ex["overlap"]["items"])
     assert len(ctx["snapshot"]) == 12 and not any(c.startswith("syn_T9") for c in ctx["snapshot"])
 
 
 def test_t9_few_similar_cases(kb):
     for n in range(4):
-        items = ["풍선", "케이크 토퍼", "고깔모자", "딸기", "아이싱 펜", f"x{n}"]
+        items = ["풍선", "케이크 토퍼", "고깔모자", "딸기", "아이싱 펜", "휘핑크림", f"x{n}"]
         kb.add(f"syn_F_{n:04d}", items, "kid_birthday_party")
     ep = ep9031()
     ctx = s2_context.build_context(ep)
     assert ctx["for_intent"]["kb_neighbors"] == {"similar_count": 4, "note": "비슷한 사례가 거의 없음"}
     assert ctx["snapshot"] == []
+
+
+def test_r48_floor_070_drops_cases_sharing_few_items(kb):
+    """dry run B (11-21): 0.6 let in baskets sharing 0-1 items; 0.70 is about a third of the basket shared."""
+    for n in range(6):                                     # 5 of 6 items shared: mock sim about 0.68
+        kb.add(f"syn_L_{n:04d}", ["풍선", "케이크 토퍼", "고깔모자", "딸기", "아이싱 펜", f"y{n}"],
+               "kid_birthday_party")
+    nb = s2_context.build_context(ep9031())["for_intent"]["kb_neighbors"]
+    assert nb == {"similar_count": 0, "note": "비슷한 사례가 거의 없음"}
+
+
+def test_r48_none_row_and_base_rate(kb):
+    kb.seed_birthday_neighbours()
+    with kb.engine().begin() as conn:                      # the one similar none case leaves; dissimilar ones stay
+        conn.execute(text("DELETE FROM cases WHERE case_id = 'syn_T3_0000'"))
+    nb = s2_context.build_context(ep9031())["for_intent"]["kb_neighbors"]
+    assert nb["intent_counts"][-1] == {"intent_id": "none", "name": "의도 없음", "n": 0, "share": 0.0,
+                                       "base_share": round(3 / 14, 4)}
+    assert sum(r["n"] for r in nb["intent_counts"]) == nb["similar_count"] == 11
+
+
+def test_r48_base_rate_is_kept_then_counted_again(kb, monkeypatch):
+    kb.seed_birthday_neighbours()
+    ep = ep9031()
+    now = [1000.0]
+    monkeypatch.setattr(s2_context.time, "monotonic", lambda: now[0])
+    assert s2_context.build_context(ep)["for_intent"]["kb_neighbors"]["base_total"] == 15
+    kb.add("syn_N_0000", ["라면", "생수"], "none")
+    now[0] += 59 * 60
+    assert s2_context.build_context(ep)["for_intent"]["kb_neighbors"]["base_total"] == 15
+    now[0] += 2 * 60                                       # base_refresh_min 60
+    assert s2_context.build_context(ep)["for_intent"]["kb_neighbors"]["base_total"] == 16
+
+
+def test_r48_base_rate_follows_version_and_sample(kb, env):
+    kb.seed_birthday_neighbours()
+    kb.add("syn_V2_0000", ["라면", "생수"], "none", kb_version="kb-v2")
+    ep = ep9031()
+    assert s2_context.build_context(ep)["for_intent"]["kb_neighbors"]["base_total"] == 15
+    env(KB_VERSION="kb-v2")
+    assert s2_context.build_context(ep)["for_intent"]["kb_neighbors"]["base_total"] == 16
+    env(KB_VERSION="kb-v1", KB_SAMPLE="0.5")
+    with kb.engine().connect() as conn:
+        ids = [r[0] for r in conn.execute(text("SELECT case_id FROM cases WHERE kb_version = 'kb-v1'"))]
+    want = sum(1 for i in ids if in_sample(i, 0.5))
+    assert 0 < want < len(ids)
+    from spira_server.config import get_config
+    from spira_server.settings import get_settings
+    assert sum(s2_context.base_rates(get_settings(), get_config().numbers).values()) == want
 
 
 def test_home_context_off_drops_bonus_and_home(kb, env):

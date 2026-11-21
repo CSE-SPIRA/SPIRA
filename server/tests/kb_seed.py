@@ -48,17 +48,17 @@ def seed_birthday_neighbours() -> None:
     """12 similar cases (9 kid birthday, 2 home baking, 1 none) + 3 dissimilar ones."""
     party = ["풍선", "케이크 토퍼", "고깔모자", "딸기", "아이싱 펜", "휘핑크림", "컵케이크 믹스"]
     for n in range(9):
-        shared = [party[(n + k) % len(party)] for k in range(5)]
+        shared = [party[(n + k) % len(party)] for k in range(6)]
         add(f"syn_T1_{n:04d}", shared + ["생일 초"], "kid_birthday_party",
             intent_text="아이 친구들을 집에 초대해 생일 파티를 여는 준비",
             situation={"event": "생일", "guests": "아이 친구들", "activity": None, "theme": None},
             calendar_tags=["생일"] if n < 5 else [], types=["3~4인", "초등 자녀"])
     for n in range(2):
-        add(f"syn_T2_{n:04d}", ["딸기", "컵케이크 믹스", "휘핑크림", "아이싱 펜", "케이크 토퍼", "버터"],
+        add(f"syn_T2_{n:04d}", ["딸기", "컵케이크 믹스", "휘핑크림", "아이싱 펜", "케이크 토퍼", "풍선", "버터"],
             "home_baking", intent_text="주말에 컵케이크를 구워 보려는 홈베이킹",
             situation={"event": None, "guests": None, "activity": "컵케이크 굽기", "theme": None},
             types=["2인", "부부·커플"])
-    add("syn_T3_0000", ["세탁 세제", "로션", "딸기", "휘핑크림", "컵케이크 믹스", "우유"], "none",
+    add("syn_T3_0000", ["세탁 세제", "로션", "딸기", "휘핑크림", "컵케이크 믹스", "아이싱 펜", "우유"], "none",
         intent_text=None, types=["1인"])
     for n in range(3):
         add(f"syn_T9_{n:04d}", ["라면", "생수", "휴지", "샴푸", "딸기", f"잡화{n}"], "none")

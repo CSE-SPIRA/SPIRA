@@ -48,6 +48,33 @@ LIMIT :limit
 """
 
 
+BASE_SQL = """
+SELECT intent_id, count(*) AS n
+FROM cases
+WHERE source = 'synthetic'
+  AND substring(kb_version from '^kb-v([0-9]+)$')::int <= :kb_version_number
+  AND (:sample >= 1.0 OR ('x' || substr(encode(sha256(convert_to(case_id, 'UTF8')), 'hex'), 1, 8))::bit(32)::bigint
+                          < :sample * 4294967296)
+GROUP BY intent_id
+"""
+
+
+def base_counts(engine: Engine, *, kb_version_number: int, sample: float) -> dict[str, int]:
+    """Cases per intent among the searchable cases (same filter as SQL) for the base rate (R48); retries like search."""
+    last: Exception | None = None
+    for _ in range(2):
+        try:
+            with engine.connect() as conn, conn.begin():
+                conn.execute(text("SET LOCAL statement_timeout = '15s'"))
+                rows = conn.execute(text(BASE_SQL), {"kb_version_number": kb_version_number,
+                                                     "sample": sample}).all()
+            return {r[0]: int(r[1]) for r in rows}
+        except SQLAlchemyError as e:
+            last = e
+            log.warning("KB base count failed: %s", e)
+    raise KbUnavailable(str(last))
+
+
 def _vector_literal(v: list[float]) -> str:
     return "[" + ",".join(f"{x:.7g}" for x in v) + "]"
 

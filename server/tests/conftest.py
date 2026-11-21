@@ -48,6 +48,7 @@ from spira_server.kb import embedding
 from spira_server.llm import client as llm_client
 from spira_server.llm.mock import MockProvider, record
 from spira_server.paths import SERVER_DIR
+from spira_server.pipeline import s2_context
 from spira_server.settings import get_settings
 
 SKIP_TRUNCATE = {"alembic_version"}
@@ -82,6 +83,7 @@ def reset_caches(keep_llm: bool = False) -> None:
     get_settings.cache_clear()
     get_config.cache_clear()
     db_engine.reset_engines()
+    s2_context.reset_base_cache()
     if not keep_llm:
         llm_client.set_llm(None)
 

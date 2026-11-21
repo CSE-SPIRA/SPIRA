@@ -253,12 +253,13 @@ Tables and starting values live in `server/config/*.yaml`, not in code (so new i
 | `routine_min` | 3 | 3 | Bought this often in 90 days = usual |
 | `spike` | 2.0 | 2.0 | Quantity ≥ this × median = spike |
 | `type_sim` | 0.85 | 0.85 | Item type names this similar count as the same |
-| `sim_floor` | 0.6 | 0.6 | KB case counts as similar above this (tuned) |
+| `sim_floor` | 0.70 | 0.70 | KB case counts as similar above this (tuned; R48: about a third of an 8-item basket shared) |
 | `min_similar` | 5 | 5 | Fewer similar cases → KB not given (tuned) |
 | `w_cal` / `w_house` | 0.05 / 0.03 | | Context bonus (tuned) |
 | `search_limit` | 200 | 200 | KB candidates (`hnsw.ef_search` ≥ this) |
 | `max_use` | 50 | 50 | Cases counted |
 | `cover` / `none_min` / `max_reps` | 0.8 / 0.10 / 3 | | Representative cases |
+| `base_refresh_min` | 60 | | KB base rates (cases per intent) are counted again after this (R48) |
 | `max_bundles` | 2 | 2 | Bundles kept |
 | `max_lines` | 4 | 4 | Lines per intent |
 | `hold_d` | 14 | 14 | Held tasks kept |
@@ -591,10 +592,10 @@ Masked items never reach S2 embedding, S3, S4, notices, rationale or the order e
 
 1. `q = embed_basket([types of unmasked items])` (`from spira.embedding import embed_basket`; KB-16). Same function and model as the KB loader.
 2. Search the KB DB (`KB_DATABASE_URL`, read-only), §8.4: up to `search_limit` (200) `synthetic` cases by cosine similarity.
-3. `similar` = candidates with `sim > sim_floor` (0.6).
+3. `similar` = candidates with `sim > sim_floor` (0.70). Measured with BGE-M3 in dry run B (11-21): 8-item baskets sharing 0 · 1 · 2 · 3 · 4 · 6 items score about 0.56 · 0.59 · 0.65 · 0.70 · 0.76 · 0.87, so 0.70 ≈ a third of the items shared; 0.6 let in baskets sharing 0–1 items (R48).
 4. `len(similar) < min_similar` (5) → `{"similar_count": n, "note": "비슷한 사례가 거의 없음"}`.
 5. Else score = sim (+ `w_cal` if any calendar tag of the case is among this order's calendar tags, + `w_house` if any household type matches — both only when `HOME_CONTEXT=on`). Sort by (score, sim, case_id) desc, keep `max_use` (50).
-6. `intent_counts` = count per `intent_id` (one row = one case), with names from `contracts/kb/intents.json` (`none` → "의도 없음").
+6. `intent_counts` = per `intent_id` among the kept cases (one row = one case): `n`, `share = n / kept`, and `base_share` = that intent's share of all searchable cases (same `source`, `KB_VERSION` and `KB_SAMPLE` filter as §8.4, `GROUP BY intent_id`; counted once per process and again after `base_refresh_min`, because the KB grows under one version while it is built). `none` always has a row (`n` 0 when absent). `base_total` = all searchable cases. Names from `contracts/kb/intents.json` (`none` → "의도 없음"). No label or threshold is added: S3 compares the two shares itself (R48).
 7. Representative cases (`pick_reps`): go through intents by count desc; take the best case (score, sim, case_id) of each intent until the covered share reaches `cover` (0.8), at most `max_reps` (3); `none` is always included if its share ≥ `none_min` (0.10). Keep only `case_id, items, intent_id, intent_text, situation, calendar_tags, case_household_types` and `overlap = {k, n, items}` (items shared with this order).
 8. `snapshot` = the case ids used (for the rationale).
 
@@ -634,14 +635,14 @@ Example: `contracts/fixtures/ep_9031/calendar.json` → c1 `[생일]`, c2 `[가�
 | Case | Handling |
 | --- | --- |
 | Embedding model not loaded | `/health` 503; orders are not processed |
-| KB DB timeout | Retry once → status `judged` with `error.stage = s2`; nothing prepared |
+| KB DB timeout (search or base count) | Retry once → status `judged` with `error.stage = s2`; nothing prepared |
 | No KB cases / fewer than 5 similar | `note` only (normal) |
 | No calendar / types / < 10 orders | Field omitted or status line (normal) |
 | Calendar tagging fails | Empty tags, title dropped, retried at next PUT |
 
 ### 8.7 Example (`ep_9031`, C2)
 
-`contracts/fixtures/ep_9031/rationale.json` `evidence` shows the values: unusual items (케이크 토퍼 … 딸기 평소 1개 → 이번 2개), calendar c1 (2 days later, Sat 14:00–17:00, 생일) and c2, KB counts 아이 생일 파티 9 · 홈베이킹 2 · 의도 없음 1, two representative cases (9/12 = 75 % < 80 % so 홈베이킹 is added; 의도 없음 is 8 % < 10 %).
+`contracts/fixtures/ep_9031/rationale.json` `evidence` shows the values: unusual items (케이크 토퍼 … 딸기 평소 1개 → 이번 2개), calendar c1 (2 days later, Sat 14:00–17:00, 생일) and c2, KB counts 아이 생일 파티 9 · 홈베이킹 2 · 의도 없음 1 (the S3 test message adds base shares 2 % · 3 % · 64 % of 30,000), two representative cases (9/12 = 75 % < 80 % so 홈베이킹 is added; 의도 없음 is 8 % < 10 %).
 
 ---
 
@@ -687,7 +688,7 @@ Blocks in this order, each with its header and how-to-use text from `s3_blocks.y
 
 - Items: unmasked, `- {type} × {qty or 모름}` + ` [{key}: {value}, …]` for attributes 테마, 포장, 가공 only.
 - Calendar: `- {id} · {days}일 뒤 {요일} {start}~{end} · {tags joined by ", "}`.
-- KB: counts line, then one example per representative case (no case id, no weekday).
+- KB: counts header `비슷한 주문 {N}건 (전체 {TOTAL}건 중):`, one line per intent `- {name} {n}건 · 이번 {share}% · 평소 {base}%` (`none` last, "1% 미만" below 0.5 %), then one example per representative case (no case id, no weekday). The how-to text reads "more than usual" as the evidence and `none` only when above its usual share (R48).
 
 The full message for `ep_9031` (C2) is the reference output of `build_intent_message` (test `test_s3_message_ep9031`, §17); expected text in `server/tests/expected/s3_message_ep_9031.txt`.
 
@@ -994,7 +995,7 @@ The API surface, paths, bodies and status codes are in `contracts/openapi/app.ya
 | `POST /v1/orders` | §7.1 |
 | `GET /v1/episodes/{id}` | Items (unmasked), `item_count`, `masked_count`, item tasks with state, `card_ids` = non-archived cards (≤ 2, `episode.json`) |
 | `PUT /v1/episodes/{id}/order` | §14 (order edit) → 202 |
-| `GET /v1/episodes/{id}/rationale` | Assemble from stored values only (no LLM): intents (+card ids, basis), evidence from `context`, unbundled, masked count, tasks (+devices with type and room), item tasks, executions (latest final result per task and device), observations (verdict and feedback per card) |
+| `GET /v1/episodes/{id}/rationale` | Assemble from stored values only (no LLM): intents (+card ids, basis), evidence from `context` (`kb_counts` keeps `intent_id, name, n` of rows with `n` ≥ 1 only, as in `contracts/schemas/rationale.json`; the base shares stay in `context`, R48), unbundled, masked count, tasks (+devices with type and room), item tasks, executions (latest final result per task and device), observations (verdict and feedback per card) |
 | `POST /v1/cards/{id}/reactions` | §11.7 |
 | `PUT /v1/hub/households/{hid}/devices` | The same device `id` twice in one list → 422 `validation_error` (`details.path` = the second one). Revision lower than stored → 409 `stale_revision`; equal → 200 no change; higher → store. Plans already published keep their `devices_revision` (the hub checks delegation at run time) |
 | `GET /v1/hub/plans?household=` | Latest version of every episode that §11.3 says is still pulled + `paused` + `devices_revision` |
@@ -1361,3 +1362,4 @@ Not yet in the Notion server spec (synchronised in one pass later). B.2 lists th
 | R45 | S1 `테마` is written only for decorating goods (party and event supplies, decorations, cakes, gift wrap); colour and size options of clothes, shoes, accessories and household goods are not a theme (dry run A 08 and 04/06/07: "화이트", "그레이+블랙" read as themes, 11-21, 서진) | §7, `s1_system.txt` |
 | R46 | S4 fridge notices for items that arrive frozen: no thaw, wipe or chill advice on arrival; without an intent no notice (freezing is obvious; 11-21 서진: notices only for what people miss), with an intent `intent_change` says to move it to the fridge the day before (one notice at arrival, no separate thaw task). Prompt examples for both (dry run A 04/06/07: frozen 삼겹살 and 고등어 were told to be wiped and chilled, 11-21, 서진) | §10.8, `s4_system.txt` |
 | R47 | S4 `[관리법 문구가 필요한 물건]` lines carry the item attributes (`[가공: 냉동, 보관: 냉동]`); without them the R46 frozen rule could not apply (dry run A 04/06/07 rerun: frozen 삼겹살 and 고등어 still told to chill, the block showed no attributes, 11-21, 서진) | §10.8, `s4_blocks.yaml`, `s4_tasks.py` |
+| R48 | KB neighbours: `sim_floor` 0.6 → 0.70 (start value, tuned) and intent counts shown with the KB base rate (`share`, `base_share`, `base_total`; `none` always listed); the S3 KB block says to prefer what came up "more than usual" and to read `none` only when above its usual share. No thresholds or labels: S3 compares the two shares. Context bonuses kept (household bonus conditions left to tuning). Dry run B (kb-v1, 2,080 cases): cases sharing 0–1 items scored 0.58–0.69, all 200 were above 0.6 for the birthday order, the kept cases followed the KB's 64 % `none`, bonuses moved 8–26 of 50; no KB case shared 2+ items with the test orders (11-21, 서진) | §8.3, §8.6, §9.3, `s3_blocks.yaml`, `numbers.yaml` |
