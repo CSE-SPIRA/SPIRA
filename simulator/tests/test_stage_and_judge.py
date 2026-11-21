@@ -988,7 +988,7 @@ def test_sim_at19_live_3d_households_and_household_content(tmp_path, monkeypatch
         }
         for device, content in {
             "oven_01": "170° · 19분 남음 · 굽는 중",
-            "light_01": "분홍 330/45/70",
+            "light_01": "분홍 빛",
             "display_01": "공주 화면",
         }.items():
             assert (

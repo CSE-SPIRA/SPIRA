@@ -160,11 +160,9 @@ def household_content(tile: dict) -> str | None:
             if "kelvin" in color:
                 return f"{number_text(color['kelvin'])}K"
             if all(key in color for key in ("hue", "saturation", "brightness")):
-                hue, saturation, brightness = (
-                    color[key] for key in ("hue", "saturation", "brightness")
-                )
-                name = "분홍" if hue == 330 and saturation else "색상"
-                return f"{name} {number_text(hue)}/{number_text(saturation)}/{number_text(brightness)}"
+                return planned_action(
+                    "color", {key: color[key] for key in ("hue", "saturation", "brightness")}
+                )[0]
         case "display":
             scene = values.get("play_mood")
             return SCENES.get(scene.get("scene"), "화면 켜짐") if scene else STATE_WORDS["off"]
