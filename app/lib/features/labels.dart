@@ -114,9 +114,16 @@ bool isPartyPreparation(wire.Card card) => switch (card.intentId) {
   _ => false,
 };
 
-String? lineTimeDerivation(wire.LineElement? line, String? scheduleStart) {
+String? lineTimeDerivation(
+  wire.LineElement? line,
+  String? scheduleStart, {
+  String? immediateTime,
+}) {
+  final immediate = immediateTime == null ? null : '바로 실행 · $immediateTime';
   final time = line?.when?.time;
-  if (time == null || scheduleStart == null) return null;
+  if (time == null || scheduleStart == null) {
+    return immediate ?? lineTimeLabel(line);
+  }
   final task = _seoulTime(time);
   final event = _seoulTime(scheduleStart);
   final minutes =
@@ -127,7 +134,7 @@ String? lineTimeDerivation(wire.LineElement? line, String? scheduleStart) {
     > 0 => '$minutes분 전',
     _ => '${minutes.abs()}분 후',
   };
-  return '${_lineClock(event)} 일정 → $relative → ${_lineClock(task)}';
+  return '${_lineClock(event)} 일정 → $relative → ${immediate ?? _lineClock(task)}';
 }
 
 String _lineClock(DateTime seoul) => '${_weekday(seoul)} ${_hourMinute(seoul)}';

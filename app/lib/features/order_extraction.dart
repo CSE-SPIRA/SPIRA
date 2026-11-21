@@ -10,11 +10,19 @@ import '../theme.dart';
 import '../korean_text.dart';
 import 'setup.dart';
 
-const _scanDuration = Duration(milliseconds: 900);
-const _stepDuration = Duration(milliseconds: 500);
-const _presentationDuration = Duration(milliseconds: 3600);
+const _scanDuration = Duration(milliseconds: 2400);
+const _itemsDuration = Duration(milliseconds: 1500);
+const _reducedDwell = Duration(milliseconds: 800);
 
-enum JudgmentStep { situation, intent, tasks }
+enum JudgmentStep {
+  situation(Duration(seconds: 2)),
+  intent(Duration(milliseconds: 2500)),
+  tasks(Duration(milliseconds: 1500));
+
+  const JudgmentStep(this.dwell);
+
+  final Duration dwell;
+}
 
 class OrderExtraction extends StatefulWidget {
   const OrderExtraction({
@@ -65,13 +73,14 @@ class _OrderExtractionState extends State<OrderExtraction>
   late final _reveal = AnimationController(vsync: this, duration: appSettle)
     ..addStatusListener((status) {
       if (status != AnimationStatus.completed) return;
-      _holdStep();
+      _holdStep(_itemsDuration);
     });
 
   Timer? _scanWindow;
   Timer? _stepTimer;
-  Timer? _presentationWindow;
   JudgmentStep? _step;
+  wire.Rationale? _judgmentResult;
+  bool _holdingStep = false;
   bool _finished = false;
   bool _expanded = false;
   bool _reduceMotion = false;
@@ -80,22 +89,10 @@ class _OrderExtractionState extends State<OrderExtraction>
   bool get wantKeepAlive => widget.images.isNotEmpty;
 
   @override
-  void initState() {
-    super.initState();
-    _startPresentationWindow();
-  }
-
-  void _startPresentationWindow() {
-    _presentationWindow?.cancel();
-    _presentationWindow = widget.images.isEmpty
-        ? null
-        : Timer(_presentationDuration, () => setState(_advance));
-  }
-
-  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _reduceMotion = MediaQuery.disableAnimationsOf(context);
+    if (_reduceMotion && _reveal.isAnimating) _reveal.value = 1;
     _advance();
   }
 
@@ -107,11 +104,11 @@ class _OrderExtractionState extends State<OrderExtraction>
       _scanWindow?.cancel();
       _scanWindow = null;
       _stepTimer?.cancel();
-      _stepTimer = null;
+      _holdingStep = false;
       _step = null;
+      _judgmentResult = null;
       _finished = false;
       _reveal.reset();
-      _startPresentationWindow();
     }
     if ((!widget.hasRows && widget.sharedImages.isEmpty) ||
         widget.images.isNotEmpty) {
@@ -125,7 +122,6 @@ class _OrderExtractionState extends State<OrderExtraction>
     _finished = true;
     _scanWindow?.cancel();
     _stepTimer?.cancel();
-    _presentationWindow?.cancel();
     _reveal.stop();
     final images = widget.images;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -135,10 +131,15 @@ class _OrderExtractionState extends State<OrderExtraction>
     });
   }
 
-  void _holdStep() {
-    _stepTimer = Timer(_stepDuration, () {
-      _stepTimer = null;
-      setState(_advance);
+  void _holdStep(Duration duration) {
+    _holdingStep = true;
+    final images = widget.images;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !identical(widget.images, images) || _finished) return;
+      _stepTimer = Timer(_reduceMotion ? _reducedDwell : duration, () {
+        _holdingStep = false;
+        setState(_advance);
+      });
     });
   }
 
@@ -154,32 +155,35 @@ class _OrderExtractionState extends State<OrderExtraction>
         return;
       }
       setState(() {
-        _scanWindow = Timer(_scanDuration, () => setState(_advance));
+        _scanWindow = Timer(
+          _reduceMotion ? _reducedDwell : _scanDuration,
+          () => setState(_advance),
+        );
       });
     });
   }
 
   void _advance() {
     if (widget.images.isEmpty || _finished) return;
-    // Slow replies can use up the presentation window while the items are up.
-    if (_reduceMotion ||
-        widget.episode?.status == wire.EpisodeStatus.CLOSED ||
-        (_reveal.isCompleted &&
-            widget.canShowJudgment &&
-            _presentationWindow?.isActive == false)) {
-      _finish();
-    } else if (_reveal.isCompleted) {
-      if (_stepTimer != null || widget.waitingForJudgment) return;
-      final result = widget.rationale;
-      if (_step == JudgmentStep.tasks ||
-          !widget.canShowJudgment ||
-          result == null ||
-          result.intents.isEmpty) {
+    if (_reveal.isCompleted) {
+      if (_holdingStep) return;
+      if (_step == null) {
+        if (widget.waitingForJudgment) return;
+        final result = widget.rationale;
+        if (!widget.canShowJudgment ||
+            result == null ||
+            result.intents.isEmpty) {
+          _finish();
+          return;
+        }
+        _judgmentResult = result;
+      } else if (_step == JudgmentStep.tasks) {
         _finish();
         return;
       }
-      _step = JudgmentStep.values[(_step?.index ?? -1) + 1];
-      _holdStep();
+      final next = JudgmentStep.values[(_step?.index ?? -1) + 1];
+      _step = next;
+      _holdStep(appSettle + next.dwell);
     } else if (_scanWindow != null &&
         !_scanWindow!.isActive &&
         widget.hasResult &&
@@ -188,7 +192,11 @@ class _OrderExtractionState extends State<OrderExtraction>
         _finish();
         return;
       }
-      _reveal.forward();
+      if (_reduceMotion) {
+        _reveal.value = 1;
+      } else {
+        _reveal.forward();
+      }
     }
   }
 
@@ -228,7 +236,6 @@ class _OrderExtractionState extends State<OrderExtraction>
   void dispose() {
     _scanWindow?.cancel();
     _stepTimer?.cancel();
-    _presentationWindow?.cancel();
     _reveal.dispose();
     super.dispose();
   }
@@ -318,11 +325,10 @@ class _OrderExtractionState extends State<OrderExtraction>
             if (!presenting)
               following!
             else if (_step case final step?)
-              if (widget.rationale case final rationale?)
-                KeyedSubtree(
-                  key: ValueKey(step),
-                  child: widget.judgment(step, rationale),
-                ),
+              KeyedSubtree(
+                key: ValueKey(step),
+                child: widget.judgment(step, _judgmentResult!),
+              ),
           ],
         );
       },

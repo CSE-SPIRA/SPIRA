@@ -816,7 +816,7 @@ def test_sim_at10_read_only_faint_waiting_and_item_only_episode(tmp_path):
         assert active_view.find('.//div[@data-device="styler_01"]').get("data-resting") == ""
         assert (
             active_view.findtext('.//div[@data-device="light_01"]/article/p[@class="device-value"]')
-            == "3000K"
+            == "따뜻한 빛"
         )
         for mode, label in (
             ("stale", "오래된 관찰값"),
@@ -1170,7 +1170,7 @@ def test_sim_at19_live_3d_households_and_household_content(tmp_path, monkeypatch
         view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
         person_marker = view.find('.//div[@data-device="light_01"]')
         assert person_marker.get("data-resting") is None
-        assert person_marker.findtext('article/p[@class="device-value"]') == "2700K"
+        assert person_marker.findtext('article/p[@class="device-value"]') == "따뜻한 빛"
         assert person_marker.findtext('article/p[@class="change-marker"]') == "아빠 · 기기 패널"
         assert view.findtext('.//h3[@id="entrance-summary"]') .startswith("손님 나감 · 토 ")
         post(client, "/operator/home", action="guests_arrive")
@@ -1456,6 +1456,11 @@ def test_sim_at21_named_panel_and_appliance_app_share_device_path(
             assert signals[-1]["target"] == LIGHT
         current = client.get(response.headers["location"], auth=AUTH).text
         assert "4000K" in current and '<option value="아빠" selected>' in current
+        viewer = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
+        assert (
+            viewer.findtext('.//div[@data-device="light_01"]/article/p[@class="device-value"]')
+            == "흰 빛"
+        )
         truth = client.get("/operator/truth", auth=AUTH).json()
         assert [
             (row["actor"], row["actor_name"], row["action_path"]) for row in truth

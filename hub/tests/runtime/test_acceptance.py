@@ -1246,7 +1246,7 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
         assert 'href="#detail">자세한 기록</a>' in ledger_page
         assert 'href="/state"' in detail and "Waiting work" in detail
         assert all(label not in ledger_page for label in (
-            "서버에 보냄", "보내는 중", "전송 실패", "계획 v", "ep_9031", "h_042", "pill actor",
+            "서버에 보냄", "보내는 중", "전송 실패", "계획 v", " · v2", " · v3", "ep_9031", "h_042", "pill actor",
         ))
         newest, = ledger_page.split('<details class="ledger-group"')[1:]
         assert 'data-newest open><summary>받은 준비 · 받은 시각 ' in newest
@@ -1255,8 +1255,8 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
         assert newest.count('<li class="ledger-row plan-change">') == 2
         assert newest.index('>토 17:50</time>') < newest.index('>토 13:30</time>')
         assert "택배 들임" in newest
-        assert "준비가 바뀌었어요 · v2 · 청소기 취소" in newest
-        assert "준비가 바뀌었어요 · v3 · 택배 기다림 끝" in newest
+        assert "준비가 바뀌었어요 · 청소기 취소" in newest
+        assert "준비가 바뀌었어요 · 택배 기다림 끝" in newest
         assert "사람이 조작함" in newest
         for source, label in (("command", "SPIRA가 시킴"), ("report", "기기가 알림"), ("restore", "집이 되돌림")):
             assert f'class="source-mark source-{source}" aria-hidden="true"></span>{label}' in ledger_page
@@ -1321,7 +1321,7 @@ def test_dashboard_keeps_cleaning_and_lock_with_their_preparation_across_version
             assert "data-newest open" in newest and " open>" not in older
             assert f'data-group="{group_key}"' in older
             assert "인덕션 · 잠금" in older and "청소기 · 청소 시작" in older
-            assert older.index("준비가 바뀌었어요 · v2") < older.index("인덕션 · 잠금")
+            assert older.index("준비가 바뀌었어요") < older.index("인덕션 · 잠금")
             assert "준비가 바뀌었어요" not in newest
         finally:
             await hub.close()

@@ -98,7 +98,7 @@ def preparation_groups(state):
         if row["kind"] == "plan":
             plan_id = row["plan_id"]
             if row is not versions[plan_id][0]:
-                change = f'준비가 바뀌었어요 · v{row["plan_version"]}'
+                change = "준비가 바뀌었어요"
                 what = f'{change} · {row["what"]}' if row["what"] else change
                 groups[plan_id].append({**row, "kind": "plan_change", "what": what})
             elif row["what"] or delivery_mark(row):

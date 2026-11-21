@@ -71,7 +71,9 @@ class OrderJudgment extends StatelessWidget {
     };
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
-      duration: appSettle,
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : appSettle,
       curve: appEase,
       builder: (context, progress, child) =>
           Opacity(opacity: progress, child: child),
@@ -1010,8 +1012,11 @@ class _TaskPanel extends StatelessWidget {
       wire.Way.NOTICE => ('안내', colors.onSurfaceVariant),
       null => null,
     };
-    final timing =
-        lineTimeDerivation(current, scheduleStart) ?? lineTimeLabel(current);
+    final timing = lineTimeDerivation(
+      current,
+      scheduleStart,
+      immediateTime: immediateTime,
+    );
     final status = switch (current?.state) {
       null || wire.LineState.HELD || wire.LineState.SCHEDULED => null,
       final state => (lineLabel(state), lineStatusColor(context, state)),
@@ -1047,8 +1052,6 @@ class _TaskPanel extends StatelessWidget {
           ],
           KoreanText(line, style: theme.textTheme.titleMedium),
           if (timing != null) KoreanText(timing, style: timingStyle),
-          if (immediateTime case final time?)
-            KoreanText('바로 실행 · $time', style: timingStyle),
           if (devices.isNotEmpty) ...[
             const SizedBox(height: 8),
             KoreanText(

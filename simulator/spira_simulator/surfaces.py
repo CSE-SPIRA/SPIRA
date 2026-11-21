@@ -177,7 +177,7 @@ def number_text(value: int | float) -> str:
     return str(value).removesuffix(".0")
 
 
-def household_content(tile: dict) -> str | None:
+def household_content(tile: dict, *, household_light: bool = False) -> str | None:
     values = tile["values"]
     if not values:
         return None
@@ -187,6 +187,8 @@ def household_content(tile: dict) -> str | None:
             if values.get("power") is False:
                 return STATE_WORDS["off"]
             if "kelvin" in color:
+                if household_light:
+                    return planned_action("color_temp", color)[0]
                 return f"{number_text(color['kelvin'])}K"
             if all(key in color for key in ("hue", "saturation", "brightness")):
                 return planned_action(
@@ -261,7 +263,9 @@ def latest_change(fact: dict) -> tuple[str, str] | None:
     return "unknown", "누가 바꿨는지 모름"
 
 
-def tiles(world: World, snapshot: dict, changes: dict | None = None) -> list[dict]:
+def tiles(
+    world: World, snapshot: dict, changes: dict | None = None, *, household_light: bool = False
+) -> list[dict]:
     result = []
     for report in snapshot["devices"]:
         target = report["target"]
@@ -272,7 +276,7 @@ def tiles(world: World, snapshot: dict, changes: dict | None = None) -> list[dic
                 "id": device.logical_id,
                 "name": device_name(device),
                 "room": device.room,
-                "content": household_content(report),
+                "content": household_content(report, household_light=household_light),
                 "observation": status,
                 "observation_label": OBSERVATION_NAMES.get(status),
                 "observed_at": display_time(report["observed_at"]),
@@ -318,7 +322,7 @@ def viewer_world(world: World) -> dict:
                 "occurred_at": occurred_at,
             }
         )
-    devices = tiles(world, snapshot, changes)
+    devices = tiles(world, snapshot, changes, household_light=True)
     for device, report in zip(devices, snapshot["devices"], strict=True):
         configured = world.devices[report["target"]]
         device["changed"] = report["target"] in changes or any(

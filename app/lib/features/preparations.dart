@@ -296,7 +296,10 @@ class _OrderSection extends StatelessWidget {
                 episode != null &&
                 (episode.status == wire.EpisodeStatus.RECEIVED ||
                     episode.status == wire.EpisodeStatus.READING ||
-                    cards.length < episode.cardIds.length),
+                    (episode.status == wire.EpisodeStatus.NOTIFIED &&
+                        cards.isEmpty) ||
+                    cards.length < episode.cardIds.length ||
+                    (cards.isNotEmpty && app.loadingRationale(episodeId))),
             canShowJudgment: cards.isNotEmpty && !app.stale,
             judgment: (step, result) =>
                 OrderJudgment(step: step, result: result, episode: episode!),
