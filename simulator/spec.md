@@ -128,15 +128,17 @@ switch homes.
 **E5-R5.** Each device tile MUST state its observed value as household content,
 not raw fields: for example the oven's set temperature, remaining time and
 whether it is baking, the light's colour or colour temperature, the display's
-scene, and the fridge notice text. The same tile MUST still follow E5-R1 and
-E5-R2.
+scene, and the fridge notices. Each observed fridge notice has its own row,
+with an item label when supplied by the device and the full notice available
+from the row. The same tile MUST still follow E5-R1 and E5-R2.
 
 **E5-R6.** The viewer MAY mark who made the latest change to a device from World
 truth (SPIRA, or a person's display name and path). It MUST NOT show the Hub's
-attribution, the judge's verdict, or anything from SPIRA's reasoning: no items,
-intents, rationale or card text. Planned overlays show the device, the action
-with its device-level target value, and its trigger or time; item notice text
-stays out of the stage until the device shows it.
+attribution, the judge's verdict, or SPIRA's reasoning, order details, intents,
+rationale or card text. Planned overlays show the device, the action with its
+device-level target value, and its trigger or time. The viewer and operator
+show the plan's guest trigger window. If the guest window passes without a
+matching trigger, the viewer shows that the action did not run.
 
 **E5-R7.** The viewer MUST show the wall-clock day of week and time (E9-R1).
 
@@ -244,7 +246,7 @@ passing claim until an implementation change supplies bounded evidence.
 | SIM-AT-16 | Compose physical Tapo, virtual Class A, and virtual Matter devices | The viewer marks physical devices; the operator identifies each device's substrate and reporting assumption; Tapo and Matter report `local_operation=false`; no physical qualification is inferred | E5-R2, E6-R2, E8-R1, E8-R2 | PC-4, PC-5, PC-6 | **Provisional only for the Class A comparison, pending PQ-01** |
 | SIM-AT-18 | Run the demo with Server `DEMO_MODE=1` | App/Hub/Simulator observations use offset wall-clock timestamps; shortened waits come from Server data and no virtual demo-clock control is present | E9-R1 | PC-4 | Required |
 | SIM-AT-19 | Open both households' viewers during the birthday scene | Each shows a 3D household with devices in their rooms and home events at the entrance; device labels read as content (oven temperature and time, light colour, display scene, fridge notice); weekday and wall-clock time are shown; a link reaches the other home | E5-R4, E5-R5, E5-R7 | PC-4 | Required |
-| SIM-AT-20 | Inspect the viewer page and its data during an active plan | No item, intent, rationale, card text, Hub `by` or judge verdict appears; overlays carry device, action and trigger or time only | E5-R6 | PC-4, PC-5 | Required |
+| SIM-AT-20 | Inspect the viewer page and its data during an active plan | Order details, intent, rationale, card text, Hub `by` and judge verdict stay private. Overlays show the planned action and trigger, including any guest window. Fridge notice labels come from observed device values. | E5-R6 | PC-4, PC-5 | Required |
 | SIM-AT-21 | Use a named person control, then change the same device from the appliance-app page | The control emits the panel path with the person's name; the appliance-app change uses `other_app` with `local_operation=false`; both are in the truth journal | E5-R8, E5-R9, E6-R2 | PC-5, PC-6 | **Provisional for the Class A panel signal, pending PQ-01** |
 
 ## 4. Open items

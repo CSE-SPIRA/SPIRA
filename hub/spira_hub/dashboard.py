@@ -15,7 +15,7 @@ from spira_contracts.error import Error
 
 from .contracts import offset_time, wire
 from .dashboard_state import state_view
-from .dashboard_words import device_words
+from .dashboard_words import device_words, task_count_words
 from .design_vocabulary import ROOM_NAMES
 from .store import encode
 
@@ -106,8 +106,8 @@ def preparation_groups(state):
     sections = []
     for index, receipt in enumerate(reversed(receipts)):
         plan_id, version = receipt["plan_id"], receipt["plan_version"]
-        count = receipt["task_count"]
-        tasks = f' · 할 일 {count}' if count is not None else ""
+        counts = task_count_words(receipt["task_count"], receipt["notice_count"])
+        tasks = "".join(f" · {count}" for count in counts)
         title = f'받은 준비 · 받은 시각 {ledger_time(receipt["at"], short=True)}{tasks}'
         key = blake2s(f"{plan_id}/{version}".encode(), digest_size=8).hexdigest()
         sections.append(ledger_group(key, title, groups[plan_id, version], newest=index == 0))

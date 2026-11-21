@@ -187,8 +187,9 @@ skip outcomes. It MUST identify each device as virtual or physical and visibly
 mark the class-A local-operation assumption. (PC-4, PC-5, PC-6)
 
 **H8-R4.** The first screen MUST group the ledger by plan receipt, with the
-newest group open and older groups collapsed on arrival. Each group shows its
-receipt time and available task count, with its rows ordered newest first.
+newest group kept open and older groups collapsed on arrival. Each group shows
+its receipt time and available counts for situation tasks and item notices,
+with its rows ordered newest first.
 Rows show local wall time, the device or home event, household wording, and a
 source marker explained in the legend. Outstanding deliveries show a pending
 or failed mark. The ledger MUST include unverified runs and restoration outcomes.

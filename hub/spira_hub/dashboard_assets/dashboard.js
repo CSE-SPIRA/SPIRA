@@ -2,6 +2,13 @@ document.querySelector('meta[name="theme-color"]').content =
   getComputedStyle(document.documentElement).getPropertyValue("--paper").trim();
 
 const regions = ["ledger-summary", "ledger", "device-list", "detail-content"].map((id) => document.getElementById(id));
+const ledger = document.getElementById("ledger");
+ledger.addEventListener("click", (event) => {
+  if (event.target.closest("details[data-newest] > summary")) event.preventDefault();
+});
+ledger.addEventListener("toggle", (event) => {
+  if (event.target.matches("details[data-newest]")) event.target.open = true;
+}, true);
 
 function refreshLedger(region, next) {
   const groups = new Map(Array.from(region.querySelectorAll("details"), (group) => [group.dataset.group, group]));
@@ -9,7 +16,7 @@ function refreshLedger(region, next) {
   for (const group of next.querySelectorAll("details")) {
     const previous = groups.get(group.dataset.group);
     if (!previous) continue;
-    if (previous.hasAttribute("data-newest") === group.hasAttribute("data-newest")) group.open = previous.open;
+    if (!previous.hasAttribute("data-newest") && !group.hasAttribute("data-newest")) group.open = previous.open;
     if (previous.firstElementChild === document.activeElement) focusedSummary = group.firstElementChild;
   }
   if (region.isEqualNode(next)) return;

@@ -116,7 +116,7 @@ body.test-home {
 }
 .viewer-marker:is(.anchored, .unplaced) { position: absolute; z-index: 1; }
 .test-home .viewer-marker.anchored { z-index: auto; }
-.test-home .viewer-marker.anchored > :is(.home-device, .planned) { position: relative; z-index: 1; }
+.test-home .viewer-marker.anchored > :is(.home-device, .planned, .observed-outcome) { position: relative; z-index: 1; }
 .viewer-marker.unplaced { clip-path: inset(50%); pointer-events: none; }
 body:not(.test-home) .viewer-marker.anchored:not([data-resting])::after {
   content: "";
@@ -142,7 +142,7 @@ body:not(.test-home) .viewer-marker.anchored:not([data-resting])::after {
   pointer-events: none;
   z-index: 0;
 }
-.home-device, .planned {
+.home-device, .planned, .observed-outcome {
   padding: 4px var(--space-8);
   border: 1px solid var(--line);
   border-radius: var(--radius-8);
@@ -156,13 +156,14 @@ body:not(.test-home) .viewer-marker.anchored:not([data-resting])::after {
 }
 .home-device h3 { font-size: inherit; font-weight: 600; }
 .device-value { white-space: pre-wrap; }
-.test-home :is(.device-value, .notice-trigger span) {
+.test-home .device-value, .notice-trigger span {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 .test-home .device-value:has(.notice-trigger) { display: block; }
+.notice-row + .notice-detail + .notice-row { margin-top: 4px; }
 :is(.notice-trigger, .planned-trigger) {
   display: block;
   max-width: 100%;
@@ -266,6 +267,11 @@ body:not(.test-home) .theme .home-device {
   border: 1px dashed var(--green-line);
   background: color-mix(in srgb, var(--paper) 85%, transparent);
   color: var(--muted);
+  font-size: .78rem;
+}
+.observed-outcome {
+  background: var(--surface);
+  color: var(--ink);
   font-size: .78rem;
 }
 .viewer-reports:not(:empty), .home-restore {

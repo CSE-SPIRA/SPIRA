@@ -104,6 +104,28 @@ async function init() {
 }
 
 const homeEvents = document.querySelector("[data-home-endpoint]");
+const guestWindow = byId("guest-window");
+async function refreshGuestWindow() {
+  try {
+    const { label } = await request("/operator/guest-window");
+    guestWindow.textContent = label;
+  } catch {
+    // Preserve the last window through a transient read failure.
+  } finally {
+    window.setTimeout(refreshGuestWindow, 2000);
+  }
+}
+if (guestWindow) window.setTimeout(refreshGuestWindow, 2000);
+
+async function observeHomeAction(control) {
+  const { occurred_at, at, observation } = await request(
+    homeEvents.dataset.homeEndpoint, { action: control.dataset.homeAction },
+  );
+  const time = document.createElement("time");
+  time.dateTime = occurred_at;
+  time.textContent = at;
+  byId(control.getAttribute("aria-describedby")).replaceChildren(time, ` · ${observation}`);
+}
 if (homeEvents) {
   const controls = homeEvents.querySelectorAll("[data-home-action]");
   const status = homeEvents.querySelector('[role="status"]');
@@ -112,14 +134,13 @@ if (homeEvents) {
       for (const entry of controls) entry.disabled = true;
       status.textContent = "";
       try {
-        await request(homeEvents.dataset.homeEndpoint, { action: control.dataset.homeAction });
+        await observeHomeAction(control);
       } catch {
         status.textContent = "집에서 일어난 일을 기록하지 못했어요. 다시 눌러 주세요.";
+      } finally {
         for (const entry of controls) entry.disabled = false;
         control.focus();
-        return;
       }
-      window.location.reload();
     });
   }
 }

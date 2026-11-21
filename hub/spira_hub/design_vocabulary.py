@@ -44,5 +44,9 @@ STATE_WORDS = {
     "light_blue": "파랑 빛",
     "light_purple": "보라 빛",
     "light_white": "흰 빛",
-    "light_warm": "따뜻한 빛"
+    "light_warm": "따뜻한 빛",
+    "scene_kids_party": "공주 화면",
+    "scene_party": "파티 화면",
+    "scene_calm": "잔잔한 화면",
+    "scene_cinema": "영화 화면"
 }

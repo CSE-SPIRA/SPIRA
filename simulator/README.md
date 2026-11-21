@@ -53,7 +53,7 @@ Tests use in-process protocol fakes, HTTP stubs for both evidence sources, and a
 | SIM-AT-16 | Stage labels and Class B behavior pass with configured targets. Class A comparisons are provisional. Physical Tapo and native Matter interoperability need integration. |
 | SIM-AT-18 | Simulator emits offset wall-clock observations. Full Server `DEMO_MODE=1` run needs integration. |
 | SIM-AT-19 | Both profiles render their rooms, device values, entrance, wall clock, and configured links in HTTP tests. |
-| SIM-AT-20 | HTTP tests check the viewer and its data for World change labels and action-only overlays. They check that items, intents, rationale, card text, Hub attribution, and judge output stay out of the viewer. |
+| SIM-AT-20 | HTTP tests check World change labels, guest windows and action-only overlays. Order details, intents, rationale, card text, Hub attribution and judge output stay out of the viewer. |
 | SIM-AT-21 | HTTP tests submit the named panel and appliance-app forms and check the emitted signals and truth journal. The Class A panel signal is provisional pending PQ-01. |
 
 ## Where to change what

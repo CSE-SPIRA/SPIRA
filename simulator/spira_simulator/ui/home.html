@@ -1,6 +1,8 @@
 {% macro planned_row(entry, detail_id, unplaced=false) %}
   {% set label %}{% if unplaced %}기기 · {% endif %}{{ entry.action }}{% if entry.timed %}<span class="planned-clock"> · {{ entry.wait }}</span>{% else %} · {{ entry.wait }}{% endif %}{% endset %}
-  {% if entry.details %}
+  {% if entry.missed %}
+  <p class="observed-outcome">손님이 오지 않아 실행 안 됨</p>
+  {% elif entry.details %}
   {% set detail = entry.details | join('\n') %}
   <p class="planned"><button id="{{ detail_id }}-trigger" class="planned-trigger" type="button" title="{{ detail }}" popovertarget="{{ detail_id }}">{{ label }}</button></p>
   <p id="{{ detail_id }}" class="planned-detail" popover="auto">{{ detail }}</p>
@@ -16,9 +18,12 @@
         {% if device.change and device.change[0] == "spira" %}<span class="spira-dot" role="img" aria-label="SPIRA가 설정했어요"></span>{% endif %}
         {% if device.physical %}<small class="substrate">{{ device.substrate }} · 미검증</small>{% endif %}
       </h3>
-      {% if device.visual_values.get("show_notice") and device.content %}
-      <p class="device-value"><button id="notice-trigger-{{ device.id }}" class="notice-trigger" type="button" popovertarget="notice-{{ device.id }}" title="{{ device.content }}"><span>{{ device.content }}</span></button></p>
-      <p id="notice-{{ device.id }}" class="notice-detail" popover="auto">{{ device.content }}</p>
+      {% if device.notices %}
+      {% for notice in device.notices %}
+      {% set notice_id = 'notice-' ~ device.id ~ '-' ~ loop.index %}
+      <p class="device-value notice-row"><button id="{{ notice_id }}-trigger" class="notice-trigger" type="button" popovertarget="{{ notice_id }}" title="{{ notice }}"><span>{{ notice }}</span></button></p>
+      <p id="{{ notice_id }}" class="notice-detail" popover="auto">{{ notice }}</p>
+      {% endfor %}
       {% elif device.content is not none %}
       <p class="device-value{% if not full %} visually-hidden{% endif %}" title="{{ device.content }}">{{ device.content }}</p>
       {% endif %}

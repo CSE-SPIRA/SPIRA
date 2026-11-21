@@ -229,12 +229,40 @@ class WorldStorage:
                        SELECT MAX(sequence) FROM truth_journal
                        WHERE json_extract(body, '$.logical_id') IS NOT NULL
                          AND json_extract(body, '$.event_type') NOT LIKE '%.availability'
-                         AND json_extract(body, '$.before') IS NOT json_extract(body, '$.after')
+                         AND (json_extract(body, '$.before') IS NOT json_extract(body, '$.after')
+                              OR json_extract(body, '$.event_type') LIKE '%.started')
                        GROUP BY json_extract(body, '$.target')
                    )
                    ORDER BY sequence"""
             )
         ]
+
+    def job_start(self, target: str, job_id: str) -> dict | None:
+        row = self.db.execute(
+            """SELECT body FROM truth_journal
+               WHERE json_extract(body, '$.target') = ?
+                 AND json_extract(body, '$.job_id') = ?
+                 AND json_extract(body, '$.event_type') LIKE '%.started'
+               ORDER BY sequence DESC LIMIT 1""",
+            (target, job_id),
+        ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def fridge_notices(self, target: str) -> list[str]:
+        rows = self.db.execute(
+            """SELECT json_extract(body, '$.after.show_notice') FROM truth_journal
+               WHERE json_extract(body, '$.target') = ?
+                 AND json_extract(body, '$.before.show_notice')
+                     IS NOT json_extract(body, '$.after.show_notice')
+               ORDER BY sequence DESC""",
+            (target,),
+        )
+        newest_first = {}
+        for (notice,) in rows:
+            if notice is None:
+                break
+            newest_first.setdefault(notice, None)
+        return list(reversed(newest_first))
 
     def home_truth(self, event_types: tuple[str, ...]) -> list[dict]:
         placeholders = ", ".join("?" for _ in event_types)
