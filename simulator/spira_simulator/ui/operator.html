@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="ko">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>SPIRA operator</title>
+  <title>집에서 일어나는 일</title>
   <link rel="stylesheet" href="/sim/assets/house/tokens.css">
   <link rel="stylesheet" href="/sim/assets/house/fonts.css">
   <link rel="stylesheet" href="/sim/style.css">
@@ -11,6 +11,27 @@
 </head>
 <body>
   <main>
+    {% if home_events %}
+    <section class="house-events" aria-labelledby="house-events-title" data-home-endpoint="/operator/home">
+      <h1 id="house-events-title">집에서 일어나는 일</h1>
+      <div class="house-event-list">
+        {% for event in home_events %}
+        <div class="house-event">
+          <button type="button" data-home-action="{{ event.action }}" aria-describedby="home-observation-{{ loop.index }}">{{ event.label }}</button>
+          <p id="home-observation-{{ loop.index }}">
+            {% if event.occurred_at %}
+            <time datetime="{{ event.occurred_at }}">{{ event.at }}</time> · {{ event.observation }}
+            {% else %}
+            아직 관찰된 일이 없어요
+            {% endif %}
+          </p>
+        </div>
+        {% endfor %}
+      </div>
+      <p class="house-event-error" role="status"></p>
+    </section>
+    {% endif %}
+    <div lang="en">
     <header>
       <h1>Household operator</h1>
       <p class="metadata">{{ household_id }}</p>
@@ -105,6 +126,7 @@
       <p class="metadata">Leave both times blank to count since the marker.</p>
       <pre id="command-evidence" aria-live="polite"></pre>
     </section>
+    </div>
   </main>
 </body>
 </html>

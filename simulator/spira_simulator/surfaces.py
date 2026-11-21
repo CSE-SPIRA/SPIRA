@@ -106,6 +106,36 @@ def display_time(at: str | datetime) -> str:
     return f"{'월화수목금토일'[local.weekday()]} {local:%H:%M}"
 
 
+def home_event_controls(world: World) -> list[dict]:
+    controls = {}
+    actions_by_signal = defaultdict(list)
+    for action, signals in world.profile.home_signals.items():
+        label = world.profile.home_action_labels.get(action)
+        if label and signals:
+            controls[action] = {"action": action, "label": label}
+            for signal in signals:
+                actions_by_signal[signal.target, signal.event_type].append(action)
+    if not controls:
+        return []
+
+    event_types = tuple({event_type for _, event_type in actions_by_signal})
+    with world.store.lock:
+        facts = world.store.home_truth(event_types)
+    for fact in facts:
+        event_type = fact["event_type"]
+        for action in actions_by_signal.get((fact["target"], event_type), ()):
+            occurred_at = fact["occurred_at"]
+            _, observation = ENTRANCE_EVENTS.get(
+                event_type, (None, "집에서 변화를 감지했어요")
+            )
+            controls[action].update(
+                at=display_time(occurred_at),
+                occurred_at=occurred_at,
+                observation=observation,
+            )
+    return list(controls.values())
+
+
 def device_name(device: Device) -> str:
     if device.label:
         return {"Kettle plug": "포트 플러그", "Virtual light panel": DEVICE_NAMES["light"]}.get(

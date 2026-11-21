@@ -29,9 +29,12 @@ SPIRA reads an order screenshot, finds similar cases in a synthetic purchase-int
 
 Start the fixture stack with `scripts/demo-up --no-shell`. Follow the [Android setup](app/README.md#run-the-live-demo-on-android) to connect SPIRA to the printed fixture URL.
 
+To open the household event controls from another device, add `--sim-lan-ip <demo-host-LAN-IPv4>` when starting the demo on a trusted network shared by both devices. For a USB-connected Android phone, you can also forward the Simulator port with `adb reverse tcp:<sim-port> tcp:<sim-port>` and use the printed loopback URL.
+
 1. Put [`app/assets/example-order.png`](app/assets/example-order.png) or any order screenshot on the phone.
 2. Share the screenshot to SPIRA from Android’s share menu.
-3. Watch the Simulator’s `/sim/viewer` and the Hub dashboard at the printed URLs.
+3. Open the printed **집에서 일어나는 일** URL on a second phone or laptop and sign in with the login shown beside it. Press **택배 들이기** and **손님 도착** when the story calls for them.
+4. Watch the Simulator’s `/sim/viewer` and the Hub dashboard at the printed URLs.
 
 Run `scripts/demo-up` to also start the [optional demo shell](demo-shell/README.md), or use [`app/scripts/browser-demo`](app/scripts/browser-demo) for the Flutter App preview.
 
