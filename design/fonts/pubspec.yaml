@@ -1,0 +1,21 @@
+name: spira_fonts
+publish_to: none
+version: 1.1.0
+
+environment:
+  sdk: ^3.14.0
+
+flutter:
+  assets:
+    - LICENSE.txt
+  fonts:
+    - family: IBM Plex Sans KR
+      fonts:
+        - asset: IBMPlexSansKR-Regular.otf
+          weight: 400
+        - asset: IBMPlexSansKR-Medium.otf
+          weight: 500
+        - asset: IBMPlexSansKR-SemiBold.otf
+          weight: 600
+        - asset: IBMPlexSansKR-Bold.otf
+          weight: 700

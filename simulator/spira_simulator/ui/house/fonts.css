@@ -1,0 +1,29 @@
+/* IBM Plex Sans KR 1.1.0 from IBM, under the SIL Open Font License. */
+@font-face {
+  font-family: "IBM Plex Sans KR";
+  src: url("./fonts/IBMPlexSansKR-Regular.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Sans KR";
+  src: url("./fonts/IBMPlexSansKR-Medium.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Sans KR";
+  src: url("./fonts/IBMPlexSansKR-SemiBold.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Sans KR";
+  src: url("./fonts/IBMPlexSansKR-Bold.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}

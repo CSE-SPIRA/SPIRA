@@ -1,0 +1,251 @@
+#!/usr/bin/env python3
+"""Run the Flutter browser preview against the local demo fixture stack."""
+
+import argparse
+from contextlib import ExitStack
+import json
+import os
+from pathlib import Path
+import re
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+from urllib.error import HTTPError
+from urllib.request import ProxyHandler, Request, build_opener
+
+from browser_demo_web import (
+    APP, APP_TOKEN, EPISODE, FLUTTER_REQUIRED, LOOPBACK, cached_web, define_flags,
+    fixture_defines, origin, proxy_command, temporary_root, web_command,
+)
+
+CLIENT = build_opener(ProxyHandler({}))
+
+
+def port(value):
+    if not value.isdecimal() or not 0 < int(value) < 65536:
+        raise argparse.ArgumentTypeError("expected a port from 1 to 65535")
+    return int(value)
+
+
+def listening(port):
+    try:
+        with socket.create_connection((LOOPBACK, port), timeout=0.25):
+            return True
+    except OSError:
+        return False
+
+
+def wait_for(probe, description, timeout):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        result = probe()
+        if result:
+            return result
+        time.sleep(0.2)
+    raise RuntimeError(f"Timed out waiting for {description}.")
+
+
+def stack_urls(log, demo_port):
+    urls = dict(re.findall(
+        r"^(Fixture|Hub|Viewer):[ \t]+(http://127\.0\.0\.1:[0-9]{1,5}/\S*)",
+        log.read_text(encoding="utf-8", errors="replace"), re.MULTILINE,
+    ))
+    if len(urls) == 3 and urls["Viewer"] == f"{origin(demo_port)}/sim/viewer":
+        return urls
+    return None
+
+
+def get_json(url, **headers):
+    with CLIENT.open(Request(url, headers=headers), timeout=5) as response:
+        return json.load(response)
+
+
+def check_stack(urls, household, key):
+    try:
+        get_json(
+            f"{urls['Fixture'].removesuffix('/health')}/v1/households/{household}/cards",
+            Authorization=f"Bearer {APP_TOKEN}",
+        )
+    except (OSError, ValueError, KeyError) as error:
+        raise RuntimeError(f"Could not verify the fixture household: {error}") from error
+
+    route = f"{urls['Hub'].rstrip('/')}/home/onboarding/devices"
+    try:
+        inventory = get_json(route, **{"X-API-Key": key})
+    except HTTPError as error:
+        if error.code in (404, 405):
+            raise RuntimeError(
+                "The Hub devices route GET /home/onboarding/devices is missing. "
+                "Use a checkout containing demo-up and the Hub devices route."
+            ) from error
+        raise RuntimeError(f"The Hub devices route returned HTTP {error.code}.") from error
+    if inventory.get("household_id") != household or "devices" not in inventory:
+        raise RuntimeError("The Hub devices route did not return the demo household inventory.")
+
+
+def running_urls(args, temp_root, prefix):
+    if args.stack_log:
+        urls = stack_urls(args.stack_log, args.demo_port)
+        if urls:
+            return urls
+        raise RuntimeError(f"{args.stack_log} must contain the Fixture, Hub and Viewer lines for port {args.demo_port}.")
+    for log in temp_root.glob(f"{prefix}*/demo-up.log"):
+        try:
+            urls = stack_urls(log, args.demo_port)
+        except FileNotFoundError:
+            continue
+        if urls:
+            return urls
+    raise RuntimeError(
+        f"Port {args.demo_port} is already in use. To reuse a manually started stack, "
+        "pass --stack-log with its demo-up output. To start a new stack, choose a free --demo-port."
+    )
+
+
+def stop(process, grouped):
+    if process.poll() is not None:
+        return
+    try:
+        if grouped:
+            os.killpg(process.pid, signal.SIGTERM)
+        else:
+            process.send_signal(signal.SIGINT)
+        process.wait(timeout=10)
+    except ProcessLookupError:
+        pass
+    except subprocess.TimeoutExpired:
+        if grouped:
+            os.killpg(process.pid, signal.SIGKILL)
+        else:
+            process.kill()
+        process.wait()
+
+
+def start(stack, command, *, cwd=APP, grouped=True, **kwargs):
+    process = subprocess.Popen(command, cwd=cwd, start_new_session=grouped, **kwargs)
+    stack.callback(stop, process, grouped)
+    return process
+
+
+def must_be_running(process, name):
+    if process.poll() is not None:
+        raise RuntimeError(f"{name} exited with status {process.returncode}.")
+
+
+def start_demo(stack, args, log):
+    launcher = args.checkout / "scripts/demo-up"
+    if not launcher.is_file():
+        raise RuntimeError(f"demo-up is missing at {launcher}. Check the selected repository checkout.")
+    with log.open("w", encoding="utf-8") as output:
+        demo = start(stack, [str(launcher), "--no-shell", "--no-app", "--start-port", "0",
+                             "--episode", EPISODE, "--port", str(args.demo_port)],
+                     cwd=args.checkout, stdout=output, stderr=subprocess.STDOUT)
+
+    def ready():
+        if demo.poll() is not None:
+            lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+            diagnostic = "\n".join(line for line in lines[-12:] if not line.startswith("집에서 일어나는 일:"))
+            raise RuntimeError(f"demo-up exited with status {demo.returncode}.\n{diagnostic}")
+        return stack_urls(log, args.demo_port)
+
+    return demo, wait_for(ready, "demo-up to print the service URLs", timeout=180)
+
+
+def run(args):
+    for number, name in ((args.proxy_port, "proxy"), (args.web_port, "web")):
+        if listening(number):
+            raise RuntimeError(f"Port {number} is already in use. Choose a free --{name}-port.")
+
+    fixture = json.loads((APP.parent / "contracts/fixtures" / EPISODE / "household.created.json").read_text())
+    household, key = fixture["household_id"], fixture["hub_api_key"]
+    temp_root = temporary_root()
+    prefix = f"spira-browser-demo-{os.getuid()}-{args.demo_port}-"
+    with ExitStack() as stack:
+        temporary = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix=prefix, dir=temp_root)))
+        if listening(args.demo_port):
+            demo = None
+            urls = running_urls(args, temp_root, prefix)
+            print(f"Reusing demo stack on port {args.demo_port}.", flush=True)
+        else:
+            demo, urls = start_demo(stack, args, temporary / "demo-up.log")
+        for name in ("Fixture", "Hub", "Viewer"):
+            print(f"{name}: {urls[name]}", flush=True)
+        check_stack(urls, household, key)
+
+        proxy = start(stack, proxy_command(urls["Fixture"], urls["Hub"], args.proxy_port, args.web_port))
+        proxy_url = origin(args.proxy_port)
+        web_url = origin(args.web_port)
+
+        def proxy_ready():
+            must_be_running(proxy, "Browser proxy")
+            try:
+                return get_json(f"{proxy_url}/health", Origin=web_url)
+            except OSError:
+                return None
+
+        wait_for(proxy_ready, "the browser proxy", timeout=10)
+        defines = fixture_defines(args.proxy_port, household, key)
+
+        def supervise(process):
+            while process.poll() is None:
+                if demo is not None:
+                    must_be_running(demo, "demo-up")
+                must_be_running(proxy, "Browser proxy")
+                time.sleep(0.2)
+            return process.returncode
+
+        if not args.build_serve:
+            return supervise(start(stack, [
+                "flutter", "run", "-d", "chrome", "--hot", f"--web-hostname={LOOPBACK}",
+                f"--web-port={args.web_port}", *define_flags(defines),
+            ], grouped=False))
+
+        def build(command, cwd):
+            return supervise(start(stack, command, cwd=cwd, env={**os.environ, "TMPDIR": str(temp_root)}))
+
+        web, _ = cached_web(defines, build)
+        if web is None:
+            raise RuntimeError(FLUTTER_REQUIRED)
+        server = start(stack, web_command(web, args.web_port))
+
+        def web_ready():
+            must_be_running(server, "Web server")
+            return listening(args.web_port)
+
+        wait_for(web_ready, "the web server", timeout=10)
+        print(f"App: {web_url}/ (Ctrl-C to stop)", flush=True)
+        return supervise(server)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--checkout", type=Path, default=APP.parent,
+                        help="checkout for the demo stack (defaults to this script's repository root)")
+    parser.add_argument("--build-serve", action="store_true", help="build and serve web without opening Chrome")
+    parser.add_argument("--stack-log", type=Path, help="demo-up output for reusing a manually started stack")
+    parser.add_argument("--demo-port", type=port, default=8730, help="Simulator port for the demo stack")
+    parser.add_argument("--proxy-port", type=port, default=8731)
+    parser.add_argument("--web-port", type=port, default=8732)
+    args = parser.parse_args()
+    args.checkout = args.checkout.resolve()
+    if len({args.demo_port, args.proxy_port, args.web_port}) != 3:
+        parser.error("the demo, proxy and web ports must differ")
+
+    def interrupt(*_):
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, interrupt)
+    try:
+        return run(args)
+    except KeyboardInterrupt:
+        return 130
+    except (RuntimeError, OSError, ValueError) as error:
+        print(f"browser-demo: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

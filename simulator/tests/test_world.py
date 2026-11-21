@@ -1,6 +1,10 @@
 import json
+import re
+import shutil
 import sqlite3
+import subprocess
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 from conftest import CLEANER, LIGHT, OVEN, PLUG, Wire, fixture_json
@@ -13,30 +17,88 @@ from spira_simulator.storage import UnsupportedSchema
 from spira_simulator.world import World
 
 
+def test_house_javascript():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is needed to test the 3D house")
+    subprocess.run([node, "--test", str(Path(__file__).with_name("house.test.mjs"))], check=True)
+
+
+def test_simulator_does_not_serve_the_demo_shell(tmp_path):
+    with TestClient(create_app(tmp_path / "world.db", broker_enabled=False)) as client:
+        assert client.get("/demo").status_code == 404
+        assert client.get("/demo/api/config").status_code == 404
+        assert client.get("/sim/assets/demo/chain.js").status_code == 404
+
+
 def test_sim_at01_configured_household_without_peers(wire, tmp_path):
     discovery, signals = wire.request("discover")
     fixture = Devices.model_validate(fixture_json("ep_9031/devices.json"))
     configured = load_profile()
     logical = {d.target: d.logical_id for d in configured.devices}
-    expected = {d.id: d for d in fixture.devices}
+    expected = {
+        device.id: (device.type, [command.cmd for command in device.commands])
+        for device in fixture.devices
+    }
+    expected.update(
+        purifier_01=("purifier", ["mode"]),
+        styler_01=("styler", ["set_course_standby"]),
+    )
     assert {logical[d["target"]] for d in discovery["devices"]} == set(expected)
     assert not signals
     for device in discovery["devices"]:
-        source = expected[logical[device["target"]]]
-        assert device["device_type"] == source.type
-        assert device["capabilities"]["commands"] == [
-            command.cmd for command in source.commands
-        ]
+        device_type, commands = expected[logical[device["target"]]]
+        assert device["device_type"] == device_type
+        assert device["capabilities"]["commands"] == commands
         assert device["available"]
         assert wire.read(device["target"])["values"].keys() == set(
             device["capabilities"]["properties"]
         )
     with TestClient(create_app(tmp_path / "web.db", broker_enabled=False)) as client:
-        assert client.get("/sim/viewer").status_code == 200
+        page = client.get("/sim/viewer").raise_for_status().text
+        assert 'id="viewer-world" class="house-world"' in page
+        assert page.count('data-device="') == 9
+        for name in ("tokens.css", "fonts.css", "house.css", "viewer.css"):
+            assert f'href="/sim/assets/house/{name}"' in page
+            assert client.get(f"/sim/assets/house/{name}").raise_for_status().headers[
+                "content-type"
+            ].startswith("text/css")
+        stage = client.get("/sim/stage.js").raise_for_status().text
+        assert 'import("/sim/assets/house/house.js")' in stage and "/demo/" not in stage
+        house = client.get("/sim/assets/house/house.js").raise_for_status().text
+        assert "/demo/" not in house and "marker-trace" not in house
+        for name in ("house.js", "devices.js", "vocabulary.js", "three.module.min.js", "castle.jpg"):
+            assert client.get(f"/sim/assets/house/{name}").raise_for_status().content
+        font_css = client.get("/sim/assets/house/fonts.css").raise_for_status().text
+        font_paths = re.findall(r'url\("\./(fonts/[^"]+)"\)', font_css)
+        assert len(font_paths) == 4
+        for path in font_paths:
+            font = client.get(f"/sim/assets/house/{path}").raise_for_status()
+            assert font.headers["content-type"] == "font/woff2"
+            assert font.content.startswith(b"wOF2")
+        license_text = client.get("/sim/assets/house/fonts/LICENSE.txt").raise_for_status().text
+        assert "SIL OPEN FONT LICENSE" in license_text
         snapshot = client.get("/sim/snapshot").json()
         assert snapshot["household_id"] == fixture.household_id
-        assert len(snapshot["devices"]) == 7
+        assert len(snapshot["devices"]) == 9
         assert all(d["observation"] == "current" for d in snapshot["devices"])
+        devices = {device["logical_id"]: device for device in snapshot["devices"]}
+        assert devices["purifier_01"]["room"] == "living_room"
+        assert devices["purifier_01"]["values"] == {"mode": "auto"}
+        assert devices["styler_01"]["room"] == "entrance"
+        assert devices["styler_01"]["values"] == {"course_standby": None}
+
+        world_wire = Wire(client.app.state.world)
+        for target, desired in (
+            ("mqtt:purifier_01", {"mode": "turbo"}),
+            ("mqtt:purifier_01", {"mode": "sleep"}),
+            ("mqtt:styler_01", {"course_standby": {"course": "standard"}}),
+        ):
+            receipt, _ = world_wire.command(target, desired)
+            assert receipt["status"] == "ACCEPTED" and receipt["job_id"] is None
+            updated = client.get("/sim/snapshot").json()["devices"]
+            actual = next(device for device in updated if device["target"] == target)
+            assert actual["values"] == desired
 
 
 def test_family_gathering_profile_and_speaker_binding(tmp_path, monkeypatch):

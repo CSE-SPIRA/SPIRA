@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
@@ -12,6 +14,12 @@ class AppApiException implements Exception {
   final int status;
   final wire.ErrorCode? code;
 }
+
+bool isServerUnavailable(Object error) => switch (error) {
+  AppApiException(:final status) => status == 408 || status >= 500,
+  http.ClientException() || SocketException() || TimeoutException() => true,
+  _ => false,
+};
 
 /// The files have already been copied to the Android app's private inbox.
 class SharedOrder {
@@ -29,7 +37,7 @@ class AppApi {
   final Uri baseUrl;
   final http.Client _client;
 
-  /// Entered at runtime when the peer requires a bearer token.
+  /// In-memory bearer token for the active peer.
   String? token;
 
   String _household(String id) => '/v1/households/${Uri.encodeComponent(id)}';
@@ -55,31 +63,34 @@ class AppApi {
       request.headers['Content-Type'] = 'application/json';
       request.body = jsonEncode(body);
     }
-    return decode(await _send(request, statuses));
+    final response = await _send(request, statuses);
+    return decode(utf8.decode(response.bodyBytes));
   }
 
-  Future<String> _send(http.BaseRequest request, Set<int> statuses) async {
+  Future<http.Response> _send(
+    http.BaseRequest request,
+    Set<int> statuses,
+  ) async {
     request.followRedirects = false;
     request.headers['Accept'] = 'application/json';
     final bearer = token;
-    if (bearer != null && request.url.path != _uri('/health').path) {
+    if (bearer != null && request.url.path.startsWith(_uri('/v1/').path)) {
       request.headers['Authorization'] = 'Bearer $bearer';
     }
     final response = await _client
         .send(request)
         .then(http.Response.fromStream)
         .timeout(const Duration(seconds: 25));
-    final body = utf8.decode(response.bodyBytes);
     if (!statuses.contains(response.statusCode)) {
       wire.ErrorCode? code;
       try {
-        code = wire.errorFromJson(body).code;
+        code = wire.errorFromJson(utf8.decode(response.bodyBytes)).code;
       } catch (_) {
         // A proxy may send a non-contract error response.
       }
       throw AppApiException(response.statusCode, code);
     }
-    return body;
+    return response;
   }
 
   Future<wire.Health> health() =>
@@ -177,16 +188,11 @@ class AppApi {
     body: body.toJson()..removeWhere((key, value) => value == null),
   );
 
-  Future<wire.OrderAccepted> share(String household, SharedOrder order) async {
-    final request = http.MultipartRequest('POST', _uri('/v1/orders'));
-    request.fields.addAll({
-      'household_id': household,
-      'source_id': order.sourceId,
-      'shared_at': order.sharedAt,
-    });
+  Future<ShareReceipt> share(String household, SharedOrder order) async {
+    final images = <http.MultipartFile>[];
     for (final image in order.images) {
       final png = image.path.endsWith('.png');
-      request.files.add(
+      images.add(
         http.MultipartFile(
           'images',
           image.openRead(),
@@ -196,6 +202,42 @@ class AppApi {
         ),
       );
     }
-    return wire.orderAcceptedFromJson(await _send(request, {200, 202}));
+    return _share(household, order.sourceId, order.sharedAt, images);
+  }
+
+  Future<ShareReceipt> shareExample(
+    String household,
+    String sourceId,
+    String sharedAt,
+    Uint8List image,
+  ) => _share(household, sourceId, sharedAt, [
+    http.MultipartFile.fromBytes(
+      'images',
+      image,
+      filename: 'example-order.png',
+      contentType: MediaType('image', 'png'),
+    ),
+  ]);
+
+  Future<ShareReceipt> _share(
+    String household,
+    String sourceId,
+    String sharedAt,
+    List<http.MultipartFile> images,
+  ) async {
+    final request = http.MultipartRequest('POST', _uri('/v1/orders'))
+      ..fields.addAll({
+        'household_id': household,
+        'source_id': sourceId,
+        'shared_at': sharedAt,
+      })
+      ..files.addAll(images);
+    final response = await _send(request, {200, 202});
+    final accepted = wire.orderAcceptedFromJson(
+      utf8.decode(response.bodyBytes),
+    );
+    return (accepted: accepted, isNew: response.statusCode == 202);
   }
 }
+
+typedef ShareReceipt = ({wire.OrderAccepted accepted, bool isNew});

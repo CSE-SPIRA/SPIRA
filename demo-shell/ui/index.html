@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="">
+<title>SPIRA · 주문에서 집까지</title>
+<link rel="stylesheet" href="/sim/assets/house/tokens.css">
+<link rel="stylesheet" href="/sim/assets/house/fonts.css">
+<link rel="stylesheet" href="/sim/assets/house/house.css">
+<link rel="stylesheet" href="/sim/assets/house/viewer.css">
+<link rel="stylesheet" href="/demo/assets/demo.css">
+<script type="importmap">
+{"imports":{"three":"/sim/assets/house/three.module.min.js"}}
+</script>
+</head>
+<body>
+<div id="frame">
+  <header class="mast">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span>SPIRA</div>
+    <nav class="mast-center segment" aria-label="페이지">
+      <button type="button" data-page="reason" aria-pressed="true">판단</button>
+      <button type="button" data-page="house" aria-pressed="false">집</button>
+    </nav>
+    <div class="mast-right">
+      <div class="segment" id="orders" role="group" aria-label="비교할 주문">
+        <button type="button" data-order="birthday" aria-pressed="true">생일 주문</button>
+        <button type="button" data-order="groceries" aria-pressed="false">평소 장보기</button>
+      </div>
+      <span class="mast-note" id="fixture" hidden>예시 판단</span>
+      <span class="mast-note" id="compressed-time" hidden>시연에서는 시간을 줄여 실행</span>
+    </div>
+  </header>
+  <main>
+    <section id="reason" aria-label="주문에서 판단까지">
+      <nav id="route" aria-label="판단 단계"><span class="owner-tag">서버 창</span><ol class="route-list" id="route-list"></ol></nav>
+      <div id="reason-layout">
+        <div class="phone-orbit">
+          <span class="owner-tag" id="phone-owner">앱 · 공유</span>
+          <section class="phone" aria-label="SPIRA 앱">
+            <div class="phone-screen">
+              <div class="phone-status"><time id="phone-time"></time><i class="phone-charge" aria-hidden="true"></i></div>
+              <div id="phone-content"></div>
+              <nav class="phone-bar" aria-label="앱 화면">
+                <button type="button" id="phone-order" aria-pressed="true">주문</button>
+                <button type="button" id="phone-map" aria-pressed="false">우리 집</button>
+              </nav>
+            </div>
+          </section>
+        </div>
+        <article id="stage-copy" aria-live="polite"></article>
+      </div>
+    </section>
+    <section id="home" aria-label="입체 집과 허브 장부" hidden>
+      <header class="house-head">
+        <div><p class="kicker" id="home-time"></p><h1 id="home-title"></h1></div>
+        <p class="lead" id="home-caption"></p>
+      </header>
+      <figure id="view" class="house-view" aria-label="현관, 거실, 주방의 입체 모형">
+        <div id="world" class="house-world"></div><div id="viewer-markers"></div>
+        <span class="owner-tag">시뮬레이터 · 집</span>
+        <div class="room-key" aria-hidden="true"><span data-room="entrance"></span><span data-room="living_room"></span><span data-room="kitchen"></span></div>
+      </figure>
+      <aside class="ledger" aria-label="허브가 기록한 일">
+        <div class="ledger-head"><h2>허브 장부</h2><span id="ledger-label"></span><span class="owner-tag">Hub 기록</span></div>
+        <ol id="ledger" aria-live="polite"></ol>
+      </aside>
+      <nav aria-label="집 시간표" id="house-timeline"><span class="owner-tag">시뮬레이터 · 집</span><ol id="timeline"></ol></nav>
+    </section>
+  </main>
+  <div id="match-orb" aria-hidden="true" hidden></div>
+  <footer class="controls" aria-label="단계 조작">
+    <p id="notice" role="status"></p>
+    <div class="control-right">
+      <button class="button simple" type="button" id="compare" hidden>주문 비교</button>
+      <button class="button" type="button" id="previous" disabled>← 이전</button>
+      <button class="button primary" type="button" id="next" disabled>다음 →</button>
+    </div>
+  </footer>
+</div>
+<script type="module" src="/demo/assets/demo.js"></script>
+</body>
+</html>

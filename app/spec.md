@@ -27,7 +27,13 @@ PC-3, PC-5, PC-6)
 **P-R2.** The App MUST derive product state only from contract values received
 from the Server and MUST distinguish observed results from acknowledgements,
 unknown facts from success, and virtual, physical, fixture, and real-Server
-qualification. It MUST NOT read or control the Hub or Simulator directly.
+qualification. The Hub's home-key authenticated `GET /home/onboarding/devices`
+supplies the read-only inventory for 우리 집. The App MUST mark the devices
+from the card's rationale tasks and the order's item tasks. Item-task
+executions identify their devices. For a fridge notice without an execution,
+the App uses the home's fridge by type when there is exactly one match. If the
+Hub list is unavailable, the App shows the identified devices with a note.
+The App MUST NOT use the Hub or Simulator to control devices directly.
 (PC-4, PC-5)
 
 **P-R3.** Until the real Server implements the App contract, the local App peer
@@ -54,10 +60,12 @@ PC-5)
 
 ### A3. Shared orders
 
-**A3-R1.** The only order input MUST be an Android OS share containing one to
-three ordered screenshots. The App MUST NOT provide an image picker, form, or
-follow-up question. It MUST preserve one share identity so redelivery or retry
-does not create a second episode. (PC-1, PC-3, PC-4)
+**A3-R1.** The only production order input MUST be an Android OS share
+containing one to three ordered screenshots. The App MUST NOT provide an image
+picker, form, or follow-up question. It MUST preserve one share identity so
+redelivery or retry does not create a second episode. The browser fixture
+preview uploads the bundled sample through `POST /v1/orders` with a share
+identity and disables the Android share and calendar integrations. (PC-1, PC-3, PC-4)
 
 **A3-R2.** An HTTP 202 MUST be shown only as intake acceptance, never as a
 finished judgment or preparation. The App MUST use the episode contract to show
@@ -66,23 +74,44 @@ the absence of preparation. Before any line has started, the user MUST be able t
 correct read product names and quantities; after a line starts, that correction
 affordance MUST be absent. (PC-1, PC-2, PC-4)
 
+**A3-R3.** For a new share, the App MUST show the capture and read items.
+Keep the capture sharp and visible for at least 2.4 seconds during reading.
+Show the read items for at least 1.5 seconds. During the same session, let the
+user reopen the capture from the read item count.
+When the card and stored rationale are available, show the situation and
+basis, intent and basis with any set-aside items, and the Server's task lines
+for at least 2, 2.5, and 1.5 seconds respectively before the card.
+Keep each step visible while waiting for the data needed to continue.
+The person can skip to the current result. With reduced motion, show the
+same steps without animation for at least 0.8 seconds each. On reload,
+show the current result directly. (PC-1, PC-2)
+
 ### A4. Preparation cards
 
 **A4-R1.** One preparation MUST be shown as one card, with no approval button.
 For each order the App MUST show no more than the contract maximum of two cards.
 Each card MUST show the understood situation in one line (`text`), its schedule,
 up to four lines, `done / total`, the awaited event, and for every line its
-contract state and `when`. After a line ends, it MUST show the supplied
-`end_state` and Server display `note`. (PC-1, PC-3, PC-4, PC-5)
+contract state and `when`. Show the schedule as the Seoul weekday and event
+name when available. On the card and in 우리 집, show a line's trigger or its
+relation to the schedule start from the supplied times. Show exact times in
+the order story and line details. After a line ends, show the supplied restore outcome when
+`end_state` is other than `none`, and preserve the Server display `note`.
+Keep newly closed preparations at the top until the next share or for 30
+minutes. Summarize restoration using only the card's own restored lines.
+Then keep the cards under collapsed 지난 준비, with WHY still reachable.
+(PC-1, PC-3, PC-4, PC-5)
 
 **A4-R2.** A line's planned end condition MUST be shown only when a future
 contract field explicitly supplies it. The App MUST NOT infer one from `when`,
 `end_state`, `note`, a timer, or fixture knowledge. The missing field remains
 Open item O-04/SP-09. (PC-4, PC-5)
 
-**A4-R3.** The App MUST follow the contract's card polling and `notify` rules and
-show at most one local notification for each (`card_id`, `updated_at`) for which
-`notify` is true. Other card updates MUST be silent. (PC-3, PC-4)
+**A4-R3.** The App MUST use the contract's 30 s card polling cadence, with a
+foreground exception of 3 s while a preparation or share is active so home
+changes are visible promptly. Preserve the contract's cursor and `notify`
+rules. Show at most one local notification for each (`card_id`, `updated_at`)
+for which `notify` is true. Other card updates MUST be silent. (PC-3, PC-4)
 
 ### A5. Interventions
 
@@ -111,18 +140,30 @@ eligibility only and MUST NOT silently revive cancelled work. (PC-5, PC-6)
 
 ### A6. WHY
 
-**A6-R1.** WHY MUST render the stored rationale without starting a new
-inference. Its presentation is a whitelist:
+**A6-R1.** A card tap or **자세히** opens the order story, led by its live or
+closed summary. Show the stored judgment, plan, known changes, fridge guidance,
+executions, restore outcomes, and S7 feedback as they become available through
+the existing App polling and rationale read. Show supplied share and execution
+times and distinguish planned upcoming times and supplied triggers. Order lines
+by their first available execution record, falling back to the planned time.
+Untimed entries remain untimed. The live summary leads with running work, then
+the awaited event or next planned work. For a closed episode, put the S7
+verdict and feedback immediately below the summary. Identify fixture judgment
+with the same preview caption as the main screen. No additional inference.
+(PC-1, PC-2)
 
-- understood `intent_text`;
-- situation slots and, for each slot, its evidence items or calendar event;
-- deliberately excluded `unbundled` items; and
-- for each preparation line, `need` → device room/type → current contract state.
-
-For no-intent episodes it MUST show the stored no-intent fact. It MUST NOT render
-purchase-history comparison (`unusual_items`), `kb_counts`, `kb_examples`, or
-other KB examples/counts. Missing rationale MUST remain unavailable rather than
-being invented locally. (PC-1, PC-2)
+**A6-R2.** The judgment opens expanded and can collapse in place. It shows the
+intent and available calendar, unusual-item and similar-order clues. Show
+set-aside items with the read order, and each supplied line need and observed
+change with its timeline entry. A line tap opens its own details with its need,
+timing in a sentence, execution results, observed changes and the card's
+shared intent and slots. If a derived time predates the share,
+use **바로 실행** and the recorded run time or share time for the derivation.
+**전체 근거 보기** opens the compact stored evidence in order: read items and
+quantities, unusual items, similar orders, situation slots and basis, and linked
+calendar. For no-intent orders, keep the stored reason and notices available.
+Missing rationale remains unavailable. S7 feedback links to **우리 집 기억** and
+says it will be considered in future preparations. (PC-1, PC-2)
 
 ### A7. Item guidance
 
@@ -142,6 +183,12 @@ It MUST NOT turn an HTTP receipt, missing evidence, or a stale value into `done`
 A `user_changed` presentation requires that Server-provided state, and
 `kept_user_change` MUST be shown as a preserved human change rather than a
 failure. (PC-4, PC-5)
+
+**A8-R2.** When the Server is unreachable, the App MUST show the last known
+preparations and 우리 집 with an inline connection notice and the last check
+time when available. It MUST retry in the background and explain that queued
+Android shares will send when the connection returns. A failed browser sample
+share MUST show an explicit failure. (PC-1, PC-4, PC-5)
 
 ### A9. This-home memory
 
@@ -169,10 +216,10 @@ exits.
 | APP-AT-08 | Stop a card containing unstarted work, a SPIRA-owned effect, a person-changed effect, and a person-started job. The peer receives contract `stop`; refreshed UI shows cancellation/restoration while preserving both human effects, asks no reason, and leaves item guidance unchanged. | PC-5, PC-6 | A5-R2, A7-R1, A8-R1 |
 | APP-AT-09 | Pause a household with unstarted work, a running effect, and then a newly shared order. The refreshed projection cancels the unstarted work, keeps the running lifecycle, stores the order as paused without judgment, and does not revive cancelled work after resume. | PC-5, PC-6 | A5-R3, A8-R1 |
 | APP-AT-10 | After the peer has only a command acknowledgement, return a card that is not `done`; then return refreshed `done`, `partial`, `failed`, `unknown`, and restore outcomes. The UI does not complete on acknowledgement and renders every supplied state without upgrading unknown evidence. | PC-4, PC-5 | P-R2, A8-R1 |
-| APP-AT-11 | Render the `ep_9031`-shaped rationale containing intent/situation basis, calendar evidence, `unbundled`, task need/device/state, `unusual_items`, `kb_counts`, and `kb_examples`. WHY shows only the A6-R1 whitelist and a second open does not cause an inference request. | PC-1, PC-2 | A6-R1 |
+| APP-AT-11 | Render the `ep_9031` order story and `ep_9150` stored evidence. Open two distinct line details, toggle the initially expanded judgment, and check execution order, live and closed summaries, S7 feedback, and full evidence. | PC-1, PC-2 | A6-R1, A6-R2 |
 | APP-AT-12 | Render the plain-groceries episode with `card_ids: []` and item guidance through unreleased, released, and closed states. No preparation card is fabricated, and the guidance lifecycle remains visible. | PC-1, PC-2 | A3-R2, A7-R1 |
 | APP-AT-13 | From settings, open memory, view Server rows, delete one case with a failed response and then a successful response/readback. No edit controls exist; failure remains visible; deletion is claimed only after Server confirmation. | PC-6 | A9-R1 |
-| APP-AT-14 | Run the same scene against the local fixture peer and against a qualified Server profile. Fixture qualification is visible and never presented as real-Server, physical-device, or native-lifecycle evidence; no App request reaches Hub or Simulator endpoints. | PC-4 | P-R2, P-R3 |
+| APP-AT-14 | Run the same scene against the local fixture peer and against a qualified Server profile. Fixture qualification is visible and never presented as real-Server, physical-device, or native-lifecycle evidence. Verify 우리 집 reads the Hub inventory and that browser sample sharing uses `POST /v1/orders`. | PC-4 | P-R2, P-R3 |
 | APP-AT-15 | With Android large text and a screen reader enabled, locate and operate card Stop, pre-start line off/on, and settings pause. Each scope and pending/confirmed result is identifiable without color alone. | PC-5 | A5-R1, A5-R2, A5-R3 |
 
 ## 4. Open items

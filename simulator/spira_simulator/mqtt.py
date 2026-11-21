@@ -32,8 +32,10 @@ class DeviceProtocol:
 
     def dispatch(self, action: Callable, *args, **kwargs):
         with self.lock:
-            for signal in action(*args, **kwargs):
+            signals = action(*args, **kwargs)
+            for signal in signals:
                 self.send("events", signal)
+            return signals
 
     def _reply_suffix(self, request_id, reply_to) -> str | None:
         if not isinstance(request_id, str) or not TOPIC_COMPONENT.fullmatch(request_id):

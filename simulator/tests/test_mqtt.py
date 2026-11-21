@@ -141,7 +141,7 @@ def test_mosquitto_requests_signals_availability_and_reconnect(tmp_path, monkeyp
 
                 send("discover", "rq_discover")
                 _, response, _, _ = frames.get(timeout=5)
-                assert len(response["data"]["devices"]) == 7
+                assert len(response["data"]["devices"]) == 9
 
                 send(
                     "command",
