@@ -1,3 +1,13 @@
+{% macro planned_row(entry, detail_id, unplaced=false) %}
+  {% set label %}{% if unplaced %}기기 · {% endif %}{{ entry.action }}{% if entry.timed %}<span class="planned-clock"> · {{ entry.wait }}</span>{% else %} · {{ entry.wait }}{% endif %}{% endset %}
+  {% if entry.details %}
+  {% set detail = entry.details | join('\n') %}
+  <p class="planned"><button id="{{ detail_id }}-trigger" class="planned-trigger" type="button" title="{{ detail }}" popovertarget="{{ detail_id }}">{{ label }}</button></p>
+  <p id="{{ detail_id }}" class="planned-detail" popover="auto">{{ detail }}</p>
+  {% else %}
+  <p class="planned">{{ label }}</p>
+  {% endif %}
+{% endmacro %}
 {% macro device_marker(device) %}
   {% set full = device.changed or device.planned %}
   <div class="viewer-marker" data-device="{{ device.id }}" data-values="{{ device.visual_values | tojson | forceescape }}"{% if device.changed %} data-changed=""{% endif %}{% if not full %} data-resting=""{% endif %}{% if full or device.observation_label or device.physical %} data-required=""{% endif %}>
@@ -16,7 +26,7 @@
       {% if device.change and device.change[0] != "spira" %}<p class="change-marker">{{ device.change[1] }}</p>{% endif %}
     </article>
     {% for entry in device.planned %}
-    <p class="planned">{{ device.name }} · {{ entry.action }}{% if entry.timed %}<span class="planned-clock"> · {{ entry.wait }}</span>{% else %} · {{ entry.wait }}{% endif %}</p>
+    {{ planned_row(entry, 'planned-' ~ device.id ~ '-' ~ loop.index) }}
     {% endfor %}
   </div>
 {% endmacro %}
@@ -73,8 +83,8 @@
     </div>
   </div>
   <div id="viewer-reports" class="viewer-reports" data-live="">
-    {% for entries in unplaced %}
-    {% for entry in entries %}<p class="planned">기기 · {{ entry.action }} · {{ entry.wait }}</p>{% endfor %}
+    {% for device, entries in unplaced %}
+    {% for entry in entries %}{{ planned_row(entry, 'planned-' ~ device ~ '-' ~ loop.index, unplaced=true) }}{% endfor %}
     {% endfor %}
     {% if overlay_errors %}
     <p class="observation-warning">예정 또는 되돌림 정보를 읽을 수 없음</p>
