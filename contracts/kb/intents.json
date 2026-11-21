@@ -1,7 +1,7 @@
 {
   "$comment": "Intent list (30) + reserved ids. Owner: KB (Uijin). Server reads it at start for S3 labels and S4 holiday lookup (related_tags). Ids never change (KB-14). (KB-08, KB-15)",
-  "source": "CSE-SPIRA/SPIRA_KB config/lists/intents.yaml @20d569f",
-  "version": 1,
+  "source": "CSE-SPIRA/SPIRA_KB config/lists/intents.yaml @a040c0c",
+  "version": 2,
   "reserved": [
     "none",
     "unclassified"
@@ -29,18 +29,19 @@
       "id": "home_party",
       "group": "손님·모임",
       "name": "지인 초대 홈파티 (집들이 포함)",
-      "definition": "친구·동료를 불러 음식·술 대접. 생일 소품·응원 용품 없음",
+      "definition": "친구·동료를 불러 대접. 술·안주·핑거푸드 + 일회용 접시·컵. 생일 소품·응원 용품 없음",
       "related_tags": [
         "집들이",
         "친구 모임",
-        "연말 모임"
+        "연말 모임",
+        "손님 방문"
       ]
     },
     {
       "id": "family_gathering",
       "group": "손님·모임",
       "name": "가족 모임·식사 대접",
-      "definition": "부모님·친척과 집에서 식사. 명절 음식 재료 없음",
+      "definition": "부모님·친척과 집에서 식사. 갈비찜·잡채 같은 손님상 재료 + 과일 바구니·선물세트. 제수용품·명절 음식 재료 없음",
       "related_tags": [
         "가족 모임",
         "어버이날",
@@ -60,7 +61,7 @@
       "id": "kids_playdate",
       "group": "손님·모임",
       "name": "아이 친구 놀러 옴",
-      "definition": "생일이 아닌 아이 친구 방문. 소량 간식·놀이 용품. 케이크·학습지 없음",
+      "definition": "생일이 아닌 아이 친구 방문. 과자·주스 여러 개 + 보드게임·클레이 같은 놀이 용품. 케이크·학습지 없음",
       "related_tags": [
         "손님 방문",
         "어린이날"
