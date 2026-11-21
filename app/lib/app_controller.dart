@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
@@ -84,6 +85,7 @@ class AppController extends ChangeNotifier {
   String? shareIssue;
   String? exampleShareError;
   int queuedShares = 0;
+  ({String sourceId, String sharedAt})? _exampleShare;
 
   final householdTypes = <String>{};
   final deviceChoices = <String, Map<String, DeviceChoice>>{};
@@ -477,10 +479,20 @@ class AppController extends ChangeNotifier {
     _change();
     try {
       await _serialize(() async {
-        // The demo shell's birthday sample, rendered from its sampleOrder canvas.
         final asset = await rootBundle.load('assets/example-order.png');
         final image = Uint8List.sublistView(asset);
-        final receipt = await api.shareExample(image);
+        final random = Random.secure();
+        final share = _exampleShare ??= (
+          sourceId: 'preview_${base64UrlEncode(List.generate(12, (_) => random.nextInt(256)))}',
+          sharedAt: DateTime.now().toUtc().toIso8601String(),
+        );
+        final receipt = await api.shareExample(
+          household!,
+          share.sourceId,
+          share.sharedAt,
+          image,
+        );
+        _exampleShare = null;
         _queueCapture(receipt.episodeId, [image]);
         accepted.add(receipt.episodeId);
         _change();

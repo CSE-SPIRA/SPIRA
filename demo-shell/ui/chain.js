@@ -1,5 +1,5 @@
-import { HOUSE_DEVICES } from "../house/devices.js";
-import { DEVICE_NAMES } from "../house/vocabulary.js";
+import { HOUSE_DEVICES } from "/sim/assets/house/devices.js";
+import { DEVICE_NAMES } from "/sim/assets/house/vocabulary.js";
 import { displayTime, planReceiptTime, storyClock, storyLedgerTime, storyObservedTime, storyPlanTime } from "./story-time.js";
 
 const PACKAGE_EVENT = "package.brought_in";

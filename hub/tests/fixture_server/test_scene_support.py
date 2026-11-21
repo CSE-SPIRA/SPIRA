@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from . import create_app
+from .scene_support import NextOrder
 from .test_fixture_server import (
     EPISODE,
     HEADERS,
@@ -58,6 +59,31 @@ def test_scene_selection_publishes_on_the_next_valid_new_order():
     assert [card["episode_id"] for card in client.get(CARDS).json()["cards"]] == ["ep_9031"]
     assert client.get("/v1/episodes/ep_9150").json()["household_id"] == "h_042"
     assert client.get(PLANS).json()["plans"][0]["plan_id"] == "ep_9150"
+
+
+def test_default_scene_replays_each_new_order_without_selection():
+    client = TestClient(
+        create_app(default_scene=NextOrder(episode_id="ep_9031"), demo_mode=True),
+        headers=HEADERS,
+    )
+    assert client.get(CARDS).json()["cards"] == []
+    assert client.get(PLANS).json()["plans"] == []
+    before = datetime.now(timezone.utc)
+    first = upload(client, "birthday")
+    assert first.status_code == 202
+    assert first.json() == {"episode_id": "ep_9031", "status": "received"}
+    plan = client.get(PLANS).json()["plans"][0]
+    assert plan["plan_id"] == "ep_9031"
+    assert before <= datetime.fromisoformat(plan["sent_at"]) <= datetime.now(timezone.utc)
+    assert client.get(CARDS).json()["cards"][0]["episode_id"] == "ep_9031"
+
+    duplicate = upload(client, "birthday")
+    assert duplicate.status_code == 200
+    assert duplicate.json() == first.json()
+    second = upload(client, "another-birthday")
+    assert second.status_code == 202
+    assert second.json()["episode_id"] == "ep_90312"
+    assert client.get(PLANS).json()["plans"][0]["plan_id"] == "ep_90312"
 
 
 @pytest.mark.parametrize("episode_id", ["ep_9031", "ep_9150"])

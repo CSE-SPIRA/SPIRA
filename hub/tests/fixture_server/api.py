@@ -76,10 +76,14 @@ def timestamp(value: str | None):
 
 
 def create_app(
-    episode_id: str = "ep_9031", *, scene_controls: bool = False, demo_mode: bool = False
+    episode_id: str = "ep_9031", *, scene_controls: bool = False, demo_mode: bool = False,
+    default_scene: NextOrder | None = None,
 ) -> FastAPI:
     replay = Replay(episode_id)
-    snapshots: dict[str, Replay] = {} if scene_controls else {episode_id: replay}
+    if default_scene and Replay(default_scene.episode_id).household_id != replay.household_id:
+        raise ValueError("The default scene must belong to the fixture household")
+    live_scenes = scene_controls or default_scene is not None
+    snapshots: dict[str, Replay] = {} if live_scenes else {episode_id: replay}
     historical_package_replays: dict[str, Replay] = {}
     scene_counts: dict[str, int] = {}
     pending_order: NextOrder | None = None
@@ -134,7 +138,7 @@ def create_app(
             timestamp(event.end)
         if active_order:
             apply_scene_calendar(replay, active_order, calendar, demo_mode=demo_mode, now=now)
-        elif not scene_controls and calendar == replay.calendar:
+        elif not live_scenes and calendar == replay.calendar:
             replay.find_calendar_time()
         return response(CalendarResponse(accepted=len(calendar.events)), 202)
 
@@ -342,23 +346,24 @@ def create_app(
                 400, "invalid_request", "Invalid multipart order"
             ) from exc
         duplicate = source_id in orders
-        if not duplicate and scene_controls and not replay.paused:
-            if pending_order is None and not snapshots:
+        if not duplicate and live_scenes and not replay.paused:
+            scene = pending_order or default_scene
+            if scene is None and not snapshots:
                 raise FixtureError(409, "invalid_request", "Select a scene episode before upload")
-            if pending_order is not None:
-                template = pending_order.episode_id
+            if scene is not None:
+                template = scene.episode_id
                 scene_counts[template] = scene_counts.get(template, 0) + 1
                 now = datetime.now(timezone.utc)
                 if replay.live:
                     now = max(now, replay.clock + timedelta(microseconds=1))
                 upcoming = live_replay(
-                    pending_order, demo_mode=demo_mode, now=now, sequence=scene_counts[template],
+                    scene, demo_mode=demo_mode, now=now, sequence=scene_counts[template],
                 )
                 upcoming.devices = replay.devices
                 upcoming.profile = replay.profile
                 upcoming.receipts = replay.receipts
                 snapshots[upcoming.episode.episode_id] = upcoming
-                replay, active_order, pending_order = upcoming, pending_order, None
+                replay, active_order, pending_order = upcoming, scene, None
         selected_id = orders[source_id] if duplicate else replay.episode.episode_id
         if source_id is not None:
             orders[source_id] = selected_id

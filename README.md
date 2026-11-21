@@ -27,7 +27,13 @@ SPIRA reads an order screenshot, finds similar cases in a synthetic purchase-int
 
 ## Run the demo
 
-Run the fixture stack from one checkout with the [Simulator demo guide](simulator/DEMO.md) or use [`app/scripts/browser-demo`](app/scripts/browser-demo) for the Flutter App preview.
+Start the fixture stack with `scripts/demo-up --no-shell`. Follow the [Android setup](app/README.md#run-the-live-demo-on-android) to connect SPIRA to the printed fixture URL.
+
+1. Put [`app/assets/example-order.png`](app/assets/example-order.png) or any order screenshot on the phone.
+2. Share the screenshot to SPIRA from Android’s share menu.
+3. Watch the Simulator’s `/sim/viewer` and the Hub dashboard at the printed URLs.
+
+Run `scripts/demo-up` to also start the [optional demo shell](demo-shell/README.md), or use [`app/scripts/browser-demo`](app/scripts/browser-demo) for the Flutter App preview.
 
 ## Paper
 

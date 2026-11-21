@@ -29,6 +29,11 @@ Select `ep_9150` or `ep_9120` with `--episode`. The first two episodes use
 `h_042`, and `ep_9120` uses `h_051`. For clients in another local process or
 emulator, configure the host and port with `--host` and `--port`.
 
+Add `--default-scene ep_9031` or set `SPIRA_FIXTURE_DEFAULT_SCENE=ep_9031`
+to start unpublished and run the live birthday replay on each new
+`POST /v1/orders` upload. Set `DEMO_MODE=1` for the shortened Server offsets.
+See the [live scene options](tests/fixture_server/README.md).
+
 Each instance starts at the first plan and card fixtures for its selected
 episode. Restart to replay from the beginning. Turning off the birthday
 cleaning line `t_clean#1` advances to v2. A package event advances the fixture

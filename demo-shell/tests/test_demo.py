@@ -6,46 +6,60 @@ from pathlib import Path
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from spira_simulator import demo
-from spira_simulator.api import create_app
+
+import demo
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("WORLD_DEMO", "1")
+def client(monkeypatch):
     monkeypatch.setenv("DEMO_SERVER_URL", "http://server.test")
     monkeypatch.setenv("DEMO_APP_TOKEN", "t")
     monkeypatch.delenv("DEMO_HUB_URL", raising=False)
     monkeypatch.delenv("DEMO_NUMBERS_PATH", raising=False)
-    with TestClient(create_app(tmp_path / "world.db", broker_enabled=False)) as test_client:
+    monkeypatch.delenv("DEMO_FIXTURE_EPISODE", raising=False)
+    monkeypatch.setenv("DEMO_HOUSEHOLD", "h_042")
+    monkeypatch.setenv("DEMO_SIMULATOR_URL", "http://sim.test")
+    with TestClient(demo.create_app()) as test_client:
         yield test_client
-
-
-def test_demo_is_off_unless_enabled(tmp_path, monkeypatch):
-    monkeypatch.delenv("WORLD_DEMO", raising=False)
-    with TestClient(create_app(tmp_path / "world.db", broker_enabled=False)) as off:
-        assert off.get("/demo").status_code == 404
-        assert off.get("/sim/assets/demo/chain.js").status_code == 404
 
 
 def test_page_assets_and_config(client):
     page = client.get("/demo").raise_for_status().text
     for name in ("demo.js", "chain.js", "flow.js", "story-time.js", "scenes.json"):
-        assert client.get(f"/sim/assets/demo/{name}").status_code == 200, name
+        assert client.get(f"/demo/assets/{name}").status_code == 200, name
     for name in ("house.css", "tokens.css", "fonts.css", "viewer.css"):
         assert f'href="/sim/assets/house/{name}"' in page
-    script = client.get("/sim/assets/demo/demo.js").raise_for_status().text
-    assert 'from "../house/house.js"' in script
+    script = client.get("/demo/assets/demo.js").raise_for_status().text
+    assert 'from "/sim/assets/house/house.js"' in script
     assert 'className = "marker-trace"' in script
-    assert 'fetch("/sim/viewer?fragment=true"' in script
-    assert client.get("/sim/assets/demo/house.js").status_code == 404
-    assert client.get("/demo/assets/house.js", follow_redirects=False).headers[
-        "location"
-    ] == "/sim/assets/house/house.js"
-    assert client.get("/sim/assets/demo/..%2Fapi.py").status_code == 404
+    assert 'fetch("/demo/api/sim/viewer"' in script
+    assert client.get("/demo/assets/house.js").status_code == 404
+    assert client.get("/demo/assets/..%2Fdemo.py").status_code == 404
     assert client.get("/demo/api/config").json() == {
         "household_id": "h_042", "server": True, "hub": False, "fixture": False, "story_timing": None,
     }
+
+
+def test_shell_reads_house_assets_and_viewer_over_http(client, monkeypatch):
+    seen = []
+
+    async def fake_get(self, url, headers):
+        seen.append((url, headers))
+        return httpx.Response(200, text="Simulator response", headers={"content-type": "text/css"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    asset = client.get("/sim/assets/house/tokens.css", headers={"If-None-Match": '"tokens"'})
+    assert asset.headers["content-type"] == "text/css"
+    assert asset.text == "Simulator response"
+    assert client.get("/demo/api/sim/viewer?fragment=false").text == "Simulator response"
+    assert client.get("/demo/api/sim/snapshot").text == "Simulator response"
+    assert client.get("/demo/api/sim/operator").status_code == 404
+    assert client.get("/sim/assets/house/..%2F..%2F..%2Foperator").status_code == 404
+    assert seen == [
+        ("http://sim.test/sim/assets/house/tokens.css", {"if-none-match": '"tokens"'}),
+        ("http://sim.test/sim/viewer?fragment=true", None),
+        ("http://sim.test/sim/snapshot", None),
+    ]
 
 
 def test_fixture_config_exposes_recorded_capture_times(client, monkeypatch):
@@ -225,12 +239,23 @@ def test_hub_proxy_handles_unconfigured_empty_and_failed_state(client, monkeypat
     assert client.get("/demo/api/hub").status_code == 502
 
 
-def test_timeline_events_are_world_home_events(client):
+def test_timeline_events_are_world_home_events(client, monkeypatch):
+    monkeypatch.setenv("DEMO_OPERATOR_TOKEN", "test-operator-token")
+    seen = []
+
+    async def fake_post(self, url, *, auth, json):
+        seen.append((url, auth, json))
+        return httpx.Response(200, json={"applied": True})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
     assert client.post("/demo/api/home/guests_arrive").json() == {"applied": True}
     assert client.post("/demo/api/home/open_fridge").status_code == 404
     assert client.post(
         "/demo/api/home/delivery", headers={"Origin": "http://elsewhere.test"}
     ).status_code == 403
+    assert seen == [
+        ("http://sim.test/operator/home", ("operator", "test-operator-token"), {"action": "guests_arrive"}),
+    ]
 
 
 def test_scenes_follow_the_server_pipeline():

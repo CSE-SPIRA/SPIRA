@@ -242,8 +242,7 @@ class Peer {
       ));
       return reaction!(request);
     }
-    if (method == 'POST' &&
-        (path == '/v1/orders' || path == '/demo/api/order')) {
+    if (method == 'POST' && path == '/v1/orders') {
       return upload!(request);
     }
     fail('Unexpected App API request $method $path');
@@ -1514,20 +1513,27 @@ void main() {
     tester,
   ) async {
     final peer = Peer();
+    String? firstIdentity;
     peer.upload = (request) async {
-      expect(request.url.path, '/demo/api/order');
-      expect(request.headers['authorization'], isNull);
-      expect(latin1.decode(request.bodyBytes), contains('name="sample"'));
-      expect(latin1.decode(request.bodyBytes), contains('birthday'));
-      expect(
-        latin1.decode(request.bodyBytes),
-        contains('filename="example-order.png"'),
-      );
+      expect(request.url.path, '/v1/orders');
+      expect(request.headers['authorization'], 'Bearer test-app-token');
+      final body = latin1.decode(request.bodyBytes);
+      expect(body, contains('name="household_id"\r\n\r\nh_042\r\n'));
+      final source = RegExp(r'name="source_id"\r\n\r\n(preview_[\w-]{16})\r\n')
+          .firstMatch(body);
+      final time = RegExp(r'name="shared_at"\r\n\r\n([\dT:.\-]+Z)\r\n')
+          .firstMatch(body);
+      expect(source, isNotNull);
+      expect(time, isNotNull);
+      expect(body, contains('filename="example-order.png"'));
       final sample = File('assets/example-order.png').readAsBytesSync();
-      expect(
-        latin1.decode(request.bodyBytes).contains(latin1.decode(sample)),
-        isTrue,
-      );
+      expect(body, contains(latin1.decode(sample)));
+      final identity = '${source!.group(1)} ${time!.group(1)}';
+      if (firstIdentity == null) {
+        firstIdentity = identity;
+        throw http.ClientException('Order receipt lost');
+      }
+      expect(identity, firstIdentity);
       peer.episodes['ep_9031'] = fixture('episode.json')
         ..['card_ids'] = ['nc_331', 'nc_340'];
       peer.cards = [
@@ -1610,6 +1616,8 @@ void main() {
     expect(find.text('확인한 기기 9대'), findsOneWidget);
     expect(find.text('쉬는 중'), findsNWidgets(9));
     await tapTab(tester, '준비');
+    await tapText(tester, '예시 주문으로 공유');
+    expect(find.text('예시 주문을 보내지 못했어요. 다시 시도해 주세요.'), findsOneWidget);
     await tester.tap(share);
     await tester.pump();
     await paintOrderPreview(tester);

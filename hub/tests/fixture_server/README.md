@@ -14,7 +14,13 @@ The default address is `http://127.0.0.1:8000`. Scene controls require loopback
 and start with no published episode. Use one fixture process per household.
 `--episode ep_9031` or `--episode ep_9150` serves `h_042`. Use
 `--episode ep_9120` to serve `h_051`, and a separate `--port` if both processes
-are running. Omit `--scene-controls` for fixed-date replay.
+are running. Omit both `--scene-controls` and `--default-scene` for fixed-date replay.
+
+Add `--default-scene ep_9031` (or set `SPIRA_FIXTURE_DEFAULT_SCENE=ep_9031`)
+to start unpublished and publish a live birthday replay on every valid new
+`POST /v1/orders` upload. The default scene must belong to the fixture's
+household. Start with `--scene-controls` as well to allow a one-shot override
+through `next-order`. After that upload, the default applies again.
 
 1. With the App's Bearer placeholder, send `POST /_fixture/scene/next-order`
    with `{"episode_id":"ep_9031"}` or `{"episode_id":"ep_9150"}` for `h_042`,

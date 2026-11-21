@@ -1,7 +1,10 @@
 import json
 import re
+import shutil
 import sqlite3
+import subprocess
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 from conftest import CLEANER, LIGHT, OVEN, PLUG, Wire, fixture_json
@@ -12,6 +15,20 @@ from spira_simulator.api import create_app
 from spira_simulator.profile import DEFAULT_PROFILE, load_profile
 from spira_simulator.storage import UnsupportedSchema
 from spira_simulator.world import World
+
+
+def test_house_javascript():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is needed to test the 3D house")
+    subprocess.run([node, "--test", str(Path(__file__).with_name("house.test.mjs"))], check=True)
+
+
+def test_simulator_does_not_serve_the_demo_shell(tmp_path):
+    with TestClient(create_app(tmp_path / "world.db", broker_enabled=False)) as client:
+        assert client.get("/demo").status_code == 404
+        assert client.get("/demo/api/config").status_code == 404
+        assert client.get("/sim/assets/demo/chain.js").status_code == 404
 
 
 def test_sim_at01_configured_household_without_peers(wire, tmp_path):

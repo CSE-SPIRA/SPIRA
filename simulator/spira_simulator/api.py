@@ -16,7 +16,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
-from .demo import mount_demo
 from .design_vocabulary import ROOM_NAMES
 from .mqtt import Broker, DeviceProtocol
 from .profile import DEFAULT_PROFILE, Profile, load_profile
@@ -469,17 +468,10 @@ def create_app(
                 "/sim/snapshot",
                 "/sim/overlay",
                 "/health",
-                "/demo/api",
             )
         ):
             response.headers["Cache-Control"] = "no-store"
         return response
-
-    if os.getenv("WORLD_DEMO") == "1":
-        mount_demo(
-            application,
-            lambda request, action: apply(request, request.app.state.world.home_event, action),
-        )
 
     return application
 

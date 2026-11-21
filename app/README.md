@@ -50,6 +50,18 @@ Optional Dart defines:
   [Flutter Android sign-in setup](https://pub.dev/packages/google_sign_in_android)
   [Google Calendar events API](https://developers.google.com/workspace/calendar/api/v3/reference/events/list)
 
+### Run the live demo on Android
+
+Start `scripts/demo-up --no-shell` from the repository root. Use the port from
+the printed **Fixture** URL. For a USB-connected Android phone, forward that port
+with `adb reverse tcp:<fixture-port> tcp:<fixture-port>` and set
+`SPIRA_BASE_URL=http://127.0.0.1:<fixture-port>` in `app/.env`. On the Android
+emulator, use `http://10.0.2.2:<fixture-port>`. Also set `SPIRA_PEER=fixture`
+and `SPIRA_HOUSEHOLD_ID=h_042`, then run the Android command above. Enter the
+fixture App token `demo` if prompted. Sharing an order starts the birthday
+replay. For **우리 집**, forward the printed Hub port the same way, set
+`SPIRA_HUB_URL` to its Android-accessible origin, and enter the fixture home key.
+
 ### Run in the browser
 
 Run the App, Hub, Simulator, and fixture Server from one checkout. The launcher
@@ -66,17 +78,15 @@ It starts the local fixture stack and proxy and supplies the committed fixture
 placeholders, so you can skip both token dialogs.
 Press Ctrl-C to stop the processes the launcher started.
 
-The launcher reuses a running stack on the demo port if it has its URL output.
-For a manually started stack, save its printed output and pass `--stack-log`
-with that file. Use `--demo-port`, `--proxy-port`, and `--web-port` to change
+For a running stack, use the **App preview** command printed by `demo-up`.
+It passes the stack's URL file to `--stack-log`. Use `--demo-port`, `--proxy-port`, and `--web-port` to change
 the defaults of 8730, 8731, and 8732.
 
 Click **예시 주문으로 공유** in the **미리보기** strip above the tab bar to see
 the screenshot scan, extracted items, and preparation card. Tap a
 preparation line to see its **판단 근거** or open the
-**우리 집** tab to browse the room grids. This preview uses the
-demo shell's sample order and skips Android sharing and Google Calendar. It
-displays the same bundled PNG it uploads to the demo route. The web build
+**우리 집** tab to browse the room grids. The preview uploads the bundled PNG
+to `POST /v1/orders` and skips Android sharing and Google Calendar. The web build
 serves it at `/assets/assets/example-order.png`.
 
 #### Manual fallback
@@ -84,18 +94,17 @@ serves it at `/assets/assets/example-order.png`.
 Start the fixture stack from the repository root.
 
 ```sh
-simulator/scripts/demo-up --episode ep_9031
+scripts/demo-up --no-shell
 ```
 
 From `app/` in the same checkout, start the local proxy so Chrome can reach
-the three services. Replace the three example URLs with the **Fixture**, **Hub**,
-and **Demo** lines printed by `demo-up`. The `/health` and `/demo` suffixes are OK.
+the fixture and Hub. Replace the example URLs with the **Fixture** and **Hub**
+lines printed by `demo-up`. The `/health` suffix is OK.
 
 ```sh
 python3 scripts/browser_demo_proxy.py \
   --fixture http://127.0.0.1:49151/health \
-  --hub http://127.0.0.1:49152/ \
-  --demo http://127.0.0.1:8730/demo
+  --hub http://127.0.0.1:49152/
 ```
 
 From `app/` in another terminal, run Flutter and keep it open for hot reload.

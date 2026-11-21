@@ -179,15 +179,10 @@ class AppApi {
   );
 
   Future<wire.OrderAccepted> share(String household, SharedOrder order) async {
-    final request = http.MultipartRequest('POST', _uri('/v1/orders'));
-    request.fields.addAll({
-      'household_id': household,
-      'source_id': order.sourceId,
-      'shared_at': order.sharedAt,
-    });
+    final images = <http.MultipartFile>[];
     for (final image in order.images) {
       final png = image.path.endsWith('.png');
-      request.files.add(
+      images.add(
         http.MultipartFile(
           'images',
           image.openRead(),
@@ -197,20 +192,36 @@ class AppApi {
         ),
       );
     }
-    return wire.orderAcceptedFromJson(await _send(request, {200, 202}));
+    return _share(household, order.sourceId, order.sharedAt, images);
   }
 
-  Future<wire.OrderAccepted> shareExample(Uint8List image) async {
-    final request = http.MultipartRequest('POST', _uri('/demo/api/order'))
-      ..fields['sample'] = 'birthday'
-      ..files.add(
-        http.MultipartFile.fromBytes(
-          'images',
-          image,
-          filename: 'example-order.png',
-          contentType: MediaType('image', 'png'),
-        ),
-      );
+  Future<wire.OrderAccepted> shareExample(
+    String household,
+    String sourceId,
+    String sharedAt,
+    Uint8List image,
+  ) => _share(household, sourceId, sharedAt, [
+    http.MultipartFile.fromBytes(
+      'images',
+      image,
+      filename: 'example-order.png',
+      contentType: MediaType('image', 'png'),
+    ),
+  ]);
+
+  Future<wire.OrderAccepted> _share(
+    String household,
+    String sourceId,
+    String sharedAt,
+    List<http.MultipartFile> images,
+  ) async {
+    final request = http.MultipartRequest('POST', _uri('/v1/orders'))
+      ..fields.addAll({
+        'household_id': household,
+        'source_id': sourceId,
+        'shared_at': sharedAt,
+      })
+      ..files.addAll(images);
     return wire.orderAcceptedFromJson(await _send(request, {200, 202}));
   }
 }

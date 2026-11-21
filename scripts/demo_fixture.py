@@ -7,6 +7,7 @@ from pathlib import Path
 
 import uvicorn
 from hub.tests.fixture_server.api import create_app
+from hub.tests.fixture_server.scene_support import NextOrder
 
 # The fixture owns this in-memory state. Its route handlers share the cells
 # below, including the active replay object that changes after an order share.
@@ -18,8 +19,11 @@ STATE = {
 }
 
 
-def create_demo_fixture(episode, path):
-    app = create_app(episode, scene_controls=True, demo_mode=True)
+def create_demo_fixture(episode, path, starts_in, scene_controls):
+    app = create_app(
+        episode, demo_mode=True, scene_controls=scene_controls,
+        default_scene=NextOrder(episode_id=episode, starts_in_seconds=starts_in),
+    )
     endpoints = {route.name: route.endpoint for route in app.routes}
     cells = {}
     for name, keys in STATE.items():
@@ -57,8 +61,11 @@ def main():
     parser.add_argument("--episode", required=True)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--state", type=Path, required=True)
+    parser.add_argument("--starts-in", type=int, required=True)
+    parser.add_argument("--scene-controls", action="store_true")
     args = parser.parse_args()
-    uvicorn.run(create_demo_fixture(args.episode, args.state), host="127.0.0.1",
+    app = create_demo_fixture(args.episode, args.state, args.starts_in, args.scene_controls)
+    uvicorn.run(app, host="127.0.0.1",
                 port=args.port, access_log=False)
 
 

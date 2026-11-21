@@ -1,6 +1,8 @@
+Temporary tool, not a product part.
+
 # Demo shell
 
-Two pages served by the Simulator at `/demo`.
+The shell serves two pages at its own `/demo` URL.
 
 | Page | Left | Middle / right | Bottom |
 | --- | --- | --- | --- |
@@ -11,21 +13,43 @@ Page 1 reads the team contract: `GET /v1/episodes/{id}` (S1 items),
 `GET /v1/episodes/{id}/rationale` (S2 evidence, S3 intents, S4 tasks) and the
 household's cards (S5). The fixture Server answers today. The real Server uses the
 same contract, so only `DEMO_SERVER_URL` changes. The reasoning page shows device
-parameters from the plan received by the Hub. Page 2 paints devices only from
-`/sim/snapshot`; the timeline's 택배 · 손님 · 끝 buttons are the same world events
-as the operator's.
+parameters from the plan received by the Hub. Page 2 paints device state from
+the Simulator's `/sim/snapshot` and reads labels from its viewer fragment. The
+timeline's 택배 · 손님 · 끝 buttons send the same world events as the operator
+through `POST /operator/home`.
 
 ## Run
 
 ```bash
-simulator/scripts/demo-up          # needs uv and mosquitto
+scripts/demo-up          # from the repository root, needs uv and mosquitto
 ```
 
-Open the printed `http://127.0.0.1:8730/demo`. Choose 생일 주문 or 평소 장보기,
+Open the printed **Demo** URL. Choose 생일 주문 or 평소 장보기,
 then share the sample or upload a screenshot. Once an order is open, selecting
 the other sample shares it and updates the current stage. Use 다음 or the right
 arrow to progress. 집으로 → checks for the Hub's receipt and opens page 2.
 Continue with 다음 to send the home events in order.
+
+The shell selects sample scenes through `POST /_fixture/scene/next-order` and
+shares them through `POST /v1/orders`. An uploaded screenshot uses the fixture's
+default birthday scene. The [Android live path](../README.md#run-the-demo) shares
+directly to the fixture Server.
+
+The launcher starts with an empty fixture and fresh Hub and World databases.
+Use `--keep` to resume the last run for this checkout, episode, and Simulator
+port. `--port` sets the Simulator port (default 8730), `--shell-port` sets the
+shell's port, and `--peer-ports FIXTURE MQTT HUB` selects the other ports.
+Use `--no-shell` to start the live stack by itself. Press Ctrl-C to stop the stack.
+
+To open the shell beside already running services, set the origins and operator
+credential listed below and start its server from the repository root.
+
+```bash
+uv run --no-project --python 3.12 \
+  --with-requirements demo-shell/requirements.txt \
+  --with-editable contracts/generated/python \
+  uvicorn demo:app --app-dir demo-shell --host 127.0.0.1 --port 8733
+```
 
 Deep links for rehearsal and screenshots: `/demo?episode=ep_9031&step=3`,
 `/demo?episode=ep_9031&page=house` (after an order was shared once).
@@ -47,16 +71,16 @@ Add `owners=1` to the query string to show the owner tags. They are hidden by de
 | To change | Edit | Do not need to touch |
 | --- | --- | --- |
 | Shared colours, spacing, type and motion | [`design/tokens.json`](../design/tokens.json), then run `python3 design/build.py` | Generated stylesheets |
-| The active stage and flow strip | `ui/demo/flow.js` (`createFlow(root, nodes)` returns `setStage(n)` and `setCounts(counts)`, with one optional count label per node, shown when reached) | |
-| Stage titles, leads, order; timeline steps and cameras | `ui/demo/scenes.json` | code |
-| Layout and component styles | `ui/demo/index.html`, `ui/demo/demo.css` | |
-| World inventory, room placement and initial values for `h_042` | `spira_simulator/profiles/ep_9031.json` | Recorded plans |
-| Hub device registration and command bindings | `scripts/demo-devices.json`, added to `hub/installation.example.json` by `scripts/demo_up.py` | Shared contract fixtures |
-| 3D models, device faces and lamp anchor | `ui/demo/house.js` (`createHouse` reads values through `update(snapshot)` and label focus through `setChain(chain, focusDevices)`) | |
-| Web evidence chain shape, joins and fixed map devices | `ui/demo/chain.js` | Panel renderers |
-| Data fetching, stage output, phone and handoff | `ui/demo/demo.js` | |
-| Story clock and time formatting | `ui/demo/story-time.js` | |
-| Allowed assets, upstream routes and fixture sample upload selection | `spira_simulator/demo.py` | |
+| The active stage and flow strip | `ui/flow.js` (`createFlow(root, nodes)` returns `setStage(n)` and `setCounts(counts)`, with one optional count label per node, shown when reached) | |
+| Stage titles, leads, order; timeline steps and cameras | `ui/scenes.json` | code |
+| Layout and component styles | `ui/index.html`, `ui/demo.css` | |
+| World inventory, room placement and initial values for `h_042` | [`simulator/spira_simulator/profiles/ep_9031.json`](../simulator/spira_simulator/profiles/ep_9031.json) | Recorded plans |
+| Hub device registration and command bindings | [`scripts/demo-devices.json`](../scripts/demo-devices.json), added to `hub/installation.example.json` by `scripts/demo_up.py` | Shared contract fixtures |
+| 3D models, device faces and lamp anchor | [`simulator/spira_simulator/ui/house/house.js`](../simulator/spira_simulator/ui/house/house.js) | |
+| Web evidence chain shape, joins and fixed map devices | `ui/chain.js` | Panel renderers |
+| Data fetching, stage output, phone and handoff | `ui/demo.js` | |
+| Story clock and time formatting | `ui/story-time.js` | |
+| Allowed assets, upstream routes and fixture sample upload selection | `demo.py` | |
 
 `buildChain({ episode, rationale, card, hubPlan, hubLedger, snapshot, storyTime })`
 is the one place that defines the evidence-chain shape on the web. It takes one
@@ -82,8 +106,16 @@ story clock. Fixture shares come from the recorded episode contracts.
   notices as well as preparation. Card, timeline and house views use the same
   chain.
 
-Run `node --test tests/demo_chain.test.mjs` from `simulator/` for the birthday
-and grocery fixture checks. Pytest runs them when Node.js is available.
+Run the shell tests from the repository root. The evidence-chain tests use
+Node.js 22.15 or newer and also run directly via
+`node --test demo-shell/tests/demo_chain.test.mjs`.
+
+```bash
+PYTHONPATH=demo-shell uv run --no-project --python 3.12 \
+  --with-requirements demo-shell/requirements.txt --with-editable contracts/generated/python \
+  --with pytest --with httpx2 \
+  python -m pytest -q demo-shell/tests
+```
 
 Rules the demo keeps:
 
@@ -110,17 +142,19 @@ Rules the demo keeps:
 - Plan receipts use the order's first capture plus the normal Server quiet
   window, rounded up to the next display minute if needed. The delivery step,
   package release and fridge notice rows use `파티 전`.
-- The demo and `/sim/viewer` use the same house, design tokens, vendored
-  Three.js 0.160.0, and IBM Plex Sans KR fonts. The shell supplies story time
-  and the chain annotations.
+- The shell proxies the Simulator's public `/sim/assets/house/` route for the
+  house module, design tokens, vendored Three.js 0.160.0, and IBM Plex Sans KR
+  fonts. The shell supplies story time and the chain annotations.
 
 ## Settings (set by `demo-up`)
 
 | Variable | Meaning |
 | --- | --- |
-| `WORLD_DEMO=1` | Mount `/demo` |
+| `DEMO_SIMULATOR_URL` | Simulator origin for house assets, snapshot and viewer fragment |
+| `DEMO_OPERATOR_TOKEN` | Simulator operator credential for the timeline's home events |
 | `DEMO_SERVER_URL`, `DEMO_APP_TOKEN` | Server for the contract reads and the order share |
-| `DEMO_FIXTURE_EPISODE` | Fixture only: the default recorded judgment for a screenshot share |
-| `DEMO_STARTS_IN` | Fixture only: seconds from share to the event start (default 90) |
+| `DEMO_HOUSEHOLD` | Household for contract reads and shares (default `h_042`) |
+| `DEMO_FIXTURE_EPISODE` | Set to the default episode when the fixture Server has `--scene-controls` enabled |
+| `DEMO_STARTS_IN` | Fixture only: seconds from sample share to the event start (default 90) |
 | `DEMO_HUB_URL` | Hub for received plan actions and the ledger (`/state`) |
 | `DEMO_NUMBERS_PATH` | Path to the Server's `config/numbers.yaml` when using `DEMO_MODE=1` |

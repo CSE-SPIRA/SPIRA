@@ -15,7 +15,7 @@ def loopback_port(value):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for peer in ("fixture", "hub", "demo"):
+    for peer in ("fixture", "hub"):
         parser.add_argument(f"--{peer}", type=loopback_port, required=True)
     parser.add_argument("--port", type=int, default=8731)
     parser.add_argument("--web-port", type=int, default=8732)
@@ -46,8 +46,8 @@ def main():
             path = self.path.split("?", 1)[0]
             if self.command == "GET" and path == "/home/onboarding/devices":
                 port, auth = args.hub, "X-API-Key"
-            elif self.command == "POST" and path == "/demo/api/order":
-                port, auth = args.demo, None
+            elif self.command == "POST" and path == "/v1/orders":
+                port, auth = args.fixture, "Authorization"
             elif re.fullmatch(r"/v1/(households|episodes|cards)(/[A-Za-z0-9_-]+)*", path):
                 port, auth = args.fixture, "Authorization"
             elif self.command == "GET" and path == "/health":

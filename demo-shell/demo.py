@@ -14,18 +14,14 @@ from typing import Literal
 import httpx
 import yaml
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from spira_contracts.episode import Episode
 from spira_contracts.plan import Action
 
-DEMO_UI = Path(__file__).with_name("ui") / "demo"
-FIXTURES = Path(__file__).resolve().parents[2] / "contracts" / "fixtures"
-ASSET = re.compile(r"^[a-z0-9_.\-]+\.(?:html|css|js|json|svg|png|jpg|woff2)$")
-MEDIA = {
-    ".html": "text/html", ".css": "text/css", ".js": "text/javascript",
-    ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png",
-    ".jpg": "image/jpeg", ".woff2": "font/woff2",
-}
+DEMO_UI = Path(__file__).with_name("ui")
+FIXTURES = Path(__file__).resolve().parents[1] / "contracts" / "fixtures"
+HOUSE_ASSET = re.compile(r"(?:fonts/)?[a-zA-Z0-9_.-]+\.(?:css|js|svg|jpg|png|woff2|txt)")
 # Read-only contract routes the reasoning page may use.
 SERVER_READS = (
     re.compile(r"^v1/episodes/ep_[A-Za-z0-9_]+$"),
@@ -33,6 +29,8 @@ SERVER_READS = (
     re.compile(r"^v1/households/h_[A-Za-z0-9_]+/cards$"),
 )
 SAMPLE_EPISODES = {"birthday": "ep_9031", "groceries": "ep_9150"}
+HOME_ACTIONS = {"delivery", "guests_arrive", "event_end"}
+SIM_READS = {"snapshot": "/sim/snapshot", "viewer": "/sim/viewer?fragment=true"}
 COMMAND_PROPERTIES = {"color": "color", "play_mood": "play_mood", "set_cook_standby": "preset"}
 STORY_TIMING_KEYS = ("before_start_default_min", "guest_window_before_min", "end_fallback_min")
 PACKAGE_EVENT = "package.brought_in"
@@ -43,7 +41,8 @@ def demo_config():
         "server": (os.getenv("DEMO_SERVER_URL") or "").rstrip("/"),
         "token": os.getenv("DEMO_APP_TOKEN") or "",
         "hub": (os.getenv("DEMO_HUB_URL") or "").rstrip("/"),
-        "fixture_episode": os.getenv("DEMO_FIXTURE_EPISODE") or "",
+        "fixture": bool(os.getenv("DEMO_FIXTURE_EPISODE")),
+        "household": os.getenv("DEMO_HOUSEHOLD", "h_042"),
     }
 
 
@@ -174,37 +173,55 @@ def end_timing(context, end, observed_at):
                 event=end.get("event_type"))
 
 
-def mount_demo(application: FastAPI, apply_home_event):
+async def simulator_read(path: str, headers=None):
+    simulator = (os.getenv("DEMO_SIMULATOR_URL") or "").rstrip("/")
+    if not simulator:
+        raise HTTPException(503, "DEMO_SIMULATOR_URL is not set")
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            upstream = await client.get(f"{simulator}{path}", headers=headers)
+    except httpx.HTTPError as error:
+        raise HTTPException(502, "Simulator is unavailable") from error
+    return Response(upstream.content, status_code=upstream.status_code, headers={
+        name: upstream.headers[name]
+        for name in ("content-type", "cache-control", "etag", "last-modified")
+        if name in upstream.headers
+    })
+
+
+def create_app():
+    application = FastAPI(title="SPIRA demo shell", docs_url=None, redoc_url=None, openapi_url=None)
     fixture_share = asyncio.Lock()
+    application.mount("/demo/assets", StaticFiles(directory=DEMO_UI), name="demo-assets")
 
     @application.get("/demo")
     def demo_page():
         return FileResponse(DEMO_UI / "index.html", media_type="text/html")
 
-    @application.get("/sim/assets/demo/{name}")
-    def demo_asset(name: str):
-        path = DEMO_UI / name
-        if not ASSET.match(name) or not path.is_file():
-            raise HTTPException(404, "No such demo asset")
-        return FileResponse(path, media_type=MEDIA[path.suffix])
+    @application.get("/sim/assets/house/{asset:path}")
+    async def house_asset(asset: str, request: Request):
+        if not HOUSE_ASSET.fullmatch(asset):
+            raise HTTPException(404, "No such house asset")
+        headers = {name: request.headers[name] for name in ("if-none-match", "if-modified-since")
+                   if name in request.headers}
+        return await simulator_read(f"/sim/assets/house/{asset}", headers)
 
-    @application.get("/demo/assets/{name}", include_in_schema=False)
-    def legacy_demo_asset(name: str):
-        if not ASSET.fullmatch(name):
-            raise HTTPException(404, "No such demo asset")
-        group = "house" if name in {"house.js", "three.module.min.js", "tokens.css", "castle.jpg"} else "demo"
-        return RedirectResponse(f"/sim/assets/{group}/{name}")
+    @application.get("/demo/api/sim/{view}")
+    async def sim_read(view: str):
+        if view not in SIM_READS:
+            raise HTTPException(404, "No such viewer route")
+        return await simulator_read(SIM_READS[view])
 
     @application.get("/demo/api/config")
-    def config(request: Request):
+    def config():
         cfg = demo_config()
         return {
-            "household_id": request.app.state.world.profile.household_id,
+            "household_id": cfg["household"],
             "server": bool(cfg["server"]),
             "hub": bool(cfg["hub"]),
-            "fixture": bool(cfg["fixture_episode"]),
+            "fixture": cfg["fixture"],
             "story_timing": story_timing(),
-            **({"fixture_shares": fixture_shares()} if cfg["fixture_episode"] else {}),
+            **({"fixture_shares": fixture_shares()} if cfg["fixture"] else {}),
         }
 
     @application.get("/demo/api/server/{path:path}")
@@ -235,7 +252,6 @@ def mount_demo(application: FastAPI, apply_home_event):
             raise HTTPException(503, "DEMO_SERVER_URL is not set")
         if not 1 <= len(images) <= 3:
             raise HTTPException(400, "One to three screenshots")
-        household = request.app.state.world.profile.household_id
         auth = {"Authorization": f"Bearer {cfg['token']}"}
         files = [
             ("images", (image.filename or "order.png", await image.read(),
@@ -246,19 +262,20 @@ def mount_demo(application: FastAPI, apply_home_event):
             async def upload():
                 return await client.post(
                     f"{cfg['server']}/v1/orders", headers=auth,
-                    data={"household_id": household}, files=files,
+                    data={"household_id": cfg["household"]}, files=files,
                 )
 
-            if cfg["fixture_episode"]:
-                # The fixture holds a single selection for the next upload.
+            if cfg["fixture"]:
+                # Keep this shell's shares in order around the fixture's one-shot override.
                 async with fixture_share:
-                    selection = await client.post(
-                        f"{cfg['server']}/_fixture/scene/next-order", headers=auth,
-                        json={"episode_id": SAMPLE_EPISODES[sample] if sample else cfg["fixture_episode"],
-                              "starts_in_seconds": int(os.getenv("DEMO_STARTS_IN") or "90")},
-                    )
-                    if sample and not selection.is_success:
-                        raise HTTPException(502, "Could not select the fixture order")
+                    if sample:
+                        selection = await client.post(
+                            f"{cfg['server']}/_fixture/scene/next-order", headers=auth,
+                            json={"episode_id": SAMPLE_EPISODES[sample],
+                                  "starts_in_seconds": int(os.getenv("DEMO_STARTS_IN") or "90")},
+                        )
+                        if not selection.is_success:
+                            raise HTTPException(502, "Could not select the fixture order")
                     upstream = await upload()
             else:
                 upstream = await upload()
@@ -284,9 +301,32 @@ def mount_demo(application: FastAPI, apply_home_event):
         }
 
     @application.post("/demo/api/home/{action}")
-    def home_event(action: str, request: Request):
+    async def home_event(action: str, request: Request):
         """The timeline's world events (package, guests, end): the same as the operator's."""
         same_origin(request)
-        if action not in request.app.state.world.profile.home_signals:
+        if action not in HOME_ACTIONS:
             raise HTTPException(404, "No such home event")
-        return apply_home_event(request, action)
+        simulator = (os.getenv("DEMO_SIMULATOR_URL") or "").rstrip("/")
+        token = os.getenv("DEMO_OPERATOR_TOKEN")
+        if not simulator or not token:
+            raise HTTPException(503, "Simulator operator is not configured")
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                upstream = await client.post(
+                    f"{simulator}/operator/home", auth=("operator", token), json={"action": action},
+                )
+            return JSONResponse(upstream.json(), status_code=upstream.status_code)
+        except (httpx.HTTPError, ValueError) as error:
+            raise HTTPException(502, "Simulator operator is unavailable") from error
+
+    @application.middleware("http")
+    async def prevent_api_caching(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/demo/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+    return application
+
+
+app = create_app()

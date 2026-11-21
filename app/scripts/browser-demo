@@ -54,10 +54,10 @@ def wait_for(probe, description, timeout):
 
 def stack_urls(log, demo_port):
     urls = dict(re.findall(
-        r"^(Fixture|Hub|Demo):[ \t]+(http://127\.0\.0\.1:[0-9]{1,5}/\S*)",
+        r"^(Fixture|Hub|Viewer):[ \t]+(http://127\.0\.0\.1:[0-9]{1,5}/\S*)",
         log.read_text(encoding="utf-8", errors="replace"), re.MULTILINE,
     ))
-    if len(urls) == 3 and urls["Demo"] == f"{origin(demo_port)}/demo":
+    if len(urls) == 3 and urls["Viewer"] == f"{origin(demo_port)}/sim/viewer":
         return urls
     return None
 
@@ -69,16 +69,12 @@ def get_json(url, **headers):
 
 def check_stack(urls, household, key):
     try:
-        demo = get_json(f"{urls['Demo']}/api/config")
-        if not (demo["fixture"] and demo["server"] and demo["hub"]
-                and demo["household_id"] == household):
-            raise RuntimeError("The Demo URL must serve the local fixture stack.")
         get_json(
             f"{urls['Fixture'].removesuffix('/health')}/v1/households/{household}/cards",
             Authorization=f"Bearer {APP_TOKEN}",
         )
     except (OSError, ValueError, KeyError) as error:
-        raise RuntimeError(f"Could not verify the Demo and Fixture URLs: {error}") from error
+        raise RuntimeError(f"Could not verify the fixture household: {error}") from error
 
     route = f"{urls['Hub'].rstrip('/')}/home/onboarding/devices"
     try:
@@ -99,7 +95,7 @@ def running_urls(args, temp_root, prefix):
         urls = stack_urls(args.stack_log, args.demo_port)
         if urls:
             return urls
-        raise RuntimeError(f"{args.stack_log} must contain the Fixture, Hub and Demo lines for port {args.demo_port}.")
+        raise RuntimeError(f"{args.stack_log} must contain the Fixture, Hub and Viewer lines for port {args.demo_port}.")
     for log in temp_root.glob(f"{prefix}*/demo-up.log"):
         try:
             urls = stack_urls(log, args.demo_port)
@@ -144,11 +140,11 @@ def must_be_running(process, name):
 
 
 def start_demo(stack, args, log):
-    launcher = args.checkout / "simulator/scripts/demo-up"
+    launcher = args.checkout / "scripts/demo-up"
     if not launcher.is_file():
         raise RuntimeError(f"demo-up is missing at {launcher}. Check the selected repository checkout.")
     with log.open("w", encoding="utf-8") as output:
-        demo = start(stack, [str(launcher), "--episode", EPISODE, "--port", str(args.demo_port)],
+        demo = start(stack, [str(launcher), "--no-shell", "--episode", EPISODE, "--port", str(args.demo_port)],
                      cwd=args.checkout, stdout=output, stderr=subprocess.STDOUT)
 
     def ready():
@@ -180,13 +176,13 @@ def run(args):
             print(f"Reusing demo stack on port {args.demo_port}.", flush=True)
         else:
             demo, urls = start_demo(stack, args, temporary / "demo-up.log")
-        for name in ("Fixture", "Hub", "Demo"):
+        for name in ("Fixture", "Hub", "Viewer"):
             print(f"{name}: {urls[name]}", flush=True)
         check_stack(urls, household, key)
 
         proxy = start(stack, [
             sys.executable, str(APP / "scripts/browser_demo_proxy.py"),
-            *[f"--{name.lower()}={url}" for name, url in urls.items()],
+            f"--fixture={urls['Fixture']}", f"--hub={urls['Hub']}",
             f"--port={args.proxy_port}", f"--web-port={args.web_port}",
         ])
         proxy_url = origin(args.proxy_port)
@@ -246,7 +242,7 @@ def main():
                         help="checkout for the demo stack (defaults to this script's repository root)")
     parser.add_argument("--build-serve", action="store_true", help="build and serve web without opening Chrome")
     parser.add_argument("--stack-log", type=Path, help="demo-up output for reusing a manually started stack")
-    parser.add_argument("--demo-port", type=port, default=8730)
+    parser.add_argument("--demo-port", type=port, default=8730, help="Simulator port for the demo stack")
     parser.add_argument("--proxy-port", type=port, default=8731)
     parser.add_argument("--web-port", type=port, default=8732)
     args = parser.parse_args()

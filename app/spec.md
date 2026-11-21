@@ -64,8 +64,8 @@ PC-5)
 containing one to three ordered screenshots. The App MUST NOT provide an image
 picker, form, or follow-up question. It MUST preserve one share identity so
 redelivery or retry does not create a second episode. The browser fixture
-preview uses the demo shell's sample order and disables the Android share and
-calendar integrations. (PC-1, PC-3, PC-4)
+preview uploads the bundled sample through `POST /v1/orders` with a share
+identity and disables the Android share and calendar integrations. (PC-1, PC-3, PC-4)
 
 **A3-R2.** An HTTP 202 MUST be shown only as intake acceptance, never as a
 finished judgment or preparation. The App MUST use the episode contract to show
@@ -180,7 +180,7 @@ exits.
 | APP-AT-11 | Render the `ep_9031` and `ep_9150` evidence chains from contract fields. A line's WHY focuses its task and supporting situation. A second open uses the stored rationale. | PC-1, PC-2 | A6-R1 |
 | APP-AT-12 | Render the plain-groceries episode with `card_ids: []` and item guidance through unreleased, released, and closed states. No preparation card is fabricated, and the guidance lifecycle remains visible. | PC-1, PC-2 | A3-R2, A7-R1 |
 | APP-AT-13 | From settings, open memory, view Server rows, delete one case with a failed response and then a successful response/readback. No edit controls exist; failure remains visible; deletion is claimed only after Server confirmation. | PC-6 | A9-R1 |
-| APP-AT-14 | Run the same scene against the local fixture peer and against a qualified Server profile. Fixture qualification is visible and never presented as real-Server, physical-device, or native-lifecycle evidence. Verify 우리 집 reads the Hub inventory and that browser sample sharing uses the demo shell route. | PC-4 | P-R2, P-R3 |
+| APP-AT-14 | Run the same scene against the local fixture peer and against a qualified Server profile. Fixture qualification is visible and never presented as real-Server, physical-device, or native-lifecycle evidence. Verify 우리 집 reads the Hub inventory and that browser sample sharing uses `POST /v1/orders`. | PC-4 | P-R2, P-R3 |
 | APP-AT-15 | With Android large text and a screen reader enabled, locate and operate card Stop, pre-start line off/on, and settings pause. Each scope and pending/confirmed result is identifiable without color alone. | PC-5 | A5-R1, A5-R2, A5-R3 |
 
 ## 4. Open items

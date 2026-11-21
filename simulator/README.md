@@ -21,7 +21,7 @@ Set `WORLD_OPERATOR_TOKEN` in your local environment to enable the operator. Its
 | Simulator, `h_042` | `WORLD_DB=/private/tmp/spira-h_042.db WORLD_OPERATOR=1 WORLD_PLANS=../contracts/fixtures/ep_9031/plan.v3.json .venv/bin/uvicorn spira_simulator.api:app --host 127.0.0.1 --port 8730` |
 | Simulator, `h_051` | `WORLD_PROFILE=spira_simulator/profiles/ep_9120.json WORLD_DB=/private/tmp/spira-h_051.db MQTT_PREFIX=spira/h_051 WORLD_OPERATOR=1 WORLD_PLANS=../contracts/fixtures/ep_9120/plan.v2.json .venv/bin/uvicorn spira_simulator.api:app --host 127.0.0.1 --port 8731` |
 
-Open `/sim/viewer` on the household's port for the Korean test home. The 3D household shows the profile's rooms, observed device values, entrance events, and the Seoul wall clock. The viewer and `/demo` share the house, design tokens, and locally bundled IBM Plex Sans KR fonts. Set `WORLD_PEER_VIEWERS` to show links to the other homes. In the local environment for `h_042`, set it to `부모님 댁=http://127.0.0.1:8731/sim/viewer`. On `h_051`, point a `지아네` link to port 8730. Separate multiple label and URL pairs with commas. Use addresses reachable by the presenting device.
+Open `/sim/viewer` on the household's port for the Korean test home. The 3D household shows the profile's rooms, observed device values, entrance events, and the Seoul wall clock. Shared house modules, design tokens, and IBM Plex Sans KR fonts are available at `/sim/assets/house/`. Set `WORLD_PEER_VIEWERS` to show links to the other homes. In the local environment for `h_042`, set it to `부모님 댁=http://127.0.0.1:8731/sim/viewer`. On `h_051`, point a `지아네` link to port 8730. Separate multiple label and URL pairs with commas. Use addresses reachable by the presenting device.
 
 Open `/operator` for **Bring package inside**, **Guests arrive**, **Event ends**, and the named panel buttons under **Person actions**. The `demo_people` profile field supplies the names and roles. The generic controls below still take an optional display name and a **Device panel** or **Other app** path. Class A panel changes report a local operation under PQ-01. The truth journal records the name and path, and the operator snapshot keeps the latest operator action per device. These fields are available under `/operator/truth` and `/operator/snapshot`.
 
@@ -31,22 +31,10 @@ Select the inventory at startup with `WORLD_PROFILE`. It defaults to [`h_042`](s
 
 ### Demo
 
-Run the fixture Server, MQTT broker, Hub, and Simulator together from the
-repository root of one checkout.
-
-```bash
-simulator/scripts/demo-up --episode ep_9031
-```
-
-The launcher uses its own repository root and prints the `/demo`, Hub dashboard,
-and fixture URLs. Each run starts with an empty fixture episode list and new
-Hub and World databases. Pass `--keep` to resume the last stopped run of the
-same checkout, episode and port. Use `--port` if the default port 8730 is occupied.
-Use `--peer-ports FIXTURE MQTT HUB` when the stack must use a reserved port range. Page 1
-projects the Server's reasoning from the contract. Page 2 shows the house in
-3D with the Hub's ledger. Press Ctrl-C to stop the stack. See [DEMO.md](DEMO.md)
-for the demo flow and the [App README](../app/README.md#run-in-the-browser) for
-the Flutter browser preview from this checkout.
+Run `scripts/demo-up --no-shell` from the repository root to start the fixture
+Server, MQTT broker, Hub, and Simulator together. The launcher prints the viewer,
+operator, Hub dashboard, and fixture URLs. Follow the [live demo steps](../README.md#run-the-demo)
+to start the replay. Press Ctrl-C to stop the stack.
 
 ## Tests
 
@@ -68,8 +56,8 @@ Tests use in-process protocol fakes, HTTP stubs for both evidence sources, and a
 
 ## Where to change what
 
-See the [demo file map](DEMO.md#where-to-change-what) for the house, demo shell,
-and shared design. The household inventories live in
+The viewer uses the shared 3D module in [`spira_simulator/ui/house/`](spira_simulator/ui/house).
+The household inventories live in
 [`spira_simulator/profiles/`](spira_simulator/profiles).
 
 ## Contract boundaries

@@ -1,7 +1,7 @@
 // Reasoning uses the Server's app contract. House surfaces use World observations.
 import { createFlow } from "./flow.js";
-import { createHouse, hsvColor, replaceHouseMarkers, TV_SCENES } from "../house/house.js";
-import { DEVICE_NAMES, ROOM_NAMES, STATE_WORDS } from "../house/vocabulary.js";
+import { createHouse, hsvColor, replaceHouseMarkers, TV_SCENES } from "/sim/assets/house/house.js";
+import { DEVICE_NAMES, ROOM_NAMES, STATE_WORDS } from "/sim/assets/house/vocabulary.js";
 import { buildChain, houseDevicePresentation } from "./chain.js";
 
 document.querySelector('meta[name="theme-color"]').content =
@@ -678,12 +678,12 @@ function acceptHub(hub) {
 }
 
 async function refreshSnapshot() {
-  state.snapshot = await api("/sim/snapshot", { signal: AbortSignal.timeout(2500) });
+  state.snapshot = await api("/demo/api/sim/snapshot", { signal: AbortSignal.timeout(2500) });
   refreshChain();
 }
 
 async function refreshHouseMarkers() {
-  const response = await fetch("/sim/viewer?fragment=true", { signal: AbortSignal.timeout(2500) });
+  const response = await fetch("/demo/api/sim/viewer", { signal: AbortSignal.timeout(2500) });
   if (!response.ok) throw new Error(response.status);
   const fragment = new DOMParser().parseFromString(await response.text(), "text/html");
   const markers = fragment.getElementById("viewer-markers");
