@@ -43,6 +43,9 @@ previously unseen device type MUST remain usable as data when its declared
 capabilities satisfy the contract; virtual success MUST NOT be presented as
 physical-device qualification. (PC-3, PC-4)
 
+**H2-R3.** `GET /home/onboarding/devices` MUST require the household Hub key
+in `X-API-Key` and return the full installed device list as a C-2 `Devices` body.
+
 ### H3. Plans, admission, and versions
 
 **H3-R1.** The Hub MUST pull and validate current C-1 plans without using current
@@ -177,20 +180,18 @@ uncertainty, and restoration outcome. It MUST NOT claim a ground-truth actor,
 preference, or successful physical qualification that it did not observe.
 (PC-4, PC-6)
 
-**H8-R3.** The Hub dashboard MUST put these four views first: waiting work and
+**H8-R3.** The engineering detail MUST put these four views first: waiting work and
 its trigger; command acknowledgement versus read-back; person actions with the
 Hub-computed `by` and the C-3 payload sent to the Server; and restoration versus
 skip outcomes. It MUST identify each device as virtual or physical and visibly
 mark the class-A local-operation assumption. (PC-4, PC-5, PC-6)
 
-**H8-R4.** The dashboard's first screen MUST read as "what this home saw": a
-time-ordered list of what the Hub admitted, did and observed, one row per
-happening, with the time, the device (or home event), what happened in household
-words, who by (SPIRA, a person, unknown, or the home event), and what was sent to
-the Server for it (ack, C-3 event, C-4 run or restore result, with its delivery
-state). A header MUST name the household, the current plan version and its task
-count. The engineering detail of H8-R3 MUST remain available below or on a
-second view. (PC-4, PC-6)
+**H8-R4.** The first screen MUST show every ledger row newest first, with local
+wall time, device or home event, household wording, actor (SPIRA, home, device
+report, or person), and delivery state when there are reports. It MUST include
+unverified runs and restoration outcomes. The header MUST name the household,
+current plan version, and task count. The detail link MUST open H8-R3 and give
+access to individual report types and delivery records. (PC-4, PC-6)
 
 ### H9. Restart and reconciliation
 
@@ -235,10 +236,10 @@ internals is not acceptance evidence.
 | HUB-AT12 | Two cards have waiting/running work; Stop is posted for one card through the fixture Server while a person has changed one property and started one job | Only that card's unstarted work is cancelled; its still-owned eligible mood property restores; the person change/job, the other card, and item notices remain; no Hub Stop All or direct stop endpoint exists | PC-5, PC-6 | H3-R4, H7-R1, H7-R2, H7-R4 |
 | HUB-AT15 | Five device effects occur: matching echoed operation, class-A local operation, class-B person change, external automation, and unmatched device transition; door/presence signals surround the changes | Fixture Server records `spira`, `user`, `unknown`, `unknown`, `unknown` respectively; removing door/presence signals does not change the outputs | PC-6 | H4-R1, H8-R1, H8-R2 |
 | HUB-AT16 | `ep_9031` with protective (child lock, kettle off) and mood actions active, in two runs: (a) an observed `event_end` arrives before `or_time`; (b) wall time passes `or_time` without `event_end` | (a) still-owned protective properties are released and mood properties restored. (b) no protective release command is sent and those items are reported `withheld_end_not_observed`; still-owned mood properties are restored. Under the interim rule, (b) sends no restore command at all and reports `unknown` | PC-5 | H4-R3, H7-R2 |
-| HUB-AT17 | Waiting, accepted-but-unverified, attributed person change, Server event delivery, restored, and skipped cases are present | The dashboard's first views show the four H8-R3 groups, including exact `by`, sent C-3 content, virtual/physical labels, and assumption badge | PC-4, PC-5, PC-6 | H8-R2, H8-R3 |
+| HUB-AT17 | Waiting, accepted-but-unverified, attributed person change, Server event delivery, restored, and skipped cases are present | The detail opens with the four H8-R3 groups, including exact `by`, sent C-3 content, virtual/physical labels, and assumption badge | PC-4, PC-5, PC-6 | H8-R2, H8-R3 |
 | HUB-AT18 | The three demo surfaces run with Server `DEMO_MODE` off and on | All timestamps advance on wall time; only Server-supplied absolute/duration values shorten in demo mode; Hub exposes no separate demo-clock control | PC-4 | H4-R4 |
 | HUB-AT19 | App and Hub clients replay all three contract episodes, including card reactions, C-3 events, and C-4 results | The fixture answers every App/Hub OpenAPI route with schema-valid responses; the Simulator judge reads `by` from the fixture's received C-3 records; surfaces label the peer as a fixture with no inference claim | PC-1, PC-2, PC-3, PC-4, PC-5, PC-6 | H10-R1 |
-| HUB-AT20 | Run the ep_9031 birthday scene against the fixture and open the dashboard | The first screen lists, in time order, plan admission and ack, the safety commands, guest arrival, mood commands, the oven start by a person, the light change, the end and each restore or skip, each with who and what was sent to the Server and whether it was delivered; H8-R3 detail is still reachable | PC-4, PC-6 | H8-R4 |
+| HUB-AT20 | Run the ep_9031 birthday scene against the fixture and open the dashboard | The ledger shows every happening newest first with its actor and delivery state. Report types and H8-R3 diagnostics are available through the detail link | PC-4, PC-6 | H8-R4 |
 
 ## 4. Open items
 

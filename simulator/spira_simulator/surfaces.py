@@ -19,8 +19,10 @@ DEVICE_NAMES = {
     "fridge": "냉장고",
     "smart_plug": "플러그",
     "speaker": "스피커",
+    "purifier": "공기청정기",
+    "styler": "스타일러",
 }
-ROOM_NAMES = {"living_room": "거실", "kitchen": "주방", "bedroom": "침실"}
+ROOM_NAMES = {"living_room": "거실", "kitchen": "주방", "bedroom": "침실", "entrance": "현관"}
 SCENES = {
     "kids_party": "공주 화면",
     "party": "파티 화면",
@@ -28,6 +30,8 @@ SCENES = {
     "cinema": "영화 화면",
 }
 PLAYLISTS = {"calm": "잔잔한 음악", "party": "파티 음악", "family": "가족 모임 음악"}
+PURIFIER_MODES = {"auto": "자동", "turbo": "터보", "sleep": "취침"}
+STYLER_COURSES = {"standard": "표준", "wool_care": "울케어"}
 COMMAND_NAMES = {
     "clean": "청소",
     "color": "조명 색상 변경",
@@ -39,6 +43,8 @@ COMMAND_NAMES = {
     "show_notice": "안내 표시",
     "play": "음악 재생",
     "stop": "정지",
+    "mode": "운전 모드 변경",
+    "set_course_standby": "코스 설정 대기",
 }
 TRIGGER_NAMES = {
     "package.brought_in": "택배를 들이면",
@@ -64,6 +70,15 @@ ENTRANCE_EVENTS = {
     "door_lock.opened": ("door", "문 열림 감지"),
     "presence.room_occupied": ("presence", "손님 있음"),
     "presence.room_empty": ("presence", "손님 나감"),
+}
+HOUSE_VISUAL_PROPERTIES = {
+    "cleaner": ("job_status", "in_use"),
+    "light": ("power", "color"),
+    "display": ("play_mood",),
+    "cooktop": ("child_lock", "in_use"),
+    "oven": ("preset", "in_use", "job_status"),
+    "fridge": ("show_notice",),
+    "smart_plug": ("power",),
 }
 
 ON = "켜짐"
@@ -165,6 +180,14 @@ def household_content(tile: dict) -> str | None:
             if play:
                 return f"{PLAYLISTS.get(play['playlist'], '음악 재생')} · 볼륨 {number_text(play['volume'])}"
             return "재생 안 함"
+        case "purifier":
+            return PURIFIER_MODES.get(values.get("mode"))
+        case "styler":
+            preset = values.get("course_standby")
+            if preset:
+                course = STYLER_COURSES.get(preset.get("course"), "")
+                return f"{course} 코스 대기".strip()
+            return "대기 설정 없음"
     if "power" in values:
         return ON if values["power"] else OFF
     return None
@@ -217,43 +240,76 @@ def viewer_world(world: World) -> dict:
     with world.store.lock:
         now = world.clock()
         snapshot = world.snapshot(for_display=True)
-        truth = world.store.latest_truth()
-    changes = {
-        fact["target"]: latest_change(fact)
-        for fact in truth
-        if fact["logical_id"] is not None
-    }
-    entrance = {}
-    for fact in truth:
-        event = ENTRANCE_EVENTS.get(fact["event_type"])
-        if fact["logical_id"] is None and event:
-            sensor, label = event
-            entrance[sensor] = {"label": label, "at": display_time(fact["occurred_at"])}
+        changes = {
+            fact["target"]: latest_change(fact) for fact in world.store.latest_truth()
+        }
+        home_truth = world.store.home_truth(tuple(ENTRANCE_EVENTS))
+    entrance = []
+    for fact in home_truth:
+        sensor, label = ENTRANCE_EVENTS[fact["event_type"]]
+        occurred_at = fact["occurred_at"]
+        entrance.append(
+            {
+                "signal": sensor,
+                "label": label,
+                "at": display_time(occurred_at),
+                "occurred_at": occurred_at,
+            }
+        )
+    devices = tiles(world, snapshot, changes)
+    physical_default = sum(device["physical"] for device in devices) > len(devices) / 2
+    class_a_default = sum(device["class_a"] for device in devices) > len(devices) / 2
+    for device, report in zip(devices, snapshot["devices"], strict=True):
+        configured = world.devices[report["target"]]
+        device["changed"] = report["target"] in changes or any(
+            key in report["values"] and report["values"][key] != prop.initial
+            for key, prop in configured.properties.items()
+        )
+        device["substrate_exception"] = device["physical"] != physical_default
+        device["class_exception"] = device["class_a"] != class_a_default
+        device["visual_values"] = {
+            key: report["values"][key]
+            for key in HOUSE_VISUAL_PROPERTIES.get(report["device_type"], ())
+            if key in report["values"]
+        }
     return {
         "clock": display_time(now),
         "clock_at": now.isoformat(),
-        "tiles": tiles(world, snapshot, changes),
-        "entrance": list(entrance.values()),
+        "tiles": devices,
+        "entrance": entrance,
+        "physical_default": physical_default,
+        "class_a_default": class_a_default,
     }
 
 
 def planned_value(command: str, value) -> str | None:
     """The target of a planned action, in household words (device-level only)."""
-    if not isinstance(value, dict):
-        return None
-    match command:
-        case "play_mood":
-            return SCENES.get(value.get("scene"))
-        case "color" if all(k in value for k in ("hue", "saturation", "brightness")):
-            name = "분홍" if value["hue"] == 330 and value["saturation"] else "색상"
-            return f"{name} {number_text(value['hue'])}/{number_text(value['saturation'])}/{number_text(value['brightness'])}"
-        case "color_temp" if "kelvin" in value:
-            return f"{number_text(value['kelvin'])}K"
-        case "set_cook_standby" if "temp_c" in value:
+    match command, value:
+        case "clean", {"room": str(room)}:
+            return ROOM_NAMES.get(room, room if room in ROOM_NAMES.values() else None)
+        case "play_mood", {"scene": str(scene)}:
+            return SCENES.get(scene)
+        case "color", {
+            "hue": (int() | float()) as hue,
+            "saturation": (int() | float()) as saturation,
+            "brightness": (int() | float()) as brightness,
+        }:
+            name = "분홍" if hue == 330 and saturation else "색상"
+            return f"{name} {number_text(hue)}/{number_text(saturation)}/{number_text(brightness)}"
+        case "color_temp", {"kelvin": (int() | float()) as kelvin}:
+            return f"{number_text(kelvin)}K"
+        case "set_cook_standby", {"temp_c": (int() | float()) as degrees}:
             minutes = value.get("minutes")
-            return f"{number_text(value['temp_c'])}°" + (f" {number_text(minutes)}분" if minutes else "")
-        case "play" if value.get("playlist"):
-            return PLAYLISTS.get(value["playlist"], "음악 재생")
+            time = f" {number_text(minutes)}분" if isinstance(minutes, (int, float)) else ""
+            return f"{number_text(degrees)}°{time}"
+        case "play", {"playlist": str(playlist_code)}:
+            playlist = PLAYLISTS.get(playlist_code, "음악")
+            volume = value.get("volume")
+            return f"{playlist} · 볼륨 {number_text(volume)}" if isinstance(volume, (int, float)) else playlist
+        case "mode", {"mode": str(mode)}:
+            return PURIFIER_MODES.get(mode)
+        case "set_course_standby", {"course": str(course)}:
+            return STYLER_COURSES.get(course)
     return None
 
 
@@ -270,6 +326,7 @@ def viewer_plan(data: dict, device_names: dict) -> tuple[dict, list[dict]]:
                     ) if part
                 ),
                 "wait": TRIGGER_NAMES.get(wait) or display_time(wait),
+                "timed": wait not in TRIGGER_NAMES,
             }
         )
     restores = [
@@ -350,6 +407,17 @@ def device_controls(device: Device, *, appliance: bool) -> list[Control]:
         )
     if "stop" in commands:
         controls.append(Control("stop", "음악 정지", {"play": None}))
+    if device.device_type == "purifier" and "mode" in commands:
+        controls.extend(
+            Control(mode, label, {"mode": mode})
+            for mode, label in PURIFIER_MODES.items()
+        )
+    if device.device_type == "styler" and "set_course_standby" in commands:
+        controls.extend(
+            Control(course, f"{label} 코스 대기", {"course_standby": {"course": course}})
+            for course, label in STYLER_COURSES.items()
+        )
+        controls.append(Control("clear_course", "대기 설정 해제", {"course_standby": None}))
     if (
         device.device_type == "oven"
         and device.job

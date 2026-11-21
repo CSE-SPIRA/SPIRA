@@ -1,0 +1,11 @@
+#!/bin/sh
+# One command for the demo stack. Needs uv and mosquitto.
+set -e
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+cd "$ROOT"
+exec uv run --no-project --python 3.12 \
+  --with-requirements hub/requirements.txt \
+  --with-requirements hub/tests/fixture_server/requirements.txt \
+  --with-editable contracts/generated/python \
+  --with-editable simulator \
+  python simulator/scripts/demo_up.py "$@"

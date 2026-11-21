@@ -12,9 +12,11 @@ import httpx
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
+from .demo import mount_demo
 from .mqtt import Broker, DeviceProtocol
 from .profile import DEFAULT_PROFILE, Profile, load_profile
 from .sources import JsonSource, Source, judge, stage_overlay
@@ -228,6 +230,7 @@ def create_app(
             "home.html" if fragment else "viewer.html",
             {
                 **display,
+                "fragment": fragment,
                 "home": world.profile.display_name or world.profile.household_id,
                 "household_id": world.profile.household_id,
                 "peers": request.app.state.peer_viewers,
@@ -249,6 +252,8 @@ def create_app(
     @application.get("/sim/style.css")
     def style():
         return FileResponse(UI / "style.css", media_type="text/css")
+
+    application.mount("/sim/assets/house", StaticFiles(directory=UI / "house"))
 
     @application.get("/operator", dependencies=[Depends(require_operator)])
     def operator(request: Request):
@@ -463,10 +468,17 @@ def create_app(
                 "/sim/snapshot",
                 "/sim/overlay",
                 "/health",
+                "/demo/api",
             )
         ):
             response.headers["Cache-Control"] = "no-store"
         return response
+
+    if os.getenv("WORLD_DEMO") == "1":
+        mount_demo(
+            application,
+            lambda request, action: apply(request, request.app.state.world.home_event, action),
+        )
 
     return application
 

@@ -313,11 +313,11 @@ feed its verdict to Hub execution, C-3 creation, or Server memory.
 ## 11. Default `h_042` profile
 
 In the [default profile](spira_simulator/profiles/ep_9031.json), the Hub MUST bind
-each logical device to `mqtt:<logical_id>` and use these mappings when sending
-fixture commands as desired properties on `P/command`. Use the fresh read's
+each delegated logical device to `mqtt:<logical_id>` and use these mappings when
+sending commands as desired properties on `P/command`. Use the fresh read's
 property witnesses for conditional writes.
 
-| Logical device | Fixture command | Desired properties |
+| Logical device | Command | Desired properties |
 | --- | --- | --- |
 | `cleaner_01` | `clean` | `clean: {room}` starts a job. `clean: null` with the current `clean` witness stops a running job. |
 | `light_01` | `color`, `color_temp` | `color: {hue, saturation, brightness}` or `color: {kelvin}`. Both modes share the same witness. |
@@ -326,6 +326,8 @@ property witnesses for conditional writes.
 | `oven_01` | `set_cook_standby` | `preset: {temp_c, minutes}`. Actual cooking starts with a local device action. |
 | `fridge_01` | `show_notice` | `show_notice: <text>`. The display slot holds the latest notice. Opening the door emits `fridge.door_opened`. |
 | `plug_kettle` | `off` | `power: false`. |
+| `purifier_01` | `mode` | `mode: auto`, `turbo`, or `sleep`. |
+| `styler_01` | `set_course_standby` | `course_standby: {course}` stores `standard` or `wool_care` as a preset. The initial value is `null`. |
 
 The default profile's operator controls MUST emit these raw observations as
 `event_signal` messages.

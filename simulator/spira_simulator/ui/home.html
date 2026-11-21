@@ -1,60 +1,84 @@
-<div id="home-state" data-live="">
-  <div class="home-meta">
+{% macro device_marker(device) %}
+  {% set full = device.changed or device.planned %}
+  <div class="viewer-marker" data-device="{{ device.id }}" data-values="{{ device.visual_values | tojson | forceescape }}"{% if device.changed %} data-changed=""{% endif %}{% if not full %} data-resting=""{% endif %}{% if full or device.observation_label or device.substrate_exception or device.class_exception %} data-required=""{% endif %}>
+    <article class="home-device" aria-describedby="device-legend" data-observation="{{ device.observation }}"{% if device.change %} data-change="{{ device.change[0] }}"{% endif %}>
+      <h3{% if not full and device.content is not none %} title="{{ device.content }}"{% endif %}>{{ device.name }}
+        {% if device.substrate_exception %}<small class="substrate{% if device.physical %} physical{% endif %}">{{ device.substrate }}{% if device.physical %} · 미검증{% endif %}</small>{% endif %}
+        {% if device.class_exception %}<small class="substrate">부류 {{ "A" if device.class_a else "B" }}</small>{% endif %}
+      </h3>
+      {% if device.content is not none %}<p class="device-value{% if not full %} visually-hidden{% endif %}">{{ device.content }}</p>{% endif %}
+      {% if device.observation_label %}<p class="observation-warning">{{ device.observation_label }}{% if device.observation == "stale" %} · {{ device.observed_at }}{% endif %}</p>{% endif %}
+      {% if device.change %}<p class="change-marker">{{ device.change[1] }}</p>{% endif %}
+    </article>
+    {% for entry in device.planned %}
+    <p class="planned">{{ device.name }} · {{ entry.action }}{% if entry.timed %}<span class="planned-clock"> · {{ entry.wait }}</span>{% else %} · {{ entry.wait }}{% endif %}</p>
+    {% endfor %}
+  </div>
+{% endmacro %}
+<div id="home-state">
+  <div id="home-meta" class="home-meta" data-live="">
     <time class="wall-clock" datetime="{{ clock_at }}">{{ clock }}</time>
     <span>MQTT {{ "연결됨" if mqtt_online else "연결 끊김" }}{% if mqtt_gap %} · 마지막 끊김 {{ mqtt_gap }}{% endif %}</span>
   </div>
-  <div class="floor-plan">
-    <div class="floor-rooms">
-      {% for room, devices in rooms.items() %}
-      <section class="floor-room" data-room="{{ room }}">
+  <div class="house-layout">
+    {% if not fragment %}
+    <figure id="viewer-house" class="house-view" aria-label="현관, 거실, 주방의 입체 모형">
+      <div id="viewer-world" class="house-world" aria-hidden="true"></div>
+      <div class="room-key" aria-hidden="true"><span>현관</span><span>거실</span><span>주방</span></div>
+    </figure>
+    <p id="world-unavailable" class="observation-warning" role="status" hidden="">이 화면에서 입체 집을 열 수 없어요.</p>
+    {% endif %}
+    <div id="viewer-markers" class="viewer-markers" data-live="">
+      {% for room, devices in rooms.items() if room != "entrance" %}
+      <section class="viewer-room" data-room="{{ room }}">
         <h2>{{ room_names.get(room, room) }}</h2>
         <div class="room-devices">
-          {% for device in devices %}
-          <div class="device-position" data-device="{{ device.id }}">
-            <article class="home-device" data-observation="{{ device.observation }}"{% if device.change %} data-change="{{ device.change[0] }}"{% endif %}>
-              <h3>{{ device.name }} <span class="substrate{% if device.physical %} physical{% endif %}">{{ device.substrate }}</span></h3>
-              {% if device.content is not none %}<p class="device-value">{{ device.content }}</p>{% endif %}
-              {% if device.observation_label %}<p class="observation-warning">{{ device.observation_label }}{% if device.observation == "stale" %} · {{ device.observed_at }}{% endif %}</p>{% endif %}
-              {% if device.change %}<p class="change-marker">{{ device.change[1] }}</p>{% endif %}
-              {% if device.physical %}<p class="tile-note">미검증</p>{% endif %}
-              {% if device.class_a %}<p class="tile-note" title="{{ device.assumption }}">부류 A · 패널 조작 보고 가정</p>{% endif %}
-            </article>
-            {% for entry in device.planned %}
-            <p class="planned">{{ device.name }} · {{ entry.action }} · {{ entry.wait }}</p>
-            {% endfor %}
-          </div>
-          {% endfor %}
+          {% for device in devices %}{{ device_marker(device) }}{% endfor %}
         </div>
       </section>
       {% endfor %}
+      <section class="viewer-room entrance" data-room="entrance">
+        <h2>현관</h2>
+        <div class="room-devices">
+          <div id="entrance-observations" class="viewer-marker" {% if entrance %}data-required=""{% else %}data-resting=""{% endif %}>
+            <div class="home-device">
+              {% if entrance %}
+              {% set latest = entrance[-1] %}
+              <h3 id="entrance-summary" tabindex="0">{{ latest.label }}{% if entrance | length > 1 %} · 이전 {{ entrance | length - 1 }}건{% endif %}</h3>
+              <ul id="entrance-history" class="entrance-history" tabindex="0" aria-label="현관 관찰 기록">
+                {% for fact in entrance | reverse %}<li data-signal="{{ fact.signal }}">{{ fact.label }} <time datetime="{{ fact.occurred_at }}">{{ fact.at }}</time></li>{% endfor %}
+              </ul>
+              {% else %}
+              <h3 title="관찰된 현관 사건 없음">현관</h3>
+              {% endif %}
+            </div>
+          </div>
+          {% for device in rooms.get("entrance", []) %}{{ device_marker(device) }}{% endfor %}
+        </div>
+      </section>
     </div>
-    <section class="entrance">
-      <h2>현관</h2>
-      {% if entrance %}
-      <ul>
-        {% for fact in entrance %}<li>{{ fact.label }} <span>{{ fact.at }}</span></li>{% endfor %}
-      </ul>
-      {% else %}
-      <p>관찰된 현관 사건 없음</p>
-      {% endif %}
-    </section>
   </div>
-  {% for device, entries in unplaced.items() %}
-  {% for entry in entries %}<p class="planned">{{ device }} · {{ entry.action }} · {{ entry.wait }}</p>{% endfor %}
-  {% endfor %}
-  {% if overlay_errors %}
-  <p class="observation-warning">예정 또는 되돌림 정보를 읽을 수 없음</p>
-  {% elif not has_preparation %}
-  <p class="tile-note">예정된 집 준비 없음</p>
-  {% endif %}
-  {% if restores %}
-  <section class="home-restore">
-    <h2>Hub 되돌림 보고</h2>
-    <ul>
-      {% for row in restores %}
-      <li>{{ row.device }} · {{ row.outcome }} · {{ row.substrate }} · {{ row.at }}{% if row.pending %} · 전송 대기{% endif %}</li>
-      {% endfor %}
-    </ul>
-  </section>
-  {% endif %}
+  <div id="viewer-reports" class="viewer-reports" data-live="">
+    {% if tiles %}
+    <p id="device-legend" class="device-legend">기기 기본 표기 · {{ "실물 · 미검증" if physical_default else "가상" }} · 부류 {{ "A (패널 조작 보고 가정)" if class_a_default else "B" }}{% if not class_a_default and tiles | selectattr("class_a") | first %} · 부류 A는 패널 조작 보고 가정{% endif %}</p>
+    {% endif %}
+    {% for device, entries in unplaced.items() %}
+    {% for entry in entries %}<p class="planned">{{ device }} · {{ entry.action }} · {{ entry.wait }}</p>{% endfor %}
+    {% endfor %}
+    {% if overlay_errors %}
+    <p class="observation-warning">예정 또는 되돌림 정보를 읽을 수 없음</p>
+    {% elif not has_preparation %}
+    <p>예정된 집 준비 없음</p>
+    {% endif %}
+    {% if restores %}
+    <section class="home-restore">
+      <h2>Hub 되돌림 보고</h2>
+      <ul>
+        {% for row in restores %}
+        <li>{{ row.device }} · {{ row.outcome }} · {{ row.substrate }} · {{ row.at }}{% if row.pending %} · 전송 대기{% endif %}</li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+  </div>
 </div>

@@ -242,6 +242,7 @@ def ledger_view(installation, history, task_counts, tasks, attempts, facts, even
         (task["plan"], task["id"]): list(dict.fromkeys(action["device"] for action in task["body"]["actions"]))
         for task in tasks if task["body"]
     }
+    task_ends = {(task["plan"], task["id"]): task.get("end_evidence", []) for task in tasks}
     rows = []
 
     def add(kind, at, label, what, by, reports, **details):
@@ -293,18 +294,22 @@ def ledger_view(installation, history, task_counts, tasks, attempts, facts, even
                 read_back=result.get("observed"))
             reported_operations.add(operation)
             continue
+        plan_id, task_id = result["plan_id"], result["task_id"]
+        result_at = offset_time(at)
+        end = next((entry["match"] for entry in reversed(task_ends.get((plan_id, task_id), []))
+                    if offset_time(entry["recorded_at"]) <= result_at), None)
         for item in result["items"]:
             device, status = item["device"], item["status"]
-            related = attempts_by_device[result["plan_id"], result["task_id"], device]
+            related = attempts_by_device[plan_id, task_id, device]
             writes = [attempt for attempt in related if attempt["kind"] == "restore"
                       and attempt["status"] != "dispatching"
-                      and offset_time(attempt["sent_at"]) <= offset_time(at)]
+                      and offset_time(attempt["sent_at"]) <= result_at]
             originals = [attempt for attempt in related if attempt["kind"] == "run"]
             reports = [report]
             for attempt in writes:
                 reports.extend(reports_for_operation(attempt["op"]))
                 reported_operations.add(attempt["op"])
-            add("restore", at, device_words(device, devices), restore_words(status, writes, originals),
+            add("restore", at, device_words(device, devices), restore_words(status, writes, originals, end=end),
                 "spira" if status == "restored" else "hub", reports, device=device, status=status,
                 commands=[command(attempt) for attempt in writes])
 

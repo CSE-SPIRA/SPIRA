@@ -350,6 +350,46 @@
         }
       },
       "label": "Kettle plug"
+    },
+    {
+      "target": "mqtt:purifier_01",
+      "logical_id": "purifier_01",
+      "device_type": "purifier",
+      "room": "living_room",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": true,
+      "assumption": "Virtual LG local-operation reporting",
+      "commands": ["mode"],
+      "properties": {
+        "mode": {
+          "initial": "auto",
+          "schema": {"enum": ["auto", "turbo", "sleep"]}
+        }
+      }
+    },
+    {
+      "target": "mqtt:styler_01",
+      "logical_id": "styler_01",
+      "device_type": "styler",
+      "room": "entrance",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": true,
+      "assumption": "Virtual LG local-operation reporting",
+      "commands": ["set_course_standby"],
+      "properties": {
+        "course_standby": {
+          "initial": null,
+          "schema": {
+            "type": ["object", "null"],
+            "properties": {"course": {"enum": ["standard", "wool_care"]}},
+            "required": ["course"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "prohibited_properties": ["start"]
     }
   ],
   "home_signals": {

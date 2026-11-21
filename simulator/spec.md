@@ -118,9 +118,9 @@ show no planned or applied household preparation. Viewer controls MUST NOT creat
 execution success. Operator writes and judge output MUST remain on the operator
 side, not the household viewer.
 
-**E5-R4.** The household viewer MUST draw the household as a floor plan: the
-profile's rooms as areas, each device placed in its room, and the entrance as
-the place of home events (package, doorbell, door). A viewer MUST be able to
+**E5-R4.** The household viewer MUST draw a 3D household with the
+profile's rooms, each device placed in its room, and the entrance as the place
+of home events (package, doorbell, door). A viewer MUST be able to
 link to the viewers of the other configured households, so the presenter can
 switch homes.
 
@@ -242,7 +242,7 @@ passing claim until an implementation change supplies bounded evidence.
 | SIM-AT-14 | Send a multi-property command containing one invalid property | The command is rejected and every value and witness remains unchanged | E2-R3 | PC-4 | Required |
 | SIM-AT-16 | Compose physical Tapo, virtual Class A, and virtual Matter devices | Every tile/result shows physical or virtual per device; assumptions are labelled; Tapo and Matter report `local_operation=false`; no physical qualification is inferred | E5-R2, E6-R2, E8-R1, E8-R2 | PC-4, PC-5, PC-6 | **Provisional only for the Class A comparison, pending PQ-01** |
 | SIM-AT-18 | Run the demo with Server `DEMO_MODE=1` | App/Hub/Simulator observations use offset wall-clock timestamps; shortened waits come from Server data and no virtual demo-clock control is present | E9-R1 | PC-4 | Required |
-| SIM-AT-19 | Open both households' viewers during the birthday scene | Each shows a floor plan with devices in their rooms and the entrance; tiles read as content (oven temperature and time, light colour, display scene, fridge notice); weekday and wall-clock time are shown; a link reaches the other home | E5-R4, E5-R5, E5-R7 | PC-4 | Required |
+| SIM-AT-19 | Open both households' viewers during the birthday scene | Each shows a 3D household with devices in their rooms and home events at the entrance; device labels read as content (oven temperature and time, light colour, display scene, fridge notice); weekday and wall-clock time are shown; a link reaches the other home | E5-R4, E5-R5, E5-R7 | PC-4 | Required |
 | SIM-AT-20 | Inspect the viewer page and its data during an active plan | No item, intent, rationale, card text, Hub `by` or judge verdict appears; overlays carry device, action and trigger or time only | E5-R6 | PC-4, PC-5 | Required |
 | SIM-AT-21 | Use a named person control, then change the same device from the appliance-app page | The control emits the panel path with the person's name; the appliance-app change uses `other_app` with `local_operation=false`; both are in the truth journal | E5-R8, E5-R9, E6-R2 | PC-5, PC-6 | **Provisional for the Class A panel signal, pending PQ-01** |
 

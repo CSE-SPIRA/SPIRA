@@ -316,14 +316,18 @@ def test_hub_at08_and_at17_property_ownership_and_dashboard_provisional(tmp_path
         assert [row["by"] for row in state["ledger"]
                 if row.get("device") == "light_02" and row["kind"] == "event"] == ["unknown", "unknown"]
         kept = next(row for row in state["ledger"] if row["kind"] == "restore" and row["device"] == "light_02")
-        assert kept["what"] == "그대로 (기기 상태가 바뀜)" and kept["by"] == "hub"
+        assert kept["what"] == "바뀐 기기 상태 유지" and kept["by"] == "hub"
         page = (await hub.dashboard.get("/")).text
-        order = [page.index(title) for title in ("Waiting work", "Command acknowledgement and read-back",
+        ledger, detail = page.split('<section id="detail"', 1)
+        assert "TV · 파티 화면 · 실행 확인 안 됨" in ledger
+        assert ledger.count('class="pill actor">기기 보고</span>') == 2
+        assert "바뀐 기기 상태 유지" in ledger
+        order = [detail.index(title) for title in ("Waiting work", "Command acknowledgement and read-back",
                  "Person actions and C-3 events", "Restoration and skips")]
         assert order == sorted(order)
-        assert all(label in page for label in ("Class A assumption", "virtual", "physical", "ACCEPTED",
+        assert all(label in detail for label in ("Class A assumption", "virtual", "physical", "ACCEPTED",
                    "unverifiable", "skipped_user_changed", "restored", "Received by Server", "C-3 payload"))
-        assert "actor" not in page and "ground_truth_actor" not in page
+        assert "ground_truth_actor" not in page
         await hub.close()
     run(exercise)
 
@@ -442,7 +446,10 @@ def test_hub_at09_dispatch_crash_and_byte_stable_resend(tmp_path):
         pending = (await hub.state())["ledger"][-1]["reports"]
         assert [report["kind"] for report in pending] == ["run", "event"]
         assert all(not report["delivered"] and report["delivery_error"] == "HTTP 503" for report in pending)
-        assert "재전송 대기" in (await hub.dashboard.get("/")).text
+        page = (await hub.dashboard.get("/")).text
+        ledger, detail = page.split('<section id="detail"', 1)
+        assert "보내는 중" in ledger and "HTTP 503" not in ledger
+        assert "HTTP 503" in detail
 
         can_crash = asyncio.Event()
         keep_waiting = asyncio.Event()
@@ -669,7 +676,12 @@ def test_hub_at16_fixture_protective_release(tmp_path, observed_end):
             "t_safe#2": {"cooktop_01": release_status, "plug_kettle": release_status},
             "t_mood#3": {"display_01": "restored", "light_01": "restored"},
         }
-        assert release_status in (await hub.dashboard.get("/")).text
+        page = (await hub.dashboard.get("/")).text
+        ledger, detail = page.split('<section id="detail"', 1)
+        assert release_status in detail
+        assert "되돌림 확인" in ledger
+        assert ("일정이 끝난 뒤 되돌림 확인" in ledger) == observed_end
+        assert ("끝났는지 확인되지 않아 그대로 유지" in ledger) == (not observed_end)
         state = (await hub.dashboard.get("/state")).json()
         summary, = state["plan_summaries"]
         assert summary["restored"] == (2 if observed_end else 1)
@@ -1134,7 +1146,10 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
         assert pending["reports"] == [
             {"kind": "ack", "id": "ep_9031/1", "delivered": False, "delivery_error": None},
         ]
-        assert "ack 전송 대기" in (await hub.dashboard.get("/")).text
+        page = (await hub.dashboard.get("/")).text
+        ledger_page, _ = page.split('<section id="detail"', 1)
+        assert '<time datetime="2026-10-15T21:11:55+09:00" title="2026-10-15 21:11:55 KST">21:11</time>' in ledger_page
+        assert "보내는 중" in ledger_page and "서버에 보냄" not in ledger_page
         await hub.runtime.flush()
 
         def at(instant):
@@ -1187,7 +1202,7 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
             ("—", "계획 v1 받음 · 할 일 6", "hub", ["ack"]),
             ("—", "계획 v2 받음 · 할 일 5 · 청소기 취소", "hub", ["ack"]),
             ("현관", "택배 들임", "hub", ["event"]),
-            ("—", "계획 v3 받음 · 할 일 5 · 택배 기다림 해제", "hub", ["ack"]),
+            ("—", "계획 v3 받음 · 할 일 5 · 택배 기다림 끝", "hub", ["ack"]),
             ("냉장고", "안내 표시", "spira", ["run", "event"]),
             ("냉장고", "안내 표시", "spira", ["run", "event"]),
             ("냉장고", "문 열림", "user", ["event"]),
@@ -1199,11 +1214,11 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
             ("오븐", "170° 20분 대기", "spira", ["run", "event"]),
             ("오븐", "시작", "user", ["event"]),
             ("조명", "색조 330° → 2700K", "user", ["event"]),
-            ("—", "일정 끝 관찰", "hub", ["event"]),
-            ("인덕션", "되돌림 → 잠금 해제", "spira", ["restore", "event"]),
-            ("전기포트", "되돌림 → 켜짐", "spira", ["restore", "event"]),
-            ("TV", "되돌림 → 꺼짐", "spira", ["restore", "event"]),
-            ("조명", "그대로 (사람이 바꿈)", "hub", ["restore"]),
+            ("—", "일정이 끝난 것을 확인", "hub", ["event"]),
+            ("인덕션", "일정이 끝난 뒤 되돌림 확인 · 잠금 해제", "spira", ["restore", "event"]),
+            ("전기포트", "일정이 끝난 뒤 되돌림 확인 · 켜짐", "spira", ["restore", "event"]),
+            ("TV", "일정이 끝난 뒤 되돌림 확인 · 꺼짐", "spira", ["restore", "event"]),
+            ("조명", "사람이 바꾼 설정 유지", "hub", ["restore"]),
         ]
         assert ledger[12]["acknowledgement"]["status"] == "ACCEPTED"
         assert ledger[12]["read_back"]["preset"] == {"temp_c": 170, "minutes": 20}
@@ -1219,13 +1234,24 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
         }
 
         page = (await hub.dashboard.get("/")).text
-        assert page.index("Hub · 이 집이 본 것") < page.index("Waiting work")
-        assert "h_042 · ep_9031 계획 v3 · 할 일 5 · Server 연결됨" in page
-        assert 'href="#detail"' in page and 'id="detail"' in page
-        assert page.count('<tr class="recent">') == 3
-        assert all(f'<th scope="col">{label}</th>' in page for label in ("시각", "기기", "일", "누가", "Server로"))
-        assert all(label in page for label in ("ack 204", "event 보냄", "결과 보냄", "restore 보냄", "사람이 바꿈"))
-        assert 'class="by user">사람' in page and 'class="by hub">집' in page
+        ledger_page, detail = page.split('<section id="detail"', 1)
+        assert "Hub · 이 집이 본 것" in ledger_page
+        assert "h_042 · 계획 v3 · 할 일 5 · 서버 연결됨" in ledger_page
+        assert 'href="#detail">자세한 기록</a>' in ledger_page
+        assert 'href="/state"' in detail and "Waiting work" in detail
+        assert ledger_page.count('<li class="ledger-row">') == len(ledger)
+        assert ledger_page.count("서버에 보냄") == len(ledger)
+        assert all(label not in ledger_page for label in ("ack 204", "event 보냄", "restore 보냄", "ep_9031"))
+        rows = ledger_page.split('<li class="ledger-row">')[1:]
+        for markup, row in zip(rows, reversed(ledger), strict=True):
+            assert f'datetime="{row["at"]}"' in markup and row["what"] in markup
+        assert "<span>10/17</span> 17:50" in rows[0] and "<span>10/15</span> 21:11" in rows[-1]
+        assert 'class="pill actor">사람</span>' in ledger_page
+        assert 'class="pill actor">집</span>' in ledger_page
+        assert 'class="pill actor">SPIRA</span>' in ledger_page
+        for asset in ("dashboard.css", "dashboard.js"):
+            assert f'"/assets/{asset}"' in page
+            assert (await hub.dashboard.get(f"/assets/{asset}")).status_code == 200
         await hub.close()
     run(exercise)
 
