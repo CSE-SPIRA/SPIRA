@@ -1494,6 +1494,7 @@ void main() {
     for (final line in lines(card)) {
       line['state'] = 'done';
     }
+    lines(card).first['state'] = 'off';
     peer.cards = [card];
     final rationale = peer.rationales.remove('ep_9031')!;
     final app = controller(peer);
@@ -1531,7 +1532,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byType(Card),
-        matching: find.byIcon(Icons.circle_outlined),
+        matching: find.byType(Switch),
       ),
       findsOneWidget,
     );

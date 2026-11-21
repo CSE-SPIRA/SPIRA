@@ -548,8 +548,16 @@ class _PreparationLine extends StatelessWidget {
                   child: Row(
                     children: [
                       if (!canSwitch) ...[
+                        // A check means the line finished, not that it is selected.
                         Icon(
-                          line.checked ? Icons.check : Icons.circle_outlined,
+                          const {
+                            wire.LineState.DONE,
+                            wire.LineState.PARTIAL,
+                          }.contains(line.state)
+                              ? Icons.check
+                              : line.checked
+                              ? Icons.radio_button_unchecked
+                              : Icons.remove,
                           color: appGreen,
                           size: 17,
                           semanticLabel: line.checked ? '선택됨' : '선택 해제됨',
