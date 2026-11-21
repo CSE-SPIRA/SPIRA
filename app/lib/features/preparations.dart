@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../app_controller.dart';
 import '../contracts.dart' as wire;
 import '../theme.dart';
+import '../korean_text.dart';
 import 'labels.dart';
 import 'order_extraction.dart';
 import 'rationale.dart';
@@ -43,7 +44,9 @@ class Preparations extends StatelessWidget {
                 onPressed: app.canControl && !app.sharingExample
                     ? app.shareExample
                     : null,
-                child: Text(app.sharingExample ? '주문을 보내는 중…' : '예시 주문으로 공유'),
+                child: KoreanText(
+                  app.sharingExample ? '주문을 보내는 중…' : '예시 주문으로 공유',
+                ),
               ),
             ),
           if (app.exampleShareError case final error?) StatusMessage(error),
@@ -66,7 +69,7 @@ class Preparations extends StatelessWidget {
               alignment: Alignment.centerLeft,
               child: OutlinedButton(
                 onPressed: app.sync,
-                child: const Text('다시 시도'),
+                child: const KoreanText('다시 시도'),
               ),
             ),
           if (!app.refreshed &&
@@ -93,7 +96,7 @@ class Preparations extends StatelessWidget {
             ExpansionTile(
               key: const PageStorageKey('past-preparations'),
               tilePadding: EdgeInsets.zero,
-              title: const Text('지난 준비'),
+              title: const KoreanText('지난 준비'),
               shape: const Border(),
               expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -145,7 +148,7 @@ class _OrderSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (episode != null && !current)
-            Text(
+            KoreanText(
               seoulDateTime(episode.sharedAt),
               style: theme.textTheme.titleMedium,
             ),
@@ -165,7 +168,7 @@ class _OrderSection extends StatelessWidget {
                             _OrderEditor(app: app, episode: episode),
                       ),
                     ),
-                    child: const Text('읽은 품목 수정'),
+                    child: const KoreanText('읽은 품목 수정'),
                   )
                 : null,
             child: episode == null
@@ -206,7 +209,7 @@ class _OrderPreparation extends StatelessWidget {
           alignment: Alignment.centerLeft,
           child: TextButton(
             onPressed: () => openRationale(context, app, episode.episodeId),
-            child: const Text('WHY · 이유 보기'),
+            child: const KoreanText('WHY · 이유 보기'),
           ),
         ),
       for (final (index, card) in app.cardsFor(episode).indexed)
@@ -233,17 +236,20 @@ class _PreparationCard extends StatelessWidget {
   Future<void> _confirmStop(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
+      animationStyle: MediaQuery.disableAnimationsOf(context)
+          ? AnimationStyle.noAnimation
+          : null,
       builder: (context) => AlertDialog(
-        title: const Text('이 준비를 중지할까요?'),
-        content: const Text('이 카드의 준비를 중지해요. 품목 안내는 계속돼요.'),
+        title: const KoreanText('이 준비를 중지할까요?'),
+        content: const KoreanText('이 카드의 준비를 중지해요. 품목 안내는 계속돼요.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('취소'),
+            child: const KoreanText('취소'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('중지'),
+            child: const KoreanText('중지'),
           ),
         ],
       ),
@@ -291,7 +297,7 @@ class _PreparationCard extends StatelessWidget {
                             final intent = snapshot.data?.intents
                                 .where((intent) => intent.cardId == card.cardId)
                                 .firstOrNull;
-                            return Text.rich(
+                            return KoreanText.rich(
                               highlightTheme(
                                 card.text,
                                 intent?.situation.theme,
@@ -316,7 +322,9 @@ class _PreparationCard extends StatelessWidget {
                     itemBuilder: (_) => [
                       PopupMenuItem(
                         value: true,
-                        child: Text(stopUncertain ? '중지 요청 재시도' : '이 준비 중지'),
+                        child: KoreanText(
+                          stopUncertain ? '중지 요청 재시도' : '이 준비 중지',
+                        ),
                       ),
                     ],
                   ),
@@ -329,10 +337,10 @@ class _PreparationCard extends StatelessWidget {
                 runSpacing: 4,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Text(
+                  KoreanText(
                     card.startsAt == null
                         ? '일정이 잡히기를 기다리고 있어요.'
-                        : '${seoulWeekdayTime(card.startsAt!)} 일정',
+                        : seoulDateTime(card.startsAt!, fullDate: true),
                     style: theme.textTheme.bodySmall,
                   ),
                   DecoratedBox(
@@ -345,7 +353,7 @@ class _PreparationCard extends StatelessWidget {
                         horizontal: 8,
                         vertical: 3,
                       ),
-                      child: Text(
+                      child: KoreanText(
                         '${card.summary.done}/${card.summary.total} 준비',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: colors.onPrimaryContainer,
@@ -354,7 +362,7 @@ class _PreparationCard extends StatelessWidget {
                     ),
                   ),
                   if (card.summary.waitingFor case final event?)
-                    Text(
+                    KoreanText(
                       '${eventLabel(event)} 기다리는 중',
                       style: theme.textTheme.bodySmall,
                     ),
@@ -433,11 +441,14 @@ class _PreparationLine extends StatelessWidget {
                           spacing: 2,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(line.text, style: theme.textTheme.titleMedium),
+                            KoreanText(
+                              line.text,
+                              style: theme.textTheme.titleMedium,
+                            ),
                             Wrap(
                               spacing: 8,
                               children: [
-                                Text(
+                                KoreanText(
                                   timing,
                                   style: theme.textTheme.bodySmall?.copyWith(
                                     color: theme.colorScheme.onSurfaceVariant,
@@ -447,11 +458,15 @@ class _PreparationLine extends StatelessWidget {
                                   ),
                                 ),
                                 if (state != null && state != timing)
-                                  Text(state, style: theme.textTheme.bodySmall),
+                                  KoreanText(
+                                    state,
+                                    style: theme.textTheme.bodySmall,
+                                  ),
                               ],
                             ),
-                            if (outcome != null) Text(outcome),
-                            if (note != null && note != outcome) Text(note),
+                            if (outcome != null) KoreanText(outcome),
+                            if (note != null && note != outcome)
+                              KoreanText(note),
                             if (pending) const StatusMessage('항목 변경 확인 중…'),
                           ],
                         ),
@@ -500,21 +515,24 @@ class _ItemGuidance extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('품목 안내', style: Theme.of(context).textTheme.titleLarge),
+        KoreanText('품목 안내', style: Theme.of(context).textTheme.titleLarge),
         if (closed)
-          const Text('품목 안내가 종료됐어요.')
+          const KoreanText('품목 안내가 종료됐어요.')
         else if (episode.itemTasks.any(_waitingForPackage))
-          const Text('택배를 집 안으로 들이면 안내를 볼 수 있어요.'),
+          const KoreanText('택배를 집 안으로 들이면 안내를 볼 수 있어요.'),
         for (final task in episode.itemTasks)
           Padding(
             padding: const EdgeInsets.only(top: 10),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(task.item, style: Theme.of(context).textTheme.titleMedium),
+                KoreanText(
+                  task.item,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
                 if (!closed && !_waitingForPackage(task)) ...[
-                  if (task.text case final text?) Text(text),
-                  Text(lineLabel(task.state)),
+                  if (task.text case final text?) KoreanText(text),
+                  KoreanText(lineLabel(task.state)),
                 ],
               ],
             ),
@@ -594,7 +612,7 @@ class _OrderEditorState extends State<_OrderEditor> {
         widget.app.episodes[widget.episode.episodeId] ?? widget.episode,
       );
       return Scaffold(
-        appBar: AppBar(title: const Text('읽은 품목 수정')),
+        appBar: AppBar(title: const KoreanText('읽은 품목 수정')),
         body: Form(
           key: _form,
           child: ListView(
@@ -627,7 +645,7 @@ class _OrderEditorState extends State<_OrderEditor> {
               ],
               FilledButton(
                 onPressed: editable && !_busy ? _save : null,
-                child: Text(_busy ? '저장 중…' : '수정 저장'),
+                child: KoreanText(_busy ? '저장 중…' : '수정 저장'),
               ),
             ],
           ),

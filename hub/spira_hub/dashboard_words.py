@@ -1,12 +1,10 @@
 """Korean display text for recorded Hub facts and outcomes."""
 
-DEVICE_NAMES = {
-    "cleaner": "청소기", "light": "조명", "display": "TV", "cooktop": "인덕션",
-    "oven": "오븐", "fridge": "냉장고", "smart_plug": "플러그", "speaker": "스피커",
-}
+from .design_vocabulary import DEVICE_NAMES, ROOM_NAMES, STATE_WORDS
+
 HOME_EVENTS = {
-    "package.brought_in": ("현관", "택배 들임"),
-    "guest_arrived": ("현관", "손님 도착"),
+    "package.brought_in": (ROOM_NAMES["entrance"], "택배 들임"),
+    "guest_arrived": (ROOM_NAMES["entrance"], "손님 도착"),
     "event_end": ("—", "일정이 끝난 것을 확인"),
 }
 DEVICE_EVENTS = {"started": "시작", "stopped": "멈춤", "completed": "끝남", "door_opened": "문 열림"}
@@ -24,7 +22,7 @@ RESTORE_STATUS = {
 
 def device_words(device_id, devices):
     device = devices.get(device_id)
-    return (device.label or DEVICE_NAMES.get(device.type, device_id)) if device else device_id
+    return (device.label or DEVICE_NAMES.get(device.type, "기기")) if device else "기기"
 
 
 def plan_words(version, count, task_devices, devices):
@@ -52,22 +50,22 @@ def number_words(value):
 
 def property_words(prop, value):
     if prop == "power" and (type(value) is bool or value in ("on", "off")):
-        return "켜짐" if value is True or value == "on" else "꺼짐"
+        return STATE_WORDS["on"] if value is True or value == "on" else STATE_WORDS["off"]
     if prop == "child_lock" and type(value) is bool:
-        return "잠금" if value else "잠금 해제"
+        return STATE_WORDS["locked"] if value else STATE_WORDS["unlocked"]
     if prop == "show_notice":
-        return "평소 화면" if value is None else "안내 표시"
+        return STATE_WORDS["normal_screen"] if value is None else STATE_WORDS["notice"]
     if prop in ("play_mood", "scene"):
         if isinstance(value, dict) and isinstance(scene := value.get("scene"), str):
             return f"{SCENES.get(scene, scene)} 화면"
         if value is None:
-            return "꺼짐"
+            return STATE_WORDS["off"]
     if prop == "play":
         if isinstance(value, dict) and isinstance(playlist := value.get("playlist"), str):
             volume = value.get("volume")
             return f"{PLAYLISTS.get(playlist, playlist)} · 볼륨 {number_words(volume)}"
         if value is None:
-            return "꺼짐"
+            return STATE_WORDS["off"]
     if prop in ("color", "color_temp") and isinstance(value, dict):
         if "kelvin" in value:
             return f'{number_words(value["kelvin"])}K'
@@ -80,9 +78,9 @@ def property_words(prop, value):
 
 def run_words(cmd, value, status):
     if cmd == "clean":
-        what = "청소 끝" if status == "completed" else "청소 시작" if status == "running" else "청소"
+        what = STATE_WORDS["cleaned"] if status == "completed" else "청소 시작" if status == "running" else "청소"
     elif cmd in ("child_lock", "off", "stop", "show_notice"):
-        what = {"child_lock": "잠금", "off": "끔", "stop": "멈춤", "show_notice": "안내 표시"}[cmd]
+        what = {"child_lock": STATE_WORDS["locked"], "off": "끔", "stop": "멈춤", "show_notice": STATE_WORDS["notice"]}[cmd]
     else:
         prop = {"set_cook_standby": "preset"}.get(cmd, cmd)
         what = property_words(prop, value) or "기기 동작 요청"

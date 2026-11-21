@@ -19,7 +19,7 @@ HOUSEHOLD_TIME = ZoneInfo("Asia/Seoul")
 BY_LABEL = {"spira": "SPIRA", "user": "사람", "unknown": "기기 보고", "hub": "집"}
 
 
-def create_app(runtime, *, lifespan=None, hub_key=None):
+def create_app(runtime, *, lifespan=None, hub_key=None, home_name="우리 집"):
     app = FastAPI(title="SPIRA Home Hub", lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
     app.mount("/assets", StaticFiles(directory=Path(__file__).with_name("dashboard_assets")), name="dashboard-assets")
@@ -48,33 +48,32 @@ def create_app(runtime, *, lifespan=None, hub_key=None):
 
     @app.get("/", response_class=HTMLResponse)
     async def dashboard():
-        return render(state_view(runtime))
+        return render(state_view(runtime), home_name=home_name)
 
     return app
 
 
-def seen(state):
+def seen(state, home_name):
     plans = " · ".join(
         f'계획 v{plan["plan_version"]} · 할 일 {plan["task_count"]}'
         for plan in state["current_plans"]
     ) or "현재 계획 없음 · 할 일 0"
     connection = ("서버 연결됨" if state["server_confirmed"] else
                   "서버 연결 실패" if state["server_error"] else "서버 연결 확인 중")
-    dated_rows = [(row, offset_time(row["at"]).astimezone(HOUSEHOLD_TIME)) for row in reversed(state["ledger"])]
-    multi_day = bool(dated_rows and dated_rows[0][1].date() != dated_rows[-1][1].date())
-    body = "".join(ledger_row(row, at, multi_day) for row, at in dated_rows)
+    body = "".join(ledger_row(row) for row in reversed(state["ledger"]))
     if not body:
         body = '<li class="subtext">기록을 기다리고 있어요.</li>'
     return f"""<section class="ledger" aria-labelledby="seen-title">
 <header class="ledger-head"><h1 id="seen-title">Hub · 이 집이 본 것</h1>
 <a href="#detail">자세한 기록</a>
-<p id="ledger-summary">{escape(state["household"])} · {plans} · {connection}</p></header>
+<p id="ledger-summary">{escape(home_name)} · {plans} · {connection}</p></header>
 <ol id="ledger" role="list" aria-label="이 집의 장부" aria-live="polite" tabindex="0">{body}</ol></section>"""
 
 
-def ledger_row(row, at, multi_day):
+def ledger_row(row):
+    at = offset_time(row["at"]).astimezone(HOUSEHOLD_TIME)
+    weekday = "월화수목금토일"[at.weekday()]
     label = f'{escape(row["label"])} · ' if row["label"] != "—" else ""
-    day = f'<span>{at:%m/%d}</span> ' if multi_day else ""
     delivery = ""
     if row["reports"]:
         if all(report["delivered"] for report in row["reports"]):
@@ -82,13 +81,13 @@ def ledger_row(row, at, multi_day):
         else:
             delivery = '<p>보내는 중</p>'
     return (
-        f'<li class="ledger-row"><div><time datetime="{escape(row["at"])}" title="{at:%Y-%m-%d %H:%M:%S %Z}">'
-        f'{day}{at:%H:%M}</time><strong>{label}{escape(row["what"])}</strong>'
+        f'<li class="ledger-row"><div><time datetime="{escape(row["at"])}">'
+        f'{weekday} {at:%H:%M}</time><strong>{label}{escape(row["what"])}</strong>'
         f'<span class="pill actor">{BY_LABEL[row["by"]]}</span></div>{delivery}</li>'
     )
 
 
-def render(state):
+def render(state, *, home_name="우리 집"):
     def text(value):
         return escape(str(value))
 
@@ -188,12 +187,13 @@ def render(state):
     )
     return f"""<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#f6f5ee"><title>SPIRA Home Hub</title>
-<link rel="stylesheet" href="/assets/dashboard.css"><script src="/assets/dashboard.js" defer></script>
-</head><body><main>{seen(state)}
+<meta name="theme-color" content=""><title>SPIRA Home Hub</title>
+<link rel="stylesheet" href="/assets/tokens.css"><link rel="stylesheet" href="/assets/dashboard.css"><script src="/assets/dashboard.js" defer></script>
+</head><body><main>{seen(state, home_name)}
 <section id="detail" tabindex="-1" aria-labelledby="detail-title">
 <h2 id="detail-title">자세한 기록</h2><p><a href="#seen-title">장부로 돌아가기</a> · <a href="/state">JSON</a></p>
 <div id="detail-content" lang="en"><p>{text(peer)}</p>
+<p>Household {text(state["household"])}</p>
 <p>Observation gap last marked at {text(state["observation_gap_at"])}</p>
 <div class="details-grid">{body}</div></div></section></main></body></html>"""
 

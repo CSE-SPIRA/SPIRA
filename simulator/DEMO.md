@@ -46,7 +46,7 @@ Add `owners=1` to the query string to show the owner tags. They are hidden by de
 
 | To change | Edit | Do not need to touch |
 | --- | --- | --- |
-| Colours, fonts, spacing, motion speed | `spira_simulator/ui/demo/tokens.css` | anything else |
+| Shared colours, spacing, type and motion | [`design/tokens.json`](../design/tokens.json), then run `python3 design/build.py` | Generated stylesheets |
 | The active stage and flow strip | `ui/demo/flow.js` (`createFlow(root, nodes)` returns `setStage(n)` and `setCounts(counts)`, with one optional count label per node, shown when reached) | |
 | Stage titles, leads, order; timeline steps and cameras | `ui/demo/scenes.json` | code |
 | Layout and component styles | `ui/demo/index.html`, `ui/demo/demo.css` | |

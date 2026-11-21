@@ -22,11 +22,10 @@ export function storyTimeOffset(event, rebasedStart) {
   return Number.isFinite(storyStart) ? start - storyStart : null;
 }
 
-export function displayTime(stamp, offset = null, withDay = true) {
+export function displayTime(stamp, offset = null) {
   const at = (typeof stamp === "number" ? stamp : Date.parse(stamp)) - (offset ?? 0);
   if (!Number.isFinite(at)) return "";
-  const time = clock.format(at);
-  return withDay ? `${weekday.format(at)} ${time}` : time;
+  return `${weekday.format(at)} ${clock.format(at)}`;
 }
 
 export function planReceiptTime(sharedAt, quietSeconds, before = Infinity) {
@@ -37,9 +36,8 @@ export function planReceiptTime(sharedAt, quietSeconds, before = Infinity) {
   // The timeline has minute precision. Round up so the label never falls inside the quiet window.
   const received = Math.ceil((shared + quietSeconds * 1000) / MINUTE) * MINUTE;
   if (!Number.isFinite(received) || received >= before) return fallback;
-  const sameDay = seoulDate.format(shared) === seoulDate.format(received);
   return {
-    story: `${displayTime(shared)} 공유 → ${displayTime(received, null, !sameDay)} 계획 받음`,
+    story: `${displayTime(shared)} 공유 → ${displayTime(received)} 계획 받음`,
     ledger: displayTime(received),
   };
 }
@@ -75,8 +73,8 @@ export function storyPlanTime(stamp, story, anchor) {
   return target + (pair ? sign * pair.normal : minutes) * MINUTE;
 }
 
-export function storyObservedTime(stamp, story, label = "", withDay = true) {
-  if (!story?.timing) return displayTime(stamp, story?.offset, withDay);
+export function storyObservedTime(stamp, story, label = "") {
+  if (!story?.timing) return displayTime(stamp, story?.offset);
   const at = Date.parse(stamp);
   if (!Number.isFinite(at)) return "";
   const shifted = at - story.offset;
@@ -90,7 +88,7 @@ export function storyObservedTime(stamp, story, label = "", withDay = true) {
   // Keep the real offset when it puts this observation on the same side of the
   // schedule landmarks in both clocks. A live occurrence need not hit a landmark.
   if (landmarks.every(([live, target]) => Math.sign(at - live) === Math.sign(shifted - target))) {
-    return displayTime(shifted, null, withDay);
+    return displayTime(shifted);
   }
   const minutes = Math.round(Math.abs(at - story.liveStart) / MINUTE);
   return label || (minutes ? `일정 ${minutes}분 ${at < story.liveStart ? "전" : "후"}` : "일정 시작 무렵");
@@ -105,5 +103,5 @@ export function storyLedgerTime(row, story, label = "") {
     // time after dispatch, for example the time a cleaning job took to finish.
     return displayTime(scheduled + Date.parse(row.at) - Date.parse(timing.observed_at));
   }
-  return storyObservedTime(row.at, story, label, Boolean(story));
+  return storyObservedTime(row.at, story, label);
 }

@@ -374,7 +374,7 @@ void main() {
       await tapText(tester, '우리 집 만들기');
       await tapText(tester, '건너뛰기');
       expect(find.text('거실 · 조명 · 실물 기기'), findsOneWidget);
-      expect(find.text('거실 · 로봇청소기 · 가상 기기'), findsOneWidget);
+      expect(find.text('거실 · 로봇청소기 · 모의 기기'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('cleaner_01/clean')));
       await tester.pumpAndSettle();
       await tapText(tester, '맡기기');
@@ -948,7 +948,7 @@ void main() {
       expect(find.text('승인'), findsNothing);
       expect(find.text('0/4 준비'), findsOneWidget);
       expect(find.text('손님 도착 기다리는 중'), findsOneWidget);
-      expect(find.text('10월 17일 토요일 오후 2시 일정'), findsOneWidget);
+      expect(find.text('10월 17일 (토) 14:00'), findsOneWidget);
       expect(find.text('토 12:30'), findsOneWidget);
       expect(find.text('토 13:30'), findsOneWidget);
       expect(find.text('토 14:00'), findsOneWidget);
@@ -1629,7 +1629,7 @@ void main() {
       expect(find.text('이번 준비와 따로 본 물건'), findsNWidgets(2));
 
       for (final sentence in [
-        '14:00–17:00',
+        '토 14:00–토 17:00',
         '평소 1개 → 이번 2개',
         '아이 생일 파티 9건',
         '홈베이킹 2건',

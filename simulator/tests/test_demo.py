@@ -32,7 +32,7 @@ def test_page_assets_and_config(client):
     page = client.get("/demo").raise_for_status().text
     for name in ("demo.js", "chain.js", "flow.js", "story-time.js", "scenes.json"):
         assert client.get(f"/sim/assets/demo/{name}").status_code == 200, name
-    for name in ("house.css", "tokens.css", "viewer.css"):
+    for name in ("house.css", "tokens.css", "fonts.css", "viewer.css"):
         assert f'href="/sim/assets/house/{name}"' in page
     script = client.get("/sim/assets/demo/demo.js").raise_for_status().text
     assert 'from "../house/house.js"' in script

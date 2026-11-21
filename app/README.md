@@ -116,7 +116,8 @@ defines for manual and real-server runs.
 
 | Change | File |
 | --- | --- |
-| Colours and fonts | [`theme.dart`](lib/theme.dart) |
+| Shared design and vocabulary | [`design/`](../design/README.md) |
+| App theme | [`theme.dart`](lib/theme.dart) |
 | Tabs and app shell | [`main.dart`](lib/main.dart) |
 | Current and past preparations | [`preparations.dart`](lib/features/preparations.dart) |
 | Order scan and extracted items | [`order_extraction.dart`](lib/features/order_extraction.dart) |

@@ -88,7 +88,8 @@ PYTHONPATH=contracts/generated/python uv run --no-project --python 3.12 \
   --installation hub/installation.example.json --db hub/hub.sqlite3
 ```
 
-The dashboard listens on loopback at port 8088. It shows waiting work,
+The dashboard listens on loopback at port 8088. Use `--home-name` to name the
+household on the ledger. It defaults to **우리 집**. The dashboard shows waiting work,
 command receipts and read-backs, C-3 delivery, and restore or skip
 results. Start the Simulator separately with the same MQTT prefix. The
 example installation declares virtual devices using `mqtt:<logical_id>`.

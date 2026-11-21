@@ -1,0 +1,36 @@
+{
+  "devices": {
+    "cleaner": {"name": "로봇청소기", "short": "청소기", "icon": "circle_outlined"},
+    "light": {"name": "조명", "icon": "lightbulb_outline"},
+    "display": {"name": "TV", "app-label": "화면", "icon": "tv"},
+    "cooktop": {"name": "인덕션", "icon": "grid_view"},
+    "oven": {"name": "오븐", "icon": "countertops_outlined"},
+    "fridge": {"name": "냉장고", "icon": "kitchen_outlined"},
+    "smart_plug": {"name": "스마트 플러그", "short": "플러그", "icon": "power_outlined"},
+    "speaker": {"name": "스피커", "icon": "devices_other"},
+    "purifier": {"name": "공기청정기", "icon": "air"},
+    "styler": {"name": "스타일러", "icon": "checkroom_outlined"}
+  },
+  "rooms": {
+    "entrance": "현관",
+    "living_room": "거실",
+    "kitchen": "주방",
+    "bedroom": "침실"
+  },
+  "states": {
+    "on": "켜짐",
+    "off": "꺼짐",
+    "locked": "잠금",
+    "unlocked": "잠금 해제",
+    "idle": "대기 중",
+    "selected": "선택됨",
+    "resting": "쉬는 중",
+    "cleaning": "청소 중",
+    "cleaned": "청소 끝",
+    "cleaning_stopped": "청소 중지",
+    "normal_screen": "평소 화면",
+    "notice": "안내 표시",
+    "virtual": "모의 기기",
+    "physical": "실물 기기"
+  }
+}

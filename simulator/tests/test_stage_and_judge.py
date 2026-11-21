@@ -742,8 +742,8 @@ def test_sim_at16_mixed_stage_labels_virtual_assumption_provisional(tmp_path):
         view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
         for device, exceptions in (
             ("light_01", []),
-            ("light_02", ["실물 · 미검증", "부류 B"]),
-            ("light_03", ["부류 B"]),
+            ("light_02", ["실물 기기 · 미검증", "패널 조작을 알려 주지 않아요"]),
+            ("light_03", ["패널 조작을 알려 주지 않아요"]),
         ):
             heading = view.find(f'.//div[@data-device="{device}"]/article/h3')
             assert [mark.text for mark in heading.findall("small")] == exceptions
@@ -894,9 +894,10 @@ def test_sim_at19_live_3d_households_and_household_content(tmp_path, monkeypatch
         page = client.get("/sim/viewer").raise_for_status().text
         assert f'<a href="{other_home}">부모님 댁</a>' in page
         assert "javascript:" not in page and "테스트 홈 · 지아네" in page
+        assert "h_042" not in page
         view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
         clock_text = view.find(".//time")
-        assert clock_text.text == "10/17 토 14:01"
+        assert clock_text.text == "토 14:01"
         assert clock_text.get("datetime") == "2026-10-17T14:01:00+09:00"
         rooms = {
             room.findtext("h2"): {
@@ -927,7 +928,7 @@ def test_sim_at19_live_3d_households_and_household_content(tmp_path, monkeypatch
             assert marker.find("article/h3").get("title") == content
             assert marker.find("article/h3/small") is None
             assert marker.findtext('article/p[@class="device-value visually-hidden"]') == content
-        assert view.findtext('.//p[@id="device-legend"]') == "기기 기본 표기 · 가상 · 부류 A (패널 조작 보고 가정)"
+        assert view.findtext('.//p[@id="device-legend"]') == "기본은 모의 기기예요. 패널 조작을 알려 준다고 가정해요."
         assert view.findtext('.//h3[@id="entrance-summary"]') == "손님 있음 · 이전 3건"
         assert view.find('.//h3[@id="entrance-summary"]').get("tabindex") == "0"
         assert [
@@ -1042,12 +1043,12 @@ def test_sim_at20_viewer_projects_world_markers_and_no_reasoning(tmp_path, monke
                 "plan_id", "task_id", "device", "command", "target_value", "wait", "protective",
             }
         assert "오븐 · 굽기 설정 대기 170° 20분" in page
-        assert '<span class="planned-clock"> · 10/17 토 14:00</span>' in page
+        assert '<span class="planned-clock"> · 토 14:00</span>' in page
         assert "냉장고 · 안내 표시 · 택배를 들이면" in page
         view = ElementTree.fromstring(fragment)
         oven_plan = view.find('.//div[@data-device="oven_01"]/p[@class="planned"]')
-        assert "".join(oven_plan.itertext()) == "오븐 · 굽기 설정 대기 170° 20분 · 10/17 토 14:00"
-        assert oven_plan.findtext('span[@class="planned-clock"]') == " · 10/17 토 14:00"
+        assert "".join(oven_plan.itertext()) == "오븐 · 굽기 설정 대기 170° 20분 · 토 14:00"
+        assert oven_plan.findtext('span[@class="planned-clock"]') == " · 토 14:00"
         visual_values = {
             marker.get("data-device"): json.loads(marker.get("data-values"))
             for marker in view.findall(".//div[@data-device]")
@@ -1128,6 +1129,9 @@ def test_sim_at21_named_panel_and_appliance_app_share_device_path(
         assert client.get("/operator").status_code == 401
         panel = client.get("/operator", auth=AUTH).raise_for_status().text
         appliance = client.get("/app", auth=AUTH).raise_for_status().text
+        for page in (panel, appliance):
+            assert 'href="/sim/assets/house/tokens.css"' in page
+            assert 'href="/sim/style.css"' in page
         assert "엄마 · 기기 패널 · 조명 2700K로 변경" in panel
         assert all(
             f"<summary>{name}</summary>" in panel

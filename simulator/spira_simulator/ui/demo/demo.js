@@ -1,7 +1,11 @@
 // Reasoning uses the Server's app contract. House surfaces use World observations.
 import { createFlow } from "./flow.js";
 import { createHouse, hsvColor, replaceHouseMarkers, TV_SCENES } from "../house/house.js";
+import { DEVICE_NAMES, ROOM_NAMES, STATE_WORDS } from "../house/vocabulary.js";
 import { buildChain, houseDevicePresentation } from "./chain.js";
+
+document.querySelector('meta[name="theme-color"]').content =
+  getComputedStyle(document.documentElement).getPropertyValue("--paper").trim();
 
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -86,22 +90,23 @@ function sampleOrder() {
   canvas.width = 650;
   canvas.height = 880;
   const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#fffefa";
+  const tokens = getComputedStyle(document.documentElement);
+  ctx.fillStyle = tokens.getPropertyValue("--surface").trim();
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "#192e28";
+  ctx.fillStyle = tokens.getPropertyValue("--ink").trim();
   ctx.font = '700 46px "Apple SD Gothic Neo", sans-serif';
   ctx.fillText("주문 상세", 32, 65);
-  ctx.fillStyle = "#51665c";
+  ctx.fillStyle = tokens.getPropertyValue("--muted").trim();
   ctx.font = '500 26px "Apple SD Gothic Neo", sans-serif';
   ctx.fillText("예시 주문", 33, 111);
   ctx.font = '600 29px "Apple SD Gothic Neo", sans-serif';
   SAMPLE_ORDERS[state.order].forEach((item, index) => {
     const y = 150 + index * 75;
-    ctx.fillStyle = "#e4ede3";
+    ctx.fillStyle = tokens.getPropertyValue("--green-soft").trim();
     ctx.fillRect(32, y, 46, 46);
-    ctx.fillStyle = "#192e28";
+    ctx.fillStyle = tokens.getPropertyValue("--ink").trim();
     ctx.fillText(item, 97, y + 32);
-    ctx.fillStyle = "#edeee5";
+    ctx.fillStyle = tokens.getPropertyValue("--soft").trim();
     ctx.fillRect(32, y + 59, 586, 2);
   });
   return canvas;
@@ -119,12 +124,12 @@ function phoneMap() {
   const devices = inventory.filter((device) => device.modeled);
   return `<div class="phone-head"><h2>우리 집</h2><p>연결된 기기 ${devices.length}대</p></div>
     <div class="app-map" aria-label="우리 집 평면 지도">
-      ${rows([["entrance", "현관"], ["living_room", "거실"], ["kitchen", "주방"]], ([room, name]) => `<div class="app-room">
-        <strong>${name}</strong>${room === "entrance" ? '<span class="app-door">출입문</span>' : ""}
+      ${rows(["entrance", "living_room", "kitchen"], (room) => `<div class="app-room">
+        <strong>${ROOM_NAMES[room]}</strong>${room === "entrance" ? '<span class="app-door">출입문</span>' : ""}
         ${rows(devices.filter((device) => device.room === room), ({ logicalId, label, chosen }) => {
           const resting = hasHubPlan && !chosen;
           return `<div class="app-device${resting ? " resting" : ""}" data-device="${esc(logicalId)}">
-            <span class="app-device-icon" role="img"${resting ? ` aria-label="${esc(label)} · 쉬는 중"` : ' aria-hidden="true"'}></span>
+            <span class="app-device-icon" role="img"${resting ? ` aria-label="${esc(label)} · ${STATE_WORDS.resting}"` : ' aria-hidden="true"'}></span>
             ${resting ? "" : `<span>${esc(label)}</span>`}
           </div>`;
         })}
@@ -143,7 +148,7 @@ function themeFor(intent) {
 function phoneCard(card) {
   const theme = themeFor(state.chain.intents.find((intent) => intent.cardId === card.card_id));
   return `<div class="app-card"><h3>${paintTheme(card.text, theme)}</h3><ul>${rows(card.lines, (line) =>
-    `<li><span class="app-check" aria-label="${line.checked ? "선택됨" : "꺼짐"}">${line.checked ? "✓" : "○"}</span>
+    `<li><span class="app-check" aria-label="${line.checked ? STATE_WORDS.selected : STATE_WORDS.off}">${line.checked ? "✓" : "○"}</span>
       <span>${esc(line.text)}<small>${esc(line.time.story || "시간을 기다리는 중")}</small></span></li>`)}</ul></div>`;
 }
 
@@ -207,6 +212,10 @@ function calendarLabel(event) {
   return `${event.day}요일 ${event.tags.join(" · ")} 일정`;
 }
 
+function calendarTimes(event) {
+  return esc(`${event.day} ${event.start}–${event.day} ${event.end}`);
+}
+
 function contextStage({ evidence, funnel }) {
   const { calendar, unusual, kbCounts, kbExamples, kbNote } = evidence;
   const counts = kbCounts ?? [];
@@ -215,7 +224,7 @@ function contextStage({ evidence, funnel }) {
     <div class="context-left">
       <section class="panel"><h2>가까운 일정</h2>${calendar.length
         ? rows(calendar, (event) => `<div class="calendar-row"><b>${esc(calendarLabel(event))}</b>
-          <time>${esc(event.start)}–${esc(event.end)}</time></div>`)
+          <time>${calendarTimes(event)}</time></div>`)
         : '<p class="subtext">이 주문과 연결할 일정이 없어요.</p>'}</section>
       <section class="panel"><h2>평소와 달랐던 물건</h2>${unusualItems.length
         ? `<ul class="unusual-list">${rows(unusualItems, ({ item, why }) =>
@@ -239,7 +248,8 @@ function contextStage({ evidence, funnel }) {
 function basisChip(value, theme = false) {
   const event = state.chain.evidence.calendar.find((entry) => entry.id === value);
   const item = state.chain.items.find((entry) => entry.id === value);
-  const label = event ? calendarLabel(event) : (theme ? item?.name : item?.id) || value;
+  const label = event ? calendarLabel(event)
+    : (theme ? item?.name : item?.id) ?? (value === "가구 유형" ? value : "근거를 확인할 수 없어요");
   return `<span class="clue">${esc(label)}${item?.qty > 1 ? ` <small>${esc(item.qty)}개</small>` : ""}</span>`;
 }
 
@@ -258,7 +268,7 @@ function intentStage({ intents, unbundled, none, evidence, items }) {
         </div>`)}</div>
       </section>
       <div class="verdict"><small>주문의 의도</small><h2>${paintTheme(intent.text, theme)}</h2>
-        ${event ? `<p>${esc(calendarLabel(event))} · <time>${esc(event.start)}–${esc(event.end)}</time></p>` : ""}
+        ${event ? `<p>${esc(calendarLabel(event))} · <time>${calendarTimes(event)}</time></p>` : ""}
       </div>
       ${intent.basis.length ? `<p class="basis-note"><b>함께 본 근거</b><span>${rows(intent.basis, (value) => basisChip(value))}</span></p>` : ""}
     </div>`;
@@ -282,11 +292,11 @@ function translation(tasks, intents) {
   const oven = actions.find(({ cmd }) => cmd === "set_cook_standby")?.value;
   const color = hsvColor(light ?? undefined);
   const values = [
-    color && `<li><strong>조명</strong><span class="swatch" style="--concept:${color}" aria-hidden="true"></span>
+    color && `<li><strong>${DEVICE_NAMES.light}</strong><span class="swatch" style="--concept:${color}" aria-hidden="true"></span>
       색조 ${light.hue}° · 채도 ${light.saturation} · 밝기 ${light.brightness}</li>`,
-    scene && `<li><strong>TV</strong>${esc(TV_SCENES[scene] || scene)} 화면</li>`,
+    scene && `<li><strong>${DEVICE_NAMES.display}</strong>${esc(TV_SCENES[scene] ?? "분위기")} 화면</li>`,
     Number.isFinite(oven?.temp_c) && Number.isFinite(oven?.minutes) &&
-      `<li><strong>오븐</strong>${oven.temp_c}℃ · ${oven.minutes}분</li>`,
+      `<li><strong>${DEVICE_NAMES.oven}</strong>${oven.temp_c}℃ · ${oven.minutes}분</li>`,
   ].filter(Boolean);
   if (!values.length) return "";
   const moodTask = tasks.find(({ values }) => values.some(({ cmd }) => cmd === "color" || cmd === "play_mood"));
@@ -901,3 +911,7 @@ async function boot() {
 }
 
 boot().catch(() => notice("시연 화면을 불러오지 못했어요."));
+
+for (const label of document.querySelectorAll(".room-key [data-room]")) {
+  label.textContent = ROOM_NAMES[label.dataset.room];
+}

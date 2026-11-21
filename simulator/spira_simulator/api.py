@@ -17,11 +17,11 @@ from fastapi.templating import Jinja2Templates
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from .demo import mount_demo
+from .design_vocabulary import ROOM_NAMES, STATE_WORDS
 from .mqtt import Broker, DeviceProtocol
 from .profile import DEFAULT_PROFILE, Profile, load_profile
 from .sources import JsonSource, Source, judge, stage_overlay
 from .surfaces import (
-    ROOM_NAMES,
     device_controls,
     device_name,
     display_time,
@@ -231,12 +231,12 @@ def create_app(
             {
                 **display,
                 "fragment": fragment,
-                "home": world.profile.display_name or world.profile.household_id,
-                "household_id": world.profile.household_id,
+                "home": world.profile.display_name or "우리 집",
                 "peers": request.app.state.peer_viewers,
                 "rooms": rooms,
                 "room_names": ROOM_NAMES,
-                "unplaced": planned,
+                "state_words": STATE_WORDS,
+                "unplaced": planned.values(),
                 "has_preparation": bool(overlay_data["preparation"]),
                 "overlay_errors": overlay_data["errors"],
                 "restores": restores,
@@ -285,7 +285,7 @@ def create_app(
             request,
             "appliance.html",
             {
-                "home": world.profile.display_name or world.profile.household_id,
+                "home": world.profile.display_name or "우리 집",
                 "tiles": device_tiles,
                 "room_names": ROOM_NAMES,
                 "people": names,

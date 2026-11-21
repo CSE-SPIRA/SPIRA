@@ -1,4 +1,5 @@
 import '../contracts.dart' as wire;
+import '../design_vocabulary.g.dart';
 
 String lineLabel(wire.LineState state) => switch (state) {
   wire.LineState.HELD => '시간을 기다리는 중',
@@ -10,7 +11,7 @@ String lineLabel(wire.LineState state) => switch (state) {
   wire.LineState.UNKNOWN => '결과 확인 불가',
   wire.LineState.BLOCKED => '실행하지 못함',
   wire.LineState.USER_CHANGED => '사용자가 변경함',
-  wire.LineState.OFF => '꺼짐',
+  wire.LineState.OFF => stateWords['off']!,
   wire.LineState.STOPPED => '중지됨',
   wire.LineState.CANCELLED => '취소됨',
   wire.LineState.DROPPED => '준비하지 않음',
@@ -33,17 +34,16 @@ String eventLabel(wire.TriggerEvent event) => switch (event) {
   wire.TriggerEvent.PACKAGE_BROUGHT_IN => '택배를 집 안으로 들이는 때',
 };
 
-String deviceLabel(String type, {String? unknownLabel}) => switch (type) {
-  'cleaner' => '로봇청소기',
-  'light' => '조명',
-  'display' => '화면',
-  'oven' => '오븐',
-  'cooktop' => '인덕션',
-  'fridge' => '냉장고',
-  'smart_plug' => '스마트 플러그',
-  'speaker' => '스피커',
-  _ => unknownLabel ?? type,
-};
+String deviceLabel(String type, {String? unknownLabel}) =>
+    appDeviceNames[type] ?? deviceNames[type] ?? unknownLabel ?? '기기';
+
+String? roomLabel(String? room) {
+  final name = room?.trim();
+  return name == null || name.isEmpty ? null : roomNames[name] ?? name;
+}
+
+String substrateLabel(wire.Substrate substrate) =>
+    stateWords[wire.substrateValues.reverse[substrate]]!;
 
 String commandLabel(String command) => switch (command) {
   'clean' => '청소',
@@ -65,23 +65,20 @@ String commandLabel(String command) => switch (command) {
 DateTime _seoulTime(String raw) =>
     DateTime.parse(raw).toUtc().add(const Duration(hours: 9));
 
-String seoulDateTime(String raw) {
+String seoulDateTime(String raw, {bool fullDate = false}) {
   final dt = _seoulTime(raw);
-  final minute = dt.minute.toString().padLeft(2, '0');
-  return '${dt.month}월 ${dt.day}일 ${dt.hour}:$minute';
+  if (!fullDate) return _lineClock(dt);
+  return '${dt.month}월 ${dt.day}일 (${_weekday(dt)}) ${_hourMinute(dt)}';
 }
 
-const koreanWeekdays = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일'];
+const _weekdays = ['월', '화', '수', '목', '금', '토', '일'];
 
-String seoulWeekdayTime(String raw) {
-  final dt = _seoulTime(raw);
-  return '${dt.month}월 ${dt.day}일 ${koreanWeekdays[dt.weekday - 1]} ${_koreanClock(dt.hour, dt.minute)}';
-}
+String _weekday(DateTime seoul) => _weekdays[seoul.weekday - 1];
 
-String _koreanClock(int hour, int minute) {
-  final period = hour < 12 ? '오전 ' : '오후 ';
-  final clockHour = hour % 12 == 0 ? 12 : hour % 12;
-  return '$period$clockHour시${minute == 0 ? '' : ' $minute분'}';
+String _hourMinute(DateTime seoul) {
+  final hour = seoul.hour.toString().padLeft(2, '0');
+  final minute = seoul.minute.toString().padLeft(2, '0');
+  return '$hour:$minute';
 }
 
 String? lineTimeLabel(wire.LineElement? line) =>
@@ -109,9 +106,4 @@ String? lineTimeDerivation(wire.LineElement? line, String? scheduleStart) {
   return '${_lineClock(event)} 일정 → $relative → ${_lineClock(task)}';
 }
 
-String _lineClock(DateTime seoul) {
-  final day = koreanWeekdays[seoul.weekday - 1][0];
-  final hour = seoul.hour.toString().padLeft(2, '0');
-  final minute = seoul.minute.toString().padLeft(2, '0');
-  return '$day $hour:$minute';
-}
+String _lineClock(DateTime seoul) => '${_weekday(seoul)} ${_hourMinute(seoul)}';

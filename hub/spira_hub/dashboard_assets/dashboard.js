@@ -1,3 +1,6 @@
+document.querySelector('meta[name="theme-color"]').content =
+  getComputedStyle(document.documentElement).getPropertyValue("--paper").trim();
+
 const regions = ["ledger-summary", "ledger", "detail-content"].map((id) => document.getElementById(id));
 
 async function refresh() {

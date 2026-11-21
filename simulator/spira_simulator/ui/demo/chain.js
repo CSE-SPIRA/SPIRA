@@ -1,4 +1,5 @@
 import { HOUSE_DEVICES } from "../house/devices.js";
+import { DEVICE_NAMES } from "../house/vocabulary.js";
 import { displayTime, planReceiptTime, storyClock, storyLedgerTime, storyObservedTime, storyPlanTime } from "./story-time.js";
 
 const PACKAGE_EVENT = "package.brought_in";
@@ -6,13 +7,9 @@ const PACKAGE_STORY = "파티 전";
 const SLOT_LABELS = { event: "행사", guests: "손님", activity: "활동", theme: "테마" };
 const TRIGGERS = { guest_arrived: "손님이 오면", event_end: "행사가 끝나면", [PACKAGE_EVENT]: "택배를 들여오면" };
 const OCCURRENCES = { guest_arrived: "손님 도착", event_end: "행사 종료", [PACKAGE_EVENT]: "택배 들여옴" };
-const DEVICE_TYPES = {
-  light: "조명", display: "TV", cleaner: "로봇청소기", cooktop: "인덕션",
-  oven: "오븐", fridge: "냉장고", smart_plug: "스마트 플러그", speaker: "스피커",
-  purifier: "공기청정기", styler: "스타일러",
-};
+
 function lineTime(when, clock) {
-  if (!when?.time) return { story: TRIGGERS[when?.event] ?? when?.event ?? "", derivation: null };
+  if (!when?.time) return { story: TRIGGERS[when?.event] ?? "", derivation: null };
   const at = storyPlanTime(when.time, clock);
   const story = displayTime(at);
   if (!clock) return { story, derivation: null };
@@ -38,7 +35,7 @@ function chainDevices(tasks, details, snapshot) {
     const type = live?.device_type ?? planned?.type;
     return {
       logicalId,
-      label: model?.label ?? live?.label ?? DEVICE_TYPES[type] ?? type ?? logicalId,
+      label: model?.label ?? live?.label ?? (Object.hasOwn(DEVICE_NAMES, type) ? DEVICE_NAMES[type] : "기기"),
       room: model?.room ?? live?.room ?? planned?.room ?? null,
       chosen: traces.has(logicalId),
       state: live?.values ?? null,
@@ -210,8 +207,8 @@ export function buildChain({ episode, rationale, card, hubPlan, hubLedger = [], 
     cards: chainCards,
     hasEpisode: Boolean(episode?.items), hasRationale: Boolean(rationale), hasHubPlan: Boolean(hubPlan),
     cardReady: Boolean(rationale && episode?.card_ids?.every((id) => cards.some((entry) => entry.card_id === id))),
-    orderClock: displayTime(episode?.shared_at, null, false),
-    cardClock: displayTime(cards[0]?.updated_at || episode?.shared_at, firstClock?.offset, false),
+    orderClock: displayTime(episode?.shared_at),
+    cardClock: displayTime(cards[0]?.updated_at || episode?.shared_at, firstClock?.offset),
     timeline: houseTimeline(sharedAt, hubLedger, cards, clocks, firstClock, tasks, plan),
   };
 }

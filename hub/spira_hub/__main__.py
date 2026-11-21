@@ -28,6 +28,7 @@ def main():
     parser.add_argument("--installation", required=True, type=Path)
     parser.add_argument("--db", default=Path("hub.sqlite3"), type=Path)
     parser.add_argument("--port", default=8088, type=int)
+    parser.add_argument("--home-name", default="우리 집", help="Household name for the ledger")
     args = parser.parse_args()
     required = ("SPIRA_SERVER_URL", "SPIRA_HOUSEHOLD", "SPIRA_HUB_KEY")
     if missing := [name for name in required if not os.environ.get(name)]:
@@ -79,7 +80,7 @@ def run(args):
                     task.cancel()
 
     try:
-        uvicorn.run(create_app(runtime, lifespan=lifespan, hub_key=hub_key),
+        uvicorn.run(create_app(runtime, lifespan=lifespan, hub_key=hub_key, home_name=args.home_name),
                     host="127.0.0.1", port=args.port, access_log=False)
     finally:
         store.db.close()

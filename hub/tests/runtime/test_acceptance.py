@@ -1148,7 +1148,7 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
         ]
         page = (await hub.dashboard.get("/")).text
         ledger_page, _ = page.split('<section id="detail"', 1)
-        assert '<time datetime="2026-10-15T21:11:55+09:00" title="2026-10-15 21:11:55 KST">21:11</time>' in ledger_page
+        assert '<time datetime="2026-10-15T21:11:55+09:00">목 21:11</time>' in ledger_page
         assert "보내는 중" in ledger_page and "서버에 보냄" not in ledger_page
         await hub.runtime.flush()
 
@@ -1236,20 +1236,20 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
         page = (await hub.dashboard.get("/")).text
         ledger_page, detail = page.split('<section id="detail"', 1)
         assert "Hub · 이 집이 본 것" in ledger_page
-        assert "h_042 · 계획 v3 · 할 일 5 · 서버 연결됨" in ledger_page
+        assert "우리 집 · 계획 v3 · 할 일 5 · 서버 연결됨" in ledger_page
         assert 'href="#detail">자세한 기록</a>' in ledger_page
         assert 'href="/state"' in detail and "Waiting work" in detail
         assert ledger_page.count('<li class="ledger-row">') == len(ledger)
         assert ledger_page.count("서버에 보냄") == len(ledger)
-        assert all(label not in ledger_page for label in ("ack 204", "event 보냄", "restore 보냄", "ep_9031"))
+        assert all(label not in ledger_page for label in ("ack 204", "event 보냄", "restore 보냄", "ep_9031", "h_042"))
         rows = ledger_page.split('<li class="ledger-row">')[1:]
         for markup, row in zip(rows, reversed(ledger), strict=True):
             assert f'datetime="{row["at"]}"' in markup and row["what"] in markup
-        assert "<span>10/17</span> 17:50" in rows[0] and "<span>10/15</span> 21:11" in rows[-1]
+        assert ">토 17:50</time>" in rows[0] and ">목 21:11</time>" in rows[-1]
         assert 'class="pill actor">사람</span>' in ledger_page
         assert 'class="pill actor">집</span>' in ledger_page
         assert 'class="pill actor">SPIRA</span>' in ledger_page
-        for asset in ("dashboard.css", "dashboard.js"):
+        for asset in ("tokens.css", "dashboard.css", "dashboard.js"):
             assert f'"/assets/{asset}"' in page
             assert (await hub.dashboard.get(f"/assets/{asset}")).status_code == 200
         await hub.close()

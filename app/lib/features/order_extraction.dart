@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../contracts.dart' as wire;
 import '../theme.dart';
+import '../korean_text.dart';
 import 'setup.dart';
 
 const _scanDuration = Duration(milliseconds: 2400);
@@ -179,7 +180,7 @@ class _OrderExtractionState extends State<OrderExtraction>
                         icon: Icon(
                           expanded ? Icons.expand_less : Icons.expand_more,
                         ),
-                        label: Text('읽은 품목 ${episode.itemCount}개'),
+                        label: KoreanText('읽은 품목 ${episode.itemCount}개'),
                       ),
                     ),
                   ),
@@ -198,7 +199,7 @@ class _OrderExtractionState extends State<OrderExtraction>
                   if (_expanded && !previewing && widget.edit != null)
                     Align(alignment: Alignment.centerLeft, child: widget.edit),
                 ] else if (episode.itemCount > 0)
-                  Text('읽은 품목 ${episode.itemCount}개'),
+                  KoreanText('읽은 품목 ${episode.itemCount}개'),
               if (!previewing) following!,
             ],
           );
@@ -351,7 +352,7 @@ class OrderItemList extends StatelessWidget {
       if (episode.maskedCount > 0)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Text('가린 물건 ${episode.maskedCount}개', style: small),
+          child: KoreanText('가린 물건 ${episode.maskedCount}개', style: small),
         ),
     ];
     return Container(
@@ -426,15 +427,15 @@ class _ItemRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(item.type, style: theme.textTheme.titleMedium),
-                Text(item.name, style: small),
-                if (setAside) Text('이번 준비와 따로 본 물건', style: small),
+                KoreanText(item.type, style: theme.textTheme.titleMedium),
+                KoreanText(item.name, style: small),
+                if (setAside) KoreanText('이번 준비와 따로 본 물건', style: small),
               ],
             ),
           ),
           const SizedBox(width: 8),
           Flexible(
-            child: Text(
+            child: KoreanText(
               item.qty == null ? '수량 미확인' : '${item.qty}개',
               style: small,
             ),

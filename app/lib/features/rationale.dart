@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../app_controller.dart';
 import '../contracts.dart' as wire;
 import '../theme.dart';
+import '../korean_text.dart';
 import 'labels.dart';
 import 'order_extraction.dart';
 import 'setup.dart';
@@ -39,7 +40,7 @@ class _RationaleScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('판단 근거')),
+    appBar: AppBar(title: const KoreanText('판단 근거')),
     body: SafeArea(
       top: false,
       child: FutureBuilder<wire.Rationale>(
@@ -239,7 +240,7 @@ class _RationaleContentState extends State<_RationaleContent> {
                   (result.noneReason?.trim().isNotEmpty ?? false))
                 Padding(
                   padding: const EdgeInsets.only(bottom: 24),
-                  child: _Panel(child: Text(result.noneReason!)),
+                  child: _Panel(child: KoreanText(result.noneReason!)),
                 ),
               tasks,
               notices,
@@ -275,7 +276,8 @@ class _ContextSection extends StatelessWidget {
               for (final event in linkedEvents)
                 _EvidenceRow(
                   title: _calendarLabel(event),
-                  detail: '${event.start}–${event.end}',
+                  detail:
+                      '${event.day} ${event.start}–${event.day} ${event.end}',
                 ),
             ],
           ),
@@ -351,15 +353,18 @@ class _Situation extends StatelessWidget {
         if (selected)
           const Padding(
             padding: EdgeInsets.only(bottom: 8),
-            child: Text('선택한 할 일의 근거'),
+            child: KoreanText('선택한 할 일의 근거'),
           ),
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: Row(
             children: [
-              Expanded(flex: 6, child: Text('주문과 일정에서 찾은 근거', style: caption)),
+              Expanded(
+                flex: 6,
+                child: KoreanText('주문과 일정에서 찾은 근거', style: caption),
+              ),
               const SizedBox(width: _proofGap),
-              Expanded(flex: 5, child: Text('짐작한 상황', style: caption)),
+              Expanded(flex: 5, child: KoreanText('짐작한 상황', style: caption)),
               const SizedBox(width: _proofGap),
             ],
           ),
@@ -388,7 +393,7 @@ class _Situation extends StatelessWidget {
             child: TextButton.icon(
               onPressed: showTask,
               icon: const Icon(Icons.arrow_downward),
-              label: const Text('선택한 할 일 보기'),
+              label: const KoreanText('선택한 할 일 보기'),
             ),
           ),
       ],
@@ -509,7 +514,10 @@ class _ChainSection extends StatelessWidget {
         children: [
           Semantics(
             header: true,
-            child: Text(title, style: Theme.of(context).textTheme.titleLarge),
+            child: KoreanText(
+              title,
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
           ),
           for (final child in children) ...[const SizedBox(height: 10), child],
         ],
@@ -564,7 +572,10 @@ class _EvidenceGroup extends StatelessWidget {
       children: [
         Semantics(
           header: true,
-          child: Text(title, style: Theme.of(context).textTheme.titleMedium),
+          child: KoreanText(
+            title,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
         ),
         for (final row in rows) ...[const Divider(height: 16), row],
       ],
@@ -584,14 +595,14 @@ class _EvidenceRow extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
+        KoreanText(
           title,
           style: theme.textTheme.bodyMedium?.copyWith(
             fontWeight: FontWeight.w600,
           ),
         ),
         if (detail.trim().isNotEmpty)
-          Text(
+          KoreanText(
             detail,
             style: theme.textTheme.bodyMedium?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
@@ -635,11 +646,11 @@ class _SituationSlot extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
+          KoreanText(
             label,
             style: theme.textTheme.bodySmall?.copyWith(color: foreground),
           ),
-          Text(
+          KoreanText(
             hasValue ? value! : '알 수 없어요',
             style: theme.textTheme.titleMedium?.copyWith(color: foreground),
           ),
@@ -674,7 +685,7 @@ class _Chips extends StatelessWidget {
             ),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              child: Text(
+              child: KoreanText(
                 label,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: colors.primary,
@@ -709,12 +720,12 @@ class _IntentPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
+          KoreanText(
             '주문의 의도',
             style: theme.textTheme.bodySmall?.copyWith(color: colors.onPrimary),
           ),
           const SizedBox(height: 6),
-          Text.rich(
+          KoreanText.rich(
             highlightTheme(sentence, themePhrase, appPinkOnGreen),
             style: theme.textTheme.titleLarge?.copyWith(
               color: colors.onPrimary,
@@ -723,7 +734,7 @@ class _IntentPanel extends StatelessWidget {
           ),
           if (clues.isNotEmpty) ...[
             const SizedBox(height: 12),
-            Text(
+            KoreanText(
               '함께 본 근거',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: colors.onPrimary,
@@ -762,7 +773,7 @@ class _TaskPanel extends StatelessWidget {
     final devices = (task?.devices ?? const <wire.Device>[])
         .map((device) {
           final type = deviceLabel(device.type, unknownLabel: '기기');
-          final room = device.room?.trim() ?? '';
+          final room = roomLabel(device.room) ?? '';
           return room.isEmpty ? type : '$room $type';
         })
         .toSet()
@@ -785,12 +796,12 @@ class _TaskPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (selected)
-            Text(
+            KoreanText(
               '선택한 할 일',
               style: theme.textTheme.bodySmall?.copyWith(color: colors.primary),
             ),
           if (need.trim().isNotEmpty) ...[
-            Text(need, style: theme.textTheme.bodyMedium),
+            KoreanText(need, style: theme.textTheme.bodyMedium),
             Align(
               alignment: Alignment.centerLeft,
               child: ExcludeSemantics(
@@ -802,9 +813,12 @@ class _TaskPanel extends StatelessWidget {
               ),
             ),
           ],
-          Text(task?.line ?? current!.text, style: theme.textTheme.titleMedium),
+          KoreanText(
+            task?.line ?? current!.text,
+            style: theme.textTheme.titleMedium,
+          ),
           if (timing != null)
-            Text(
+            KoreanText(
               timing,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: colors.onSurfaceVariant,
@@ -813,7 +827,7 @@ class _TaskPanel extends StatelessWidget {
             ),
           if (devices.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(
+            KoreanText(
               devices,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: colors.onSurfaceVariant,
@@ -824,16 +838,16 @@ class _TaskPanel extends StatelessWidget {
             const SizedBox(height: 8),
             _Chips([?way, ?status]),
           ],
-          if (task == null) const Text('이 할 일의 자세한 근거를 볼 수 없어요.'),
+          if (task == null) const KoreanText('이 할 일의 자세한 근거를 볼 수 없어요.'),
           if (current?.endState == wire.EndState.WITHHELD)
-            Text(endLabel(wire.EndState.WITHHELD)),
+            KoreanText(endLabel(wire.EndState.WITHHELD)),
           if (showSituation != null)
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
                 onPressed: showSituation,
                 icon: const Icon(Icons.arrow_upward),
-                label: const Text('이 일을 정한 근거 보기'),
+                label: const KoreanText('이 일을 정한 근거 보기'),
               ),
             ),
         ],

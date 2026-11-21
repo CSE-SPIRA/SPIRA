@@ -12,6 +12,7 @@ import 'features/our_home.dart';
 import 'features/preparations.dart';
 import 'features/settings.dart';
 import 'features/setup.dart';
+import 'korean_text.dart';
 import 'platform/android_bridge.dart';
 import 'platform/google_calendar.dart';
 import 'platform/home_hub_onboarding.dart';
@@ -30,7 +31,7 @@ void main() {
     runApp(
       const MaterialApp(
         home: Scaffold(
-          body: SafeArea(child: Center(child: Text('서버 주소를 설정해 주세요.'))),
+          body: SafeArea(child: Center(child: KoreanText('서버 주소를 설정해 주세요.'))),
         ),
       ),
     );
@@ -87,7 +88,9 @@ class SpiraApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'SPIRA',
-      theme: buildAppTheme(),
+      theme: buildAppTheme(
+        reduceMotion: MediaQuery.disableAnimationsOf(context),
+      ),
       locale: const Locale('ko'),
       supportedLocales: const [Locale('ko')],
       // ignore: deprecated_member_use
@@ -132,6 +135,9 @@ class _HomeState extends State<_Home> with WidgetsBindingObserver {
   Future<void> _token({bool hub = false}) async {
     final token = await showDialog<String>(
       context: context,
+      animationStyle: MediaQuery.disableAnimationsOf(context)
+          ? AnimationStyle.noAnimation
+          : null,
       builder: (_) => _TokenDialog(
         title: hub ? '우리 집 접속 키' : '서버 접속 토큰',
         label: hub ? '접속 키' : '접속 토큰',
@@ -154,7 +160,7 @@ class _HomeState extends State<_Home> with WidgetsBindingObserver {
       return Scaffold(
         backgroundColor: surface,
         appBar: AppBar(
-          title: const Text('SPIRA'),
+          title: const KoreanText('SPIRA'),
           backgroundColor: surface,
           actions: [
             if (!ready && app.needsToken)
@@ -285,7 +291,10 @@ class _TabBar extends StatelessWidget {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(tab.icon, size: 20),
-                              Text(tab.label, textAlign: TextAlign.center),
+                              KoreanText(
+                                tab.label,
+                                textAlign: TextAlign.center,
+                              ),
                             ],
                           ),
                         ),
@@ -322,7 +331,7 @@ class _TokenDialogState extends State<_TokenDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: Text(widget.title),
+    title: KoreanText(widget.title),
     content: TextField(
       controller: _text,
       obscureText: true,
@@ -333,14 +342,14 @@ class _TokenDialogState extends State<_TokenDialog> {
     actions: [
       TextButton(
         onPressed: () => Navigator.pop(context),
-        child: const Text('취소'),
+        child: const KoreanText('취소'),
       ),
       FilledButton(
         onPressed: () {
           final token = _text.text.trim();
           if (token.isNotEmpty) Navigator.pop(context, token);
         },
-        child: const Text('연결'),
+        child: const KoreanText('연결'),
       ),
     ],
   );

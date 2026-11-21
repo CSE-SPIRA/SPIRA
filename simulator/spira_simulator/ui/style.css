@@ -1,66 +1,72 @@
 :root {
-  color-scheme: light;
-  font: 100% system-ui, sans-serif;
-  background: #f3f3ed;
-  color: #212a25;
+  font: 100% var(--sans);
+  background: var(--paper);
+  color: var(--ink);
   line-height: 1.5;
+  word-break: keep-all;
 }
 * { box-sizing: border-box; }
 body { margin: 0; }
 main { width: min(94%, 72rem); margin: 2.5rem auto; }
-header { margin-bottom: 1.5rem; }
+header { margin-bottom: var(--space-24); }
 h1, h2, h3, p { margin: 0 0 .55rem; }
 h1 { font-size: clamp(2rem, 5vw, 3.2rem); line-height: 1.1; }
-h2 { font-size: 1.25rem; }
-h3 { font-size: 1rem; }
+h2 { font-size: var(--size-20); }
+h3 { font-size: var(--size-16); }
+a { color: var(--green); }
 .controls {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
-  gap: 1rem;
-  margin-bottom: 1rem;
+  gap: var(--space-16);
+  margin-bottom: var(--space-16);
 }
-.metadata { color: #49584f; font-size: .88rem; }
-.control, .evidence { padding: 1rem; }
-.control, .evidence { background: #fff; border: 1px solid #bdc9bd; }
+.metadata { color: var(--muted); font-size: .88rem; }
+.control, .evidence {
+  padding: var(--space-16);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-8);
+}
 ul { margin-top: .4rem; padding-left: 1.35rem; }
 label { display: block; margin: .6rem 0 .2rem; }
-button, select, textarea { font: inherit; padding: .42rem .6rem; }
-button { cursor: pointer; border: 1px solid #45614f; background: #e4ece3; color: #212a25; margin: .25rem .2rem .25rem 0; }
-button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #257052; outline-offset: 2px; }
-textarea { width: 100%; min-height: 5.2rem; }
-pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: .5rem 0 1rem; }
-
-.person-controls { margin-bottom: 1rem; }
-.person-controls summary { cursor: pointer; padding: .25rem 0; }
-.person-controls form { margin: .25rem 0; }
-header a + a { margin-left: .75rem; }
-
-.appliance-app {
-  background: #f4f4f2;
-  color: #15191b;
-  min-height: 100vh;
+button, select, textarea, input { font: inherit; }
+button, select, textarea {
+  padding: .42rem .6rem;
+  border: 1px solid var(--green-line);
+  border-radius: var(--radius-6);
+  background: var(--surface);
+  color: var(--ink);
 }
+button { cursor: pointer; background: var(--green-soft); margin: .25rem .2rem .25rem 0; }
+:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+textarea { width: 100%; min-height: 5.2rem; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--space-8) 0 var(--space-16); }
+
+.person-controls { margin-bottom: var(--space-16); }
+.person-controls summary { cursor: pointer; padding: var(--space-4) 0; }
+.person-controls form { margin: var(--space-4) 0; }
+header a + a { margin-left: var(--space-12); }
+
+.appliance-app { min-height: 100vh; }
 .appliance-app main {
-  width: min(94%, 58rem);
-  margin: 1.5rem auto;
-  padding: clamp(.8rem, 3vw, 1.5rem);
-  background: #fff;
-  border: 1px solid #b9bebb;
-  border-radius: 8px;
+  width: 94%;
+  max-width: 27rem;
+  margin: var(--space-24) auto;
+  padding: clamp(.8rem, 3vw, var(--space-24));
+  background: var(--surface);
+  border: 2px solid var(--frame);
+  border-radius: var(--radius-22);
 }
 .appliance-app h1 { font-size: clamp(1.2rem, 3vw, 1.7rem); margin: 0; }
-.appliance-device small { color: #6b7378; font-size: .78em; font-weight: 400; }
-.observation-warning { color: #824a21; font-size: .83rem; font-weight: 600; }
-.appliance-app main { max-width: 27rem; border: 2px solid #15191b; border-radius: 20px; }
+.appliance-device small { color: var(--muted); font-size: .78em; font-weight: 400; }
+.observation-warning { color: var(--pink-ink); font-size: .83rem; font-weight: 600; }
 .appliance-app header { margin-bottom: .65rem; }
-.appliance-device { padding: .65rem 0; border-top: 1px solid #dadedb; }
-.appliance-device h2 { font-size: 1rem; }
+.appliance-device { padding: .65rem 0; border-top: 1px solid var(--line); }
+.appliance-device h2 { font-size: var(--size-16); }
 .device-actions { display: flex; flex-wrap: wrap; gap: .35rem; }
 .device-actions button {
   margin: 0;
-  border: 1px solid #b9bebb;
-  border-radius: 5px;
-  background: #fbfbfa;
-  color: #15191b;
+  border-color: var(--line);
+  background: var(--paper);
   font-size: .85rem;
 }

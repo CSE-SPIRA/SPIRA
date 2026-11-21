@@ -367,8 +367,8 @@ test("birthday and grocery receipts use the order day while delivery has no cloc
   const delivered = "2026-11-20T11:41:41+09:00";
   const packageEvent = "package.brought_in";
   for (const [input, episodeId, expectedPlan, expectedLedger] of [
-    [birthdayOrder, "ep_9031", "목 21:00 공유 → 21:11 계획 받음", "목 21:11"],
-    [groceries, "ep_91502", "수 19:30 공유 → 19:41 계획 받음", "수 19:41"],
+    [birthdayOrder, "ep_9031", "목 21:00 공유 → 목 21:11 계획 받음", "목 21:11"],
+    [groceries, "ep_91502", "수 19:30 공유 → 수 19:41 계획 받음", "수 19:41"],
   ]) {
     const episode = { ...input.episode, episode_id: episodeId, shared_at: shared };
     const card = input.card && {
@@ -413,7 +413,7 @@ test("plan receipt uses the contract capture and the configured quiet window", (
     end_fallback_min: { normal: 180, demo: 10 },
   } };
   const chain = buildChain({ ...input, hubLedger, storyTime });
-  assert.equal(chain.timeline.plan.story, "목 21:00 공유 → 21:16 계획 받음");
+  assert.equal(chain.timeline.plan.story, "목 21:00 공유 → 목 21:16 계획 받음");
   assert.equal(chain.reports[0].story, "목 21:16");
   for (const shared_at of ["2026-10-15", "invalid", "2026-10-16T12:00:00+09:00"]) {
     const missing = buildChain({ ...input, episode: { ...input.episode, shared_at }, hubLedger, storyTime });

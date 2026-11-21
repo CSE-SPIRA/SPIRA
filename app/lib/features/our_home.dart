@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
 import '../contracts.dart' as wire;
+import '../design_tokens.g.dart';
+import '../design_vocabulary.g.dart';
 import '../theme.dart';
+import '../korean_text.dart';
 import 'labels.dart';
 import 'setup.dart';
 
@@ -161,27 +164,24 @@ class _OurHomeState extends State<OurHome> {
         final rooms = <String, List<Widget>>{};
         final selectionKnown = _order == null || result != null;
         for (final (:id, :type, :room, :label) in devices) {
-          final roomName = room?.trim();
+          final roomName = roomLabel(room);
           final name = label?.trim();
           final times = selected[id]?.times;
           rooms
-              .putIfAbsent(
-                roomName == null || roomName.isEmpty ? '방 미확인' : roomName,
-                () => [],
-              )
+              .putIfAbsent(roomName ?? '방 미확인', () => [])
               .add(
                 _HomeDevice(
                   key: ValueKey(id),
                   name: name == null || name.isEmpty
-                      ? _homeDeviceLabel(type)
+                      ? deviceNames[type] ?? '기기'
                       : name,
                   type: type,
                   selected: times != null,
                   status: switch (times) {
                     final times? when times.isNotEmpty =>
-                      '선택됨 · ${times.join(' · ')}',
-                    _ when times != null => '선택됨',
-                    _ when selectionKnown => '쉬는 중',
+                      '${stateWords['selected']} · ${times.join(' · ')}',
+                    _ when times != null => stateWords['selected']!,
+                    _ when selectionKnown => stateWords['resting']!,
                     _ => '준비 미확인',
                   },
                 ),
@@ -193,11 +193,16 @@ class _OurHomeState extends State<OurHome> {
           onRefresh: _refresh,
           child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+            padding: const EdgeInsets.fromLTRB(
+              DesignTokens.space20,
+              DesignTokens.space12,
+              DesignTokens.space20,
+              DesignTokens.space24,
+            ),
             children: [
-              Text('우리 집', style: theme.textTheme.headlineMedium),
+              KoreanText('우리 집', style: theme.textTheme.headlineMedium),
               if (devices.isNotEmpty)
-                Text(
+                KoreanText(
                   '확인한 기기 ${devices.length}대',
                   style: theme.textTheme.bodySmall,
                 ),
@@ -215,7 +220,7 @@ class _OurHomeState extends State<OurHome> {
                 else if (devices.isEmpty)
                   const StatusMessage('집에 등록된 기기가 없어요.'),
               ],
-              for (final room in {'현관', '거실', '주방', ...rooms.keys})
+              for (final room in {...roomNames.values, ...rooms.keys})
                 if (rooms[room] case final cards?)
                   _RoomGrid(name: room, cards: cards),
             ],
@@ -225,13 +230,6 @@ class _OurHomeState extends State<OurHome> {
     ),
   );
 }
-
-String _homeDeviceLabel(String type) => switch (type) {
-  'display' => 'TV',
-  'purifier' => '공기청정기',
-  'styler' => '스타일러',
-  _ => deviceLabel(type, unknownLabel: '기기'),
-};
 
 class _RoomGrid extends StatelessWidget {
   const _RoomGrid({required this.name, required this.cards});
@@ -243,16 +241,19 @@ class _RoomGrid extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(top: 18),
     child: Column(
-      spacing: 8,
+      spacing: DesignTokens.space8,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Semantics(
           header: true,
-          child: Text(name, style: Theme.of(context).textTheme.titleMedium),
+          child: KoreanText(
+            name,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
         ),
         LayoutBuilder(
           builder: (context, constraints) {
-            const gap = 8.0;
+            const gap = DesignTokens.space8;
             final minWidth = MediaQuery.textScalerOf(context).scale(144);
             final columns = ((constraints.maxWidth + gap) / (minWidth + gap))
                 .floor()
@@ -291,25 +292,14 @@ class _HomeDevice extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-    final icon = switch (type) {
-      'cleaner' => Icons.circle_outlined,
-      'light' => Icons.lightbulb_outline,
-      'display' => Icons.tv,
-      'cooktop' => Icons.grid_view,
-      'oven' => Icons.countertops_outlined,
-      'fridge' => Icons.kitchen_outlined,
-      'smart_plug' => Icons.power_outlined,
-      'styler' => Icons.checkroom_outlined,
-      'purifier' => Icons.air,
-      _ => Icons.devices_other,
-    };
+    final icon = deviceIcons[type] ?? Icons.devices_other;
     final foreground = selected ? colors.primary : colors.onSurfaceVariant;
     return MergeSemantics(
       child: Container(
         constraints: const BoxConstraints(minHeight: 66),
         decoration: BoxDecoration(
           color: selected ? colors.primaryContainer : appPaper,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(DesignTokens.radius12),
           border: Border.all(color: colors.outlineVariant),
         ),
         clipBehavior: Clip.antiAlias,
@@ -333,14 +323,14 @@ class _HomeDevice extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
+                        KoreanText(
                           name,
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: foreground,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        Text(
+                        KoreanText(
                           status,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,

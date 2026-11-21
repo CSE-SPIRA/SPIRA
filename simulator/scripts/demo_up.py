@@ -114,8 +114,10 @@ def main():
         prefix = f"spira/demo/{HOUSEHOLD}"
         installation = logs / "installation.json"
         write_demo_installation(installation)
+        profile = ROOT / "simulator/spira_simulator/profiles" / PROFILES[args.episode]
+        home_name = json.loads(profile.read_text(encoding="utf-8")).get("display_name") or "우리 집"
         launch("hub", [sys.executable, "-m", "hub.spira_hub", "--port", str(ports["hub"]),
-                       "--db", str(logs / "hub.db"), "--installation", str(installation)],
+                       "--db", str(logs / "hub.db"), "--installation", str(installation), "--home-name", home_name],
                ROOT, SPIRA_SERVER_URL=urls["fixture"], SPIRA_HOUSEHOLD=HOUSEHOLD, SPIRA_HUB_KEY=hub_key,
                SPIRA_MQTT_PORT=str(ports["mqtt"]), SPIRA_MQTT_PREFIX=prefix)
 
@@ -123,7 +125,7 @@ def main():
                              "--port", str(ports["sim"]), "--no-access-log"], ROOT / "simulator",
                MQTT_HOST="127.0.0.1", MQTT_PORT=str(ports["mqtt"]), MQTT_PREFIX=prefix,
                WORLD_DB=str(logs / "world.db"),
-               WORLD_PROFILE=str(ROOT / "simulator/spira_simulator/profiles" / PROFILES[args.episode]),
+               WORLD_PROFILE=str(profile),
                WORLD_OPERATOR="1", WORLD_OPERATOR_TOKEN=operator_token,
                WORLD_PLANS=f"{urls['fixture']}/v1/hub/plans?household={HOUSEHOLD}", WORLD_PLANS_TOKEN=hub_key,
                WORLD_HUB_STATE_URL=f"{urls['hub']}/state",

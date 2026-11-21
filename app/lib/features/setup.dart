@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
 import '../contracts.dart' as wire;
+import '../korean_text.dart';
 import 'labels.dart';
 
 class SetupScreen extends StatefulWidget {
@@ -70,12 +71,15 @@ class _SetupScreenState extends State<SetupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('우리 집 설정', style: Theme.of(context).textTheme.headlineMedium),
+        KoreanText(
+          '우리 집 설정',
+          style: Theme.of(context).textTheme.headlineMedium,
+        ),
         const SizedBox(height: 8),
-        const Text('해당하는 가구 유형을 선택해 주세요.'),
+        const KoreanText('해당하는 가구 유형을 선택해 주세요.'),
         for (final group in _groups.entries) ...[
           const SizedBox(height: 18),
-          Text(group.key, style: Theme.of(context).textTheme.titleMedium),
+          KoreanText(group.key, style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 5),
           Wrap(
             spacing: 8,
@@ -83,7 +87,7 @@ class _SetupScreenState extends State<SetupScreen> {
             children: [
               for (final type in group.value)
                 FilterChip(
-                  label: Text(type),
+                  label: KoreanText(type),
                   selected: _types.contains(type),
                   onSelected: app.busy
                       ? null
@@ -107,7 +111,7 @@ class _SetupScreenState extends State<SetupScreen> {
           onPressed: app.busy || _types.isEmpty || !_validTypes
               ? null
               : () => app.submitHousehold(_types),
-          child: Text(app.busy ? '저장 중…' : '우리 집 만들기'),
+          child: KoreanText(app.busy ? '저장 중…' : '우리 집 만들기'),
         ),
       ],
     );
@@ -118,9 +122,9 @@ class _SetupScreenState extends State<SetupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('일정 연결', style: Theme.of(context).textTheme.headlineMedium),
+        KoreanText('일정 연결', style: Theme.of(context).textTheme.headlineMedium),
         const SizedBox(height: 8),
-        const Text('Google 캘린더를 연결하면 향후 14일의 일정을 준비에 참고해요.'),
+        const KoreanText('Google 캘린더를 연결하면 향후 14일의 일정을 준비에 참고해요.'),
         if (app.readCalendar == null)
           const StatusMessage('이 환경에서 Google 캘린더 연결을 사용할 수 없어요.'),
         const SizedBox(height: 20),
@@ -128,11 +132,11 @@ class _SetupScreenState extends State<SetupScreen> {
           onPressed: app.busy || app.readCalendar == null
               ? null
               : () => app.finishCalendar(connect: true),
-          child: Text(app.busy ? '연결 중…' : 'Google 캘린더 연결'),
+          child: KoreanText(app.busy ? '연결 중…' : 'Google 캘린더 연결'),
         ),
         TextButton(
           onPressed: app.busy ? null : () => app.finishCalendar(connect: false),
-          child: const Text('건너뛰기'),
+          child: const KoreanText('건너뛰기'),
         ),
       ],
     );
@@ -144,9 +148,12 @@ class _SetupScreenState extends State<SetupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('기기와 맡길 동작', style: Theme.of(context).textTheme.headlineMedium),
+        KoreanText(
+          '기기와 맡길 동작',
+          style: Theme.of(context).textTheme.headlineMedium,
+        ),
         const SizedBox(height: 8),
-        Text(
+        KoreanText(
           devices.isEmpty
               ? '기기 검색 정보를 사용할 수 없어요.'
               : '발견 목록에서 동작을 선택할 수 있어요. 이 선택은 이 앱에 저장돼요.',
@@ -158,13 +165,13 @@ class _SetupScreenState extends State<SetupScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
+                  KoreanText(
                     device.label ?? deviceLabel(device.type),
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
-                  Text(
-                    '${device.room ?? '공간 미확인'} · ${deviceLabel(device.type)} · '
-                    '${device.substrate == wire.Substrate.VIRTUAL ? '가상 기기' : '실물 기기'}',
+                  KoreanText(
+                    '${roomLabel(device.room) ?? '공간 미확인'} · ${deviceLabel(device.type)} · '
+                    '${substrateLabel(device.substrate)}',
                   ),
                   for (final command in device.commands)
                     if (!device.never.contains(command.cmd)) ...[
@@ -181,15 +188,15 @@ class _SetupScreenState extends State<SetupScreen> {
                         items: const [
                           DropdownMenuItem(
                             value: DeviceChoice.undecided,
-                            child: Text('미선택'),
+                            child: KoreanText('미선택'),
                           ),
                           DropdownMenuItem(
                             value: DeviceChoice.delegated,
-                            child: Text('맡기기'),
+                            child: KoreanText('맡기기'),
                           ),
                           DropdownMenuItem(
                             value: DeviceChoice.never,
-                            child: Text('맡기지 않기'),
+                            child: KoreanText('맡기지 않기'),
                           ),
                         ],
                         onChanged: app.busy
@@ -209,7 +216,7 @@ class _SetupScreenState extends State<SetupScreen> {
                       ),
                     ],
                   for (final command in device.never)
-                    Text('${commandLabel(command)} · 위임 유보'),
+                    KoreanText('${commandLabel(command)} · 위임 유보'),
                 ],
               ),
             ),
@@ -217,7 +224,7 @@ class _SetupScreenState extends State<SetupScreen> {
         const SizedBox(height: 18),
         FilledButton(
           onPressed: app.busy ? null : () => app.finishDevices(_choices),
-          child: Text(app.busy ? '저장 중…' : '설정 완료'),
+          child: KoreanText(app.busy ? '저장 중…' : '설정 완료'),
         ),
       ],
     );
@@ -237,7 +244,7 @@ class StatusMessage extends StatelessWidget {
     excludeSemantics: true,
     child: Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Text(text),
+      child: KoreanText(text),
     ),
   );
 }
