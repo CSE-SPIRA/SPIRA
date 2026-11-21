@@ -186,11 +186,14 @@ Hub-computed `by` and the C-3 payload sent to the Server; and restoration versus
 skip outcomes. It MUST identify each device as virtual or physical and visibly
 mark the class-A local-operation assumption. (PC-4, PC-5, PC-6)
 
-**H8-R4.** The first screen MUST show every ledger row newest first, with local
-wall time, device or home event, household wording, actor (SPIRA, home, device
-report, or person), and delivery state when there are reports. It MUST include
-unverified runs and restoration outcomes. The header MUST name the household,
-current plan version, and task count. The detail link MUST open H8-R3 and give
+**H8-R4.** The first screen MUST group the ledger by plan receipt, with the
+newest group open and older groups collapsed on arrival. Each group shows its
+receipt time and available task count, with its rows ordered newest first.
+Rows show local wall time, the device or home event, household wording, and a
+source marker explained in the legend. Outstanding deliveries show a pending
+or failed mark. The ledger MUST include unverified runs and restoration outcomes.
+The header names the household. At 1100 px and above, the read-only installed
+device list appears beside the ledger. The detail link MUST open H8-R3 and give
 access to individual report types and delivery records. (PC-4, PC-6)
 
 ### H9. Restart and reconciliation
@@ -239,7 +242,7 @@ internals is not acceptance evidence.
 | HUB-AT17 | Waiting, accepted-but-unverified, attributed person change, Server event delivery, restored, and skipped cases are present | The detail opens with the four H8-R3 groups, including exact `by`, sent C-3 content, virtual/physical labels, and assumption badge | PC-4, PC-5, PC-6 | H8-R2, H8-R3 |
 | HUB-AT18 | The three demo surfaces run with Server `DEMO_MODE` off and on | All timestamps advance on wall time; only Server-supplied absolute/duration values shorten in demo mode; Hub exposes no separate demo-clock control | PC-4 | H4-R4 |
 | HUB-AT19 | App and Hub clients replay all three contract episodes, including card reactions, C-3 events, and C-4 results | The fixture answers every App/Hub OpenAPI route with schema-valid responses; the Simulator judge reads `by` from the fixture's received C-3 records; surfaces label the peer as a fixture with no inference claim | PC-1, PC-2, PC-3, PC-4, PC-5, PC-6 | H10-R1 |
-| HUB-AT20 | Run the ep_9031 birthday scene against the fixture and open the dashboard | The ledger shows every happening newest first with its actor and delivery state. Report types and H8-R3 diagnostics are available through the detail link | PC-4, PC-6 | H8-R4 |
+| HUB-AT20 | Run the ep_9031 birthday scene against the fixture and open the dashboard | The ledger groups happenings by plan receipt, newest first. The source legend identifies the row markers and outstanding deliveries are marked. Report types and H8-R3 diagnostics are available through the detail link | PC-4, PC-6 | H8-R4 |
 
 ## 4. Open items
 

@@ -1,7 +1,21 @@
 document.querySelector('meta[name="theme-color"]').content =
   getComputedStyle(document.documentElement).getPropertyValue("--paper").trim();
 
-const regions = ["ledger-summary", "ledger", "detail-content"].map((id) => document.getElementById(id));
+const regions = ["ledger-summary", "ledger", "device-list", "detail-content"].map((id) => document.getElementById(id));
+
+function refreshLedger(region, next) {
+  const groups = new Map(Array.from(region.querySelectorAll("details"), (group) => [group.dataset.group, group]));
+  let focusedSummary;
+  for (const group of next.querySelectorAll("details")) {
+    const previous = groups.get(group.dataset.group);
+    if (!previous) continue;
+    if (previous.hasAttribute("data-newest") === group.hasAttribute("data-newest")) group.open = previous.open;
+    if (previous.firstElementChild === document.activeElement) focusedSummary = group.firstElementChild;
+  }
+  if (region.isEqualNode(next)) return;
+  region.replaceChildren(...next.childNodes);
+  focusedSummary?.focus({ preventScroll: true });
+}
 
 async function refresh() {
   try {
@@ -11,7 +25,9 @@ async function refresh() {
     const page = new DOMParser().parseFromString(await response.text(), "text/html");
     for (const region of regions) {
       const next = page.getElementById(region.id);
-      if (next && !region.isEqualNode(next)) region.replaceChildren(...next.childNodes);
+      if (!next) continue;
+      if (region.id === "ledger") refreshLedger(region, next);
+      else if (!region.isEqualNode(next)) region.replaceChildren(...next.childNodes);
     }
   } catch {
     // Preserve the last view on a failed read.

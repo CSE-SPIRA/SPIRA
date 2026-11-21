@@ -25,10 +25,12 @@ def device_words(device_id, devices):
     return (device.label or DEVICE_NAMES.get(device.type, "기기")) if device else "기기"
 
 
-def plan_words(version, count, task_devices, devices):
+def plan_words(version, count, task_devices, devices, *, compact=False):
     what = [f'계획 v{version["plan_version"]} 받음']
     if count is not None:
         what.append(f"할 일 {count}")
+    if compact:
+        what.clear()  # Receipt and count are already in the group header.
     rejected = version["ack"]["packet"]["rejected_tasks"]
     if rejected:
         what.append(f"받지 못한 일 {len(rejected)}")
@@ -76,20 +78,22 @@ def property_words(prop, value):
     return None
 
 
-def run_words(cmd, value, status):
+def run_words(cmd, value, status, *, missing_report=False):
     if cmd == "clean":
         what = STATE_WORDS["cleaned"] if status == "completed" else "청소 시작" if status == "running" else "청소"
     elif cmd in ("child_lock", "off", "stop", "show_notice"):
-        what = {"child_lock": STATE_WORDS["locked"], "off": "끔", "stop": "멈춤", "show_notice": STATE_WORDS["notice"]}[cmd]
+        what = {"child_lock": STATE_WORDS["locked"], "off": STATE_WORDS["off"],
+                "stop": "멈춤", "show_notice": STATE_WORDS["notice"]}[cmd]
     else:
         prop = {"set_cook_standby": "preset"}.get(cmd, cmd)
         what = property_words(prop, value) or "기기 동작 요청"
     if status in RUN_STATUS:
-        return f"{what} · {RUN_STATUS[status]}"
+        outcome = "보고 없음" if status == "unverifiable" and missing_report else RUN_STATUS[status]
+        return f"{what} · {outcome}"
     return what
 
 
-def restore_words(status, writes, originals, *, end=None):
+def restore_words(status, writes, originals, *, end=None, compact=False):
     if status == "skipped_user_changed":
         partial = any(
             attempt["status"] == "restored" or (
@@ -105,8 +109,10 @@ def restore_words(status, writes, originals, *, end=None):
                   for prop, value in attempt["desired"].items()]
         what = "되돌림 확인"
         if end and end.get("event_type") == "event_end":
-            what = f"일정이 끝난 뒤 {what}"
+            what = f"{'끝난 뒤' if compact else '일정이 끝난 뒤'} {what}"
         return " · ".join([what, *filter(None, values)])
+    if compact and status == "withheld_end_not_observed":
+        return "그대로 둠 · 끝남 확인 없음"
     return RESTORE_STATUS[status]
 
 

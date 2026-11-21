@@ -89,9 +89,10 @@ PYTHONPATH=contracts/generated/python uv run --no-project --python 3.12 \
 ```
 
 The dashboard listens on loopback at port 8088. Use `--home-name` to name the
-household on the ledger. It defaults to **우리 집**. The dashboard shows waiting work,
-command receipts and read-backs, C-3 delivery, and restore or skip
-results. Start the Simulator separately with the same MQTT prefix. The
+household on the ledger. It defaults to **우리 집**. The ledger groups activity by
+plan receipt and shows the installed device list alongside it on desktop.
+Open **자세한 기록** for waiting work, command receipts and read-backs, C-3 delivery,
+and restore or skip results. Start the Simulator separately with the same MQTT prefix. The
 example installation declares virtual devices using `mqtt:<logical_id>`.
 The fixture's dates are fixed. The live Hub uses wall time, so past windows
 and elapsed lifecycles remain past. The acceptance tests
