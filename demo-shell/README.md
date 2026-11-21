@@ -1,4 +1,4 @@
-Temporary tool, not a product part.
+Example and reference tool for the demo, not a product part. Nothing in app/, hub/ or simulator/ depends on it.
 
 # Demo shell
 
