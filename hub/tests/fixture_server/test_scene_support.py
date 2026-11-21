@@ -1,11 +1,15 @@
 """HTTP checks for opt-in, wall-clock scene replay."""
 
+import pickle
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
+from spira_contracts.reaction import Reaction
 
 from . import create_app
+from .scene_support import NextOrder, live_replay
 from .test_fixture_server import (
     EPISODE,
     HEADERS,
@@ -60,6 +64,31 @@ def test_scene_selection_publishes_on_the_next_valid_new_order():
     assert client.get(PLANS).json()["plans"][0]["plan_id"] == "ep_9150"
 
 
+def test_default_scene_replays_each_new_order_without_selection():
+    client = TestClient(
+        create_app(default_scene=NextOrder(episode_id="ep_9031"), demo_mode=True),
+        headers=HEADERS,
+    )
+    assert client.get(CARDS).json()["cards"] == []
+    assert client.get(PLANS).json()["plans"] == []
+    before = datetime.now(timezone.utc)
+    first = upload(client, "birthday")
+    assert first.status_code == 202
+    assert first.json() == {"episode_id": "ep_9031", "status": "received"}
+    plan = client.get(PLANS).json()["plans"][0]
+    assert plan["plan_id"] == "ep_9031"
+    assert before <= datetime.fromisoformat(plan["sent_at"]) <= datetime.now(timezone.utc)
+    assert client.get(CARDS).json()["cards"][0]["episode_id"] == "ep_9031"
+
+    duplicate = upload(client, "birthday")
+    assert duplicate.status_code == 200
+    assert duplicate.json() == first.json()
+    second = upload(client, "another-birthday")
+    assert second.status_code == 202
+    assert second.json()["episode_id"] == "ep_90312"
+    assert client.get(PLANS).json()["plans"][0]["plan_id"] == "ep_90312"
+
+
 @pytest.mark.parametrize("episode_id", ["ep_9031", "ep_9150"])
 def test_scene_order_exposes_rationale_at_first_card_poll(episode_id):
     http = TestClient(create_app(scene_controls=True, demo_mode=True), headers=HEADERS)
@@ -76,7 +105,61 @@ def test_scene_order_exposes_rationale_at_first_card_poll(episode_id):
     }
     cards = client.cards(since=initial["server_time"])["cards"]
     assert [card["card_id"] for card in cards] == client.fixture("episode.json")["card_ids"]
-    assert client.request("GET", rationale) == client.fixture("rationale.json")
+    actual = client.request("GET", rationale)
+    original = client.fixture("rationale.json")
+    if episode_id == "ep_9031":
+        starts = datetime.fromisoformat(cards[0]["starts_at"]).astimezone(ZoneInfo("Asia/Seoul"))
+        source_event = client.fixture("calendar.json")["events"][0]
+        duration = datetime.fromisoformat(source_event["end"]) - datetime.fromisoformat(source_event["start"])
+        linked = actual["evidence"]["calendar"][0]
+        assert linked["start"] == starts.strftime("%H:%M")
+        assert linked["end"] == (starts + duration).strftime("%H:%M")
+        assert actual["evidence"]["calendar"][1:] == original["evidence"]["calendar"][1:]
+    else:
+        assert actual == original
+
+
+@pytest.mark.parametrize(("duration", "calendar_end"), [(30, "03:00"), (120, "00:02")])
+def test_demo_guest_window_and_calendar_agree_across_seoul_midnight(duration, calendar_end):
+    now = datetime.fromisoformat("2026-11-22T23:59:00+09:00")
+    order = NextOrder(episode_id="ep_9031", starts_in_seconds=65, duration_seconds=duration)
+    replay = live_replay(order, demo_mode=True, now=now, guest_window=900)
+    starts = now + timedelta(seconds=65)
+    ends = starts + timedelta(seconds=duration)
+    mood = next(task for task in replay.plan.tasks if task.task_id == "t_mood#3")
+    assert datetime.fromisoformat(mood.trigger.window.from_) == starts
+    closes = starts + timedelta(seconds=900)
+    assert datetime.fromisoformat(mood.trigger.window.to) == closes
+    assert datetime.fromisoformat(mood.end.or_time) > closes
+    assert replay.calendar.events[0].start == starts.isoformat()
+    assert replay.calendar.events[0].end == f"2026-11-23T{calendar_end}:05+09:00"
+    assert replay.files["rationale.json"]["evidence"]["calendar"][0] == {
+        "id": "c1", "days_after": 1, "day": "월", "tags": ["생일"],
+        "start": "00:00", "end": calendar_end,
+    }
+    assert replay.card.text.startswith("월요일 생일")
+    for task, item in zip(replay.plan.tasks[-2:], replay.episode.item_tasks, strict=True):
+        assert task.actions[0].value == f"{item.item} · {item.text}"
+    assert "월요일" in replay.files["rationale.json"]["item_tasks"][0]["text"]
+
+    ordinary = live_replay(order, demo_mode=False, now=now, guest_window=900)
+    assert ordinary.calendar.events[0].start != starts.isoformat()
+    original_window = next(task.trigger.window for task in ordinary.plan.tasks if task.task_id == "t_mood#3")
+    assert datetime.fromisoformat(original_window.from_) == starts - timedelta(minutes=30)
+    assert datetime.fromisoformat(original_window.to) == ends
+
+
+def test_demo_checkpoint_from_before_observation_tracking_restores_window():
+    now = datetime.now(timezone.utc)
+    replay = live_replay(NextOrder(episode_id="ep_9031"), demo_mode=True, now=now)
+    replay.react(Reaction(reaction="line_off", task_id="t_clean#1"))
+    window = replay.observation_window
+    del replay.observation_window, replay.observation, replay.checked_changed_at
+
+    restored = pickle.loads(pickle.dumps(replay))
+    assert restored.observation_window == window
+    assert restored.observation is None
+    assert restored.checked_changed_at["t_clean#1"] == datetime.fromisoformat(restored.plan.sent_at)
 
 
 def test_scene_demo_wall_times_and_live_revisions():
