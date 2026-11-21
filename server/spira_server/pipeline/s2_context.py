@@ -134,28 +134,43 @@ def kb_neighbors(types: list[str], calendar: list[dict], household_types: list[s
     q = embedding.embed_basket(types)
     cases = search(kb_engine(), q, kb_version_number=settings.kb_version_number, sample=settings.kb_sample,
                    limit=n.search_limit)
-    similar = [c for c in cases if c.sim > n.sim_floor]
-    if len(similar) < n.min_similar:
-        return {"similar_count": len(similar), "note": "비슷한 사례가 거의 없음"}, []
+    return summarize_neighbors(cases, types, calendar, household_types, home=settings.home_context == "on", n=n,
+                               lists=lists, sim_floor=n.sim_floor, max_use=n.max_use)
 
-    home = settings.home_context == "on"
+
+def context_bonus(c: KbCase, cal_tags: set[str], house: set[str], home: bool, n) -> tuple[float, float]:
+    """(calendar bonus, household bonus) of one case; both 0 when HOME_CONTEXT=off."""
+    if not home:
+        return 0.0, 0.0
+    cal = n.w_cal if cal_tags & set(c.when.get("calendar_tags") or []) else 0.0
+    hh = n.w_house if house & set(c.household.get("types") or []) else 0.0
+    return cal, hh
+
+
+def rank_similar(cases: list[KbCase], calendar: list[dict], household_types: list[str], *, home: bool, n,
+                 sim_floor: float, max_use: int) -> tuple[list[KbCase], dict[str, float]]:
+    """Cases above `sim_floor`, best `max_use` by score = sim + context bonus. Also returns every case's score."""
     cal_tags = {t for e in calendar for t in e["tags"]}
     house = set(household_types)
+    scores = {c.case_id: c.sim + sum(context_bonus(c, cal_tags, house, home, n)) for c in cases}
+    similar = [c for c in cases if c.sim > sim_floor]
+    ranked = sorted(similar, key=lambda c: (scores[c.case_id], c.sim, c.case_id), reverse=True)[:max_use]
+    return ranked, scores
 
-    def score(c: KbCase) -> float:
-        bonus = 0.0
-        if home and cal_tags & set(c.when.get("calendar_tags") or []):
-            bonus += n.w_cal
-        if home and house & set(c.household.get("types") or []):
-            bonus += n.w_house
-        return c.sim + bonus
 
-    ranked = sorted(similar, key=lambda c: (score(c), c.sim, c.case_id), reverse=True)[: n.max_use]
+def summarize_neighbors(cases: list[KbCase], types: list[str], calendar: list[dict], household_types: list[str], *,
+                        home: bool, n, lists: KbLists, sim_floor: float, max_use: int) -> tuple[dict, list[str]]:
+    """The kb_neighbors block from searched cases (§8.3). dry_run.py calls this again with other floors and caps."""
+    similar_n = sum(1 for c in cases if c.sim > sim_floor)
+    if similar_n < n.min_similar:
+        return {"similar_count": similar_n, "note": "비슷한 사례가 거의 없음"}, []
+    ranked, scores = rank_similar(cases, calendar, household_types, home=home, n=n, sim_floor=sim_floor,
+                                  max_use=max_use)
     counts = Counter(c.intent_id for c in ranked)
     best: dict[str, KbCase] = {}
     for c in ranked:                               # ranked best first
         best.setdefault(c.intent_id, c)
-    order = sorted(counts, key=lambda i: (-counts[i], -score(best[i]), best[i].case_id))
+    order = sorted(counts, key=lambda i: (-counts[i], -scores[best[i].case_id], best[i].case_id))
     reps = pick_reps(order, counts, len(ranked), n.cover, n.none_min, n.max_reps)
     order_set = set(types)
     examples = []

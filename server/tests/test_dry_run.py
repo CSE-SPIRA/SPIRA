@@ -13,6 +13,7 @@ from spira_server.llm import client as llm_client
 from spira_server.llm.client import RawReply
 from spira_server.paths import SERVER_DIR
 
+from . import kb_seed
 from .factories import data, png
 
 spec = importlib.util.spec_from_file_location("dry_run", SERVER_DIR / "scripts" / "dry_run.py")
@@ -159,3 +160,63 @@ def test_earlier_runs_are_not_counted(tmp_path, env):
     assert [c["stage"] for c in calls] == ["cal", "s1", "s3", "s4"]
     io = [json.loads(x) for x in (out / "llm_io.jsonl").read_text(encoding="utf-8").splitlines()]
     assert {x["stage"]: x["enforce_schema"] for x in io} == {"cal": True, "s1": True, "s3": True, "s4": False}
+
+
+def _kb_run(tmp_path, env, **extra_env):
+    env(KB_MODE="on", KB_VERSION="kb-v1", **extra_env)
+    kb_seed.clear()
+    kb_seed.seed_birthday_neighbours()
+    llm_client.set_llm(llm_client.LLM(StageProvider(_canned())))
+    out = tmp_path / "out"
+    code = dry_run.main(["--images", str(_folder(tmp_path, ANSWER)), "--home",
+                         str(SERVER_DIR / "dev" / "home.example.yaml"), "--kb", "on",
+                         "--now", "2026-10-15T21:00:08+09:00", "--out", str(out)])
+    return code, out
+
+
+def test_kb_on_writes_search_table_and_sweep(tmp_path, env):
+    """dry run B (11-21): every searched case with sim, bonus and used rank; floors x caps and KB_SAMPLE sizes."""
+    code, out = _kb_run(tmp_path, env)
+    checks = (out / "checks.txt").read_text(encoding="utf-8")
+    assert code == 0, checks
+    assert "[ok] S2 KB searched — 15 cases, 12 above 0.6, used 12, top sim" in checks
+    rows = [r.split("\t") for r in (out / "kb_search.tsv").read_text(encoding="utf-8").splitlines()]
+    assert rows[0] == dry_run.TSV_COLUMNS and len(rows) == 16
+    col = {name: k for k, name in enumerate(rows[0])}
+    body = rows[1:]
+    sims = [float(r[col["sim"]]) for r in body]
+    assert sims == sorted(sims, reverse=True)
+    assert sum(1 for r in body if r[col["used_rank"]]) == 12
+    assert {r[col["case_id"]] for r in body if r[col["rep"]] == "y"} == {
+        e["case_id"] for e in json.loads((out / "s2_context.json").read_text(encoding="utf-8"))
+        ["for_intent"]["kb_neighbors"]["examples"]}
+    assert all(r[col["cal_bonus"]] == "0.05" for r in body if r[col["calendar_tags"]] == "생일")   # c1 생일
+    assert all(r[col["ox"]] == "" for r in body)
+    sweep = (out / "kb_sweep.txt").read_text(encoding="utf-8")
+    assert "floor 0.60 cap  50: above  12, used  12 | kid_birthday_party 9 · home_baking 2 · none 1 " \
+           "| reps kid_birthday_party, home_baking  <- now" in sweep
+    assert "floor 0.60 cap  20" in sweep and "floor 0.70 cap 200" in sweep
+    assert "sample 0.25:" in sweep and "sample 0.5 :" in sweep and "sample 1.0 :" in sweep
+
+
+def test_kb_down_fails_the_kb_check(tmp_path, env):
+    """A KB failure ends S2 as judged/done; without this check it looked like a correct 'no intent' (03_grocery)."""
+    code, out = _kb_run(tmp_path, env, KB_DATABASE_URL="postgresql://spira:spira@localhost:1/nothing")
+    checks = (out / "checks.txt").read_text(encoding="utf-8")
+    assert code == 1
+    assert "[FAIL] S2 KB searched — KB unavailable" in checks
+    assert not (out / "kb_search.tsv").exists()
+
+
+def test_used_band_counts_cases_lifted_by_the_bonus(env):
+    from spira_server.config import Numbers, get_config
+    from spira_server.kb.search import KbCase
+
+    env(KB_MODE="off")
+    n = Numbers({**get_config().numbers.as_dict(), "max_use": 2})
+    case = lambda cid, sim, tags: KbCase(cid, ["딸기"], "kid_birthday_party", None, {},  # noqa: E731
+                                          {"calendar_tags": tags}, {"types": []}, sim)
+    cases = [case("a", 0.80, []), case("b", 0.79, []), case("c", 0.77, ["생일"])]
+    band, moved, lifted = dry_run._used_band(cases, [{"tags": ["생일"]}], [], True, n)
+    assert moved == 1 and [c.case_id for c in lifted] == ["c"]                 # 0.77 + 0.05 > 0.79
+    assert band == "0.800 ~ 0.770 (band 0.030)"
