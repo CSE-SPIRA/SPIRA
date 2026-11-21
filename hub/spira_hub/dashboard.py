@@ -21,7 +21,6 @@ from .store import encode
 
 HOUSEHOLD_TIME = ZoneInfo("Asia/Seoul")
 SOURCE_LABELS = {"command": "SPIRA가 시킴", "report": "기기가 알림", "restore": "집이 되돌림"}
-FIXTURE_PREPARATIONS = {"ep_9031": "생일 준비"}  # C-1 supplies no display title.
 
 
 def create_app(runtime, *, lifespan=None, hub_key=None, home_name="우리 집"):
@@ -104,13 +103,12 @@ def preparation_groups(state):
                 preparation = (receipt["plan_id"], receipt["plan_version"])
         groups.get(preparation, household_rows).append(row)
 
-    names = FIXTURE_PREPARATIONS if state["server_peer"] else {}
     sections = []
     for index, receipt in enumerate(reversed(receipts)):
         plan_id, version = receipt["plan_id"], receipt["plan_version"]
         count = receipt["task_count"]
         tasks = f' · 할 일 {count}' if count is not None else ""
-        title = f'{names.get(plan_id, "받은 준비")} · 받은 시각 {ledger_time(receipt["at"], short=True)}{tasks}'
+        title = f'받은 준비 · 받은 시각 {ledger_time(receipt["at"], short=True)}{tasks}'
         key = blake2s(f"{plan_id}/{version}".encode(), digest_size=8).hexdigest()
         sections.append(ledger_group(key, title, groups[plan_id, version], newest=index == 0))
     if household_rows:

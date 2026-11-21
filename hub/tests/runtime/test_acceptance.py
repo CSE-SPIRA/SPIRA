@@ -1249,7 +1249,7 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
             "서버에 보냄", "보내는 중", "전송 실패", "계획 v", "ep_9031", "h_042", "pill actor",
         ))
         newest, earlier, first = ledger_page.split('<details class="ledger-group"')[1:]
-        assert 'data-newest open><summary>생일 준비 · 받은 시각 ' in newest
+        assert 'data-newest open><summary>받은 준비 · 받은 시각 ' in newest
         assert '>18:05</time> · 할 일 5</summary>' in newest
         assert ' open>' not in earlier and '>08:40</time> · 할 일 5</summary>' in earlier
         assert ' open>' not in first and '>21:11</time> · 할 일 6</summary>' in first
