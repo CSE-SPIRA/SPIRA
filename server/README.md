@@ -52,7 +52,7 @@ python scripts/dry_run.py --images orders/01_birthday --home dev/home.yaml --kb 
 
 | Option | Use |
 | --- | --- |
-| `--kb on` | KB search (needs `KB_DATABASE_URL`, `KB_VERSION`) |
+| `--kb on` | KB search (needs `KB_DATABASE_URL`, `KB_VERSION`). Also writes `kb_search.tsv` and `kb_sweep.txt` (below) |
 | `--now 2026-11-20T21:00:00+09:00` | Run as if at that time (calendar dates in `home.yaml` are relative to it) |
 | `--split` | Post each image as its own share (grouping) |
 | `--resend` | Post the first share again with the same `source_id` |
@@ -66,6 +66,15 @@ LLM provider) and optionally `answer.txt`:
 감기약 · 1 · 가림
 제외: 위쪽 배송지 영역은 가림
 ```
+
+With `--kb on`, `checks.txt` has "S2 KB searched" (fails when the KB search failed: S2 then closes the episode as
+`judged`, which otherwise looks like a correct "no intent"), and two more files help check the search numbers
+(`sim_floor`, `max_use`, `w_cal`, `w_house`):
+
+| File | Content |
+| --- | --- |
+| `kb_search.tsv` | Every searched case in sim order: sim, calendar and household bonus, score, above the floor, rank among the used cases, representative, intent, items, situation, an empty `ox` column for marking "really similar?" |
+| `kb_sweep.txt` | Sim by rank, cases above the floor, sim range of the used cases, cases in the used set only because of the bonus, best sim per intent; the same cases summarised again for floors 0.5–0.7 × caps 20–200; the same search at `KB_SAMPLE` 0.25 and 0.5 (two more read-only queries, no LLM) |
 
 `orders/`, `out/` and `dev/home.yaml` are git-ignored. The household in `home.yaml` is deleted and written again on
 every run.

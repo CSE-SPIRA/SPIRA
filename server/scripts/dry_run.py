@@ -7,6 +7,8 @@
 Reads server/.env (real LLM, EMBED_MODE=bge, local DATABASE_URL). Writes out/<folder>/:
     s1_items.json  s2_context.json  s3_message.txt  s3_intent.json  s4_tasks.json  plan.json  card.json
     llm_calls.jsonl  llm_io.jsonl  checks.txt
+With --kb on also kb_search.tsv (every searched case: sim, bonus, used rank, items, an empty ox column for marking
+"really similar?") and kb_sweep.txt (the same search summarised again with other floors, caps and KB_SAMPLE sizes).
 The folder may hold answer.txt ("물건 · 수량" per line, "?" for an unknown quantity, " · 가림" for an item that must be
 masked, lines starting with "제외:" are notes). Exit code 0 when every check passed.
 
@@ -105,6 +107,24 @@ class RecordingProvider:
         return reply
 
 
+class RecordingSearch:
+    """Wraps s2_context.search and keeps the query vector, arguments and cases of every KB search."""
+
+    def __init__(self, inner) -> None:
+        self.inner = inner
+        self.calls: list[dict] = []
+
+    def __call__(self, engine, q, **kw):
+        entry: dict = {"q": q, "kw": kw}
+        self.calls.append(entry)
+        try:
+            entry["cases"] = self.inner(engine, q, **kw)
+        except Exception as e:  # noqa: BLE001
+            entry["error"] = repr(e)
+            raise
+        return entry["cases"]
+
+
 def dump(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
 
@@ -128,7 +148,7 @@ def run(images_dir: Path, home_path: Path, kb: str, now: datetime | None, out_di
     from spira_server.kb import embedding
     from spira_server.llm import client as llm_client
     from spira_server.main import create_app
-    from spira_server.pipeline import s1_extract
+    from spira_server.pipeline import s1_extract, s2_context
     from spira_server.pipeline.s3_intent import build_intent_message, item_dicts
     from spira_server.pipeline.s5_cards import card_body
     from spira_server.pipeline.s5_plan import command_allowed
@@ -149,6 +169,8 @@ def run(images_dir: Path, home_path: Path, kb: str, now: datetime | None, out_di
     llm = llm_client.get_llm()
     recorder = RecordingProvider(llm.provider)
     llm.provider = recorder
+    kb_recorder = RecordingSearch(s2_context.search)
+    s2_context.search = kb_recorder
     run_clock = clock.MovableClock(now or clock.now())
     clock.set_now(run_clock)
 
@@ -269,6 +291,9 @@ def run(images_dir: Path, home_path: Path, kb: str, now: datetime | None, out_di
                             str(numbers)))
         words = [w for w in cfg.sensitive_words.get("words", []) if w in message]
         checks.append(Check("no sensitive word in the S3 message", not words, ", ".join(words)))
+        if kb == "on":
+            types = list(dict.fromkeys(i["type"] for i in items if not i["masked"]))
+            checks.append(kb_outputs(out, kb_recorder, ep, types, settings, cfg))
         left = [p for p in image_paths if Path(p).exists()]
         checks.append(Check("images deleted", not left, ", ".join(left)))
         answer_file = images_dir / "answer.txt"
@@ -291,8 +316,160 @@ def run(images_dir: Path, home_path: Path, kb: str, now: datetime | None, out_di
     print("\n".join(lines))
     print(f"\nwrote {out}")
     llm.provider = recorder.inner
+    s2_context.search = kb_recorder.inner
     clock.set_now(None)
     return 0 if passed else 1
+
+
+# ------------------------------------------------------------------------------------------- KB search (§8.3)
+
+FLOORS = (0.5, 0.55, 0.6, 0.65, 0.7)
+CAPS = (20, 30, 50, 100, 200)
+SAMPLES = (0.25, 0.5)
+TSV_COLUMNS = ["rank", "case_id", "sim", "cal_bonus", "house_bonus", "score", "above_floor", "used_rank", "rep",
+               "intent_id", "items", "intent_text", "situation", "calendar_tags", "household_types", "ox"]
+
+
+def kb_outputs(out: Path, rec: RecordingSearch, ep, types: list[str], settings, cfg) -> Check:
+    """kb_search.tsv + kb_sweep.txt from the search S2 made; the check fails when S2 did not get KB cases."""
+    if ep.error and ep.error.get("stage") == "s2":
+        return Check("S2 KB searched", False, ep.error.get("message", ""))
+    done = [c for c in rec.calls if "cases" in c]
+    if not done:
+        return Check("S2 KB searched", False, "no KB search (pipeline stopped before S2?)")
+    call = done[-1]
+    cases = call["cases"]
+    n = cfg.numbers
+    this_home = ((ep.context or {}).get("for_intent") or {}).get("this_home")
+    home = settings.home_context == "on" and this_home is not None
+    calendar = this_home["calendar"] if home else []
+    house = this_home["household_types"] if home else []
+    nb = ((ep.context or {}).get("for_intent") or {}).get("kb_neighbors") or {}
+    reps = {e["case_id"] for e in nb.get("examples", [])}
+    write_kb_tsv(out / "kb_search.tsv", cases, calendar, house, home, n, reps)
+    lines = sweep_lines(cases, types, calendar, house, home, n, settings, call)
+    (out / "kb_sweep.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    above = sum(1 for c in cases if c.sim > n.sim_floor)
+    top = f"{cases[0].sim:.3f}" if cases else "-"
+    return Check("S2 KB searched", True, f"{len(cases)} cases, {above} above {n.sim_floor}, "
+                 f"used {nb.get('similar_count', 0)}, top sim {top}" + (f", {nb['note']}" if nb.get("note") else ""))
+
+
+def write_kb_tsv(path: Path, cases, calendar, house, home, n, reps: set[str]) -> None:
+    from spira_server.pipeline.s2_context import context_bonus, rank_similar
+
+    used, _ = rank_similar(cases, calendar, house, home=home, n=n, sim_floor=n.sim_floor, max_use=n.max_use)
+    used_rank = {c.case_id: k for k, c in enumerate(used, start=1)}
+    cal_tags = {t for e in calendar for t in e["tags"]}
+    rows = ["\t".join(TSV_COLUMNS)]
+    for k, c in enumerate(cases, start=1):
+        cal, hh = context_bonus(c, cal_tags, set(house), home, n)
+        cells = [k, c.case_id, f"{c.sim:.4f}", f"{cal:g}", f"{hh:g}", f"{c.sim + cal + hh:.4f}",
+                 "y" if c.sim > n.sim_floor else "", used_rank.get(c.case_id, ""), "y" if c.case_id in reps else "",
+                 c.intent_id, ", ".join(sorted(c.items)), c.intent_text or "",
+                 json.dumps({k2: v for k2, v in (c.situation or {}).items() if v}, ensure_ascii=False),
+                 ", ".join(c.when.get("calendar_tags") or []), ", ".join(c.household.get("types") or []), ""]
+        rows.append("\t".join(str(x).replace("\t", " ").replace("\n", " ") for x in cells))
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+
+def _sim_at(sims: list[float], k: int) -> str:
+    return f"{sims[k - 1]:.3f}" if len(sims) >= k else "-"
+
+
+def _intents(cases) -> str:
+    from collections import Counter
+
+    return " · ".join(f"{i} {m}" for i, m in Counter(c.intent_id for c in cases).most_common()) or "-"
+
+
+def _summary(cases, types, calendar, house, home, n, floor: float, cap: int) -> str:
+    from spira_server.kb.lists import get_lists
+    from spira_server.pipeline.s2_context import summarize_neighbors
+
+    block, _ = summarize_neighbors(cases, types, calendar, house, home=home, n=n, lists=get_lists(),
+                                   sim_floor=floor, max_use=cap)
+    above = sum(1 for c in cases if c.sim > floor)
+    if block.get("note"):
+        return f"floor {floor:.2f} cap {cap:>3}: above {above:>3} -> KB not given ({block['note']})"
+    counts = " · ".join(f"{x['intent_id']} {x['n']}" for x in block["intent_counts"])
+    reps = ", ".join(e["intent_id"] for e in block["examples"])
+    return (f"floor {floor:.2f} cap {cap:>3}: above {above:>3}, used {block['similar_count']:>3} | {counts} "
+            f"| reps {reps}")
+
+
+def _used_band(cases, calendar, house, home, n) -> tuple[str, int, list]:
+    """(sim range of the used cases, how many are in only because of the bonus, those cases)."""
+    from spira_server.pipeline.s2_context import rank_similar
+
+    used, _ = rank_similar(cases, calendar, house, home=home, n=n, sim_floor=n.sim_floor, max_use=n.max_use)
+    if not used:
+        return "-", 0, []
+    by_sim = {c.case_id for c in sorted((c for c in cases if c.sim > n.sim_floor),
+                                        key=lambda c: (c.sim, c.case_id), reverse=True)[: n.max_use]}
+    moved = [c for c in used if c.case_id not in by_sim]
+    sims = [c.sim for c in used]
+    return f"{max(sims):.3f} ~ {min(sims):.3f} (band {max(sims) - min(sims):.3f})", len(moved), moved
+
+
+def sweep_lines(cases, types, calendar, house, home, n, settings, call) -> list[str]:
+    import statistics
+
+    from spira_server.db.engine import kb_engine
+    from spira_server.kb.search import search as kb_search
+    from spira_server.pipeline.s2_context import context_bonus
+
+    kw = call["kw"]
+    sims = [c.sim for c in cases]
+    above = sum(1 for s in sims if s > n.sim_floor)
+    lines = [f"KB search: KB_VERSION={settings.kb_version} KB_SAMPLE={kw.get('sample')} limit {kw.get('limit')} "
+             f"returned {len(cases)} | now: sim_floor {n.sim_floor}, max_use {n.max_use}, min_similar "
+             f"{n.min_similar}, w_cal {n.w_cal}, w_house {n.w_house}, HOME_CONTEXT {'on' if home else 'off'}",
+             f"basket: {', '.join(types)}", ""]
+    if not cases:
+        return lines + ["no cases returned"]
+    lines.append("sim by rank: " + "  ".join(f"#{k} {_sim_at(sims, k)}" for k in (1, 10, 20, 50, 100, 150, 200))
+                 + f"  median {statistics.median(sims):.3f}")
+    full = above == len(cases) == kw.get("limit")
+    lines.append(f"above floor {n.sim_floor}: {above} of {len(cases)}"
+                 + ("  <- every returned case is above the floor: the search limit cut, not the floor" if full else ""))
+    band, moved_n, moved = _used_band(cases, calendar, house, home, n)
+    cal_tags = {t for e in calendar for t in e["tags"]}
+    bonus = [context_bonus(c, cal_tags, set(house), home, n) for c in cases if c.sim > n.sim_floor]
+    lines.append(f"used {min(above, n.max_use)}: sim {band}; above floor with calendar bonus "
+                 f"{sum(1 for b in bonus if b[0])}, household bonus {sum(1 for b in bonus if b[1])}")
+    lines.append(f"in the used set only because of the bonus: {moved_n}" + (f" ({_intents(moved)})" if moved else ""))
+    best: dict[str, float] = {}
+    count: dict[str, int] = {}
+    for c in cases:
+        best.setdefault(c.intent_id, c.sim)
+        count[c.intent_id] = count.get(c.intent_id, 0) + (c.sim > n.sim_floor)
+    lines.append("best sim per intent (n above floor): " + " · ".join(
+        f"{i} {s:.3f} ({count[i]})" for i, s in sorted(best.items(), key=lambda x: -x[1])[:8]))
+    lines += ["", "[floor x cap] the same searched cases, other numbers (S3 saw only the current one)"]
+    for floor in FLOORS:
+        for cap in CAPS:
+            mark = "  <- now" if (floor == n.sim_floor and cap == n.max_use) else ""
+            lines.append(_summary(cases, types, calendar, house, home, n, floor, cap) + mark)
+    lines += ["", f"[KB size] KB_SAMPLE fractions of the same KB, floor {n.sim_floor} cap {n.max_use}"]
+    if kw.get("sample", 1.0) < 1.0:
+        return lines + [f"skipped: this run already searched KB_SAMPLE={kw.get('sample')}"]
+    for sample in SAMPLES + (1.0,):
+        if sample == 1.0:
+            part = cases
+        else:
+            try:
+                part = kb_search(kb_engine(), call["q"], **{**kw, "sample": sample})
+            except Exception as e:  # noqa: BLE001
+                lines.append(f"sample {sample}: error {e!r}")
+                continue
+        ps = [c.sim for c in part]
+        p_above = sum(1 for s in ps if s > n.sim_floor)
+        p_band, p_moved, _ = _used_band(part, calendar, house, home, n)
+        lines.append(f"sample {sample:<4}: returned {len(part):>3}, above {p_above:>3}, sim #1 {_sim_at(ps, 1)} "
+                     f"#50 {_sim_at(ps, 50)} #200 {_sim_at(ps, 200)}, used sim {p_band}, moved by bonus {p_moved} | "
+                     + _summary(part, types, calendar, house, home, n, n.sim_floor, n.max_use).split(": ", 1)[1])
+    return lines
 
 
 def _contract_checks(plan: dict | None, cards: list[dict]) -> list[Check]:
