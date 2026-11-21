@@ -46,6 +46,8 @@ const stateWords = {
   "unlocked": "잠금 해제",
   "idle": "대기 중",
   "selected": "선택됨",
+  "used_for_preparation": "이번 준비에 써요",
+  "guidance": "안내",
   "resting": "쉬는 중",
   "cleaning": "청소 중",
   "cleaned": "청소 끝",

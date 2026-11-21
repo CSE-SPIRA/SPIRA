@@ -1500,6 +1500,16 @@ void main() {
     },
   );
 
+  testWidgets('empty Android preparation explains how to share an order', (
+    tester,
+  ) async {
+    await openApp(tester, controller(Peer()), size: const Size(412, 900));
+
+    expect(find.text('쇼핑 앱에서 주문 화면을 공유하면, 그 주문에 맞춰 집을 준비해요.'), findsOneWidget);
+    expect(find.text('주문 화면을 캡처하고 공유 메뉴에서 SPIRA를 선택해 주세요.'), findsOneWidget);
+    expect(find.textContaining('예시 주문으로 공유'), findsNothing);
+  });
+
   testWidgets('browser sample marks card devices and the order fridge', (
     tester,
   ) async {
@@ -1580,6 +1590,17 @@ void main() {
       homeHub: homeHub,
     );
     await openApp(tester, app, size: const Size(412, 820));
+    final intro = find.text('쇼핑 앱에서 주문 화면을 공유하면, 그 주문에 맞춰 집을 준비해요.');
+    final hint = find.text('아래에서 ‘예시 주문으로 공유’를 눌러 보세요.');
+    final share = find.text('예시 주문으로 공유');
+    expect(intro, findsOneWidget);
+    expect(hint, findsOneWidget);
+    expect(share.hitTestable(), findsOneWidget);
+    expect(tester.getCenter(intro).dy, inInclusiveRange(200, 360));
+    expect(
+      tester.getBottomLeft(hint).dy,
+      lessThan(tester.getTopLeft(share).dy),
+    );
     expect(find.text('우리 집 접속 키 입력'), findsNothing);
     await settings(tester);
     await tapText(tester, '우리 집 접속 키 입력');
@@ -1589,11 +1610,13 @@ void main() {
     expect(find.text('확인한 기기 9대'), findsOneWidget);
     expect(find.text('쉬는 중'), findsNWidgets(9));
     await tapTab(tester, '준비');
-    await tester.tap(find.text('예시 주문으로 공유'));
+    await tester.tap(share);
     await tester.pump();
     await paintOrderPreview(tester);
     await tester.pump(const Duration(milliseconds: 2400));
     await tester.pumpAndSettle();
+    expect(intro, findsNothing);
+    expect(hint, findsNothing);
     expect(find.text('읽은 품목 9개'), findsOneWidget);
     await tapText(tester, '손님 오기 전 거실 청소');
     expect(find.text('판단 근거'), findsOneWidget);
@@ -1613,12 +1636,12 @@ void main() {
     expect(find.text('주방'), findsOneWidget);
     expect(find.text('현관'), findsOneWidget);
     expect(find.text('확인한 기기 9대'), findsOneWidget);
-    expect(statusFor('로봇청소기', '선택됨 · 토 12:30'), findsOneWidget);
-    expect(statusFor('TV', '선택됨 · 손님이 오면'), findsOneWidget);
-    expect(statusFor('냉장고', '선택됨'), findsOneWidget);
+    expect(statusFor('로봇청소기', '이번 준비에 써요 · 토 12:30'), findsOneWidget);
+    expect(statusFor('TV', '이번 준비에 써요 · 손님이 오면'), findsOneWidget);
+    expect(statusFor('냉장고', '이번 준비에 써요 · 안내'), findsOneWidget);
     expect(statusFor('공기청정기', '쉬는 중'), findsOneWidget);
     expect(statusFor('스타일러', '쉬는 중'), findsOneWidget);
-    expect(find.textContaining('선택됨'), findsNWidgets(7));
+    expect(find.textContaining('이번 준비에 써요'), findsNWidgets(7));
     expect(find.byType(Switch), findsNothing);
     expect(
       tester.getTopLeft(find.byKey(const ValueKey('light_01'))).dy,
@@ -1627,13 +1650,13 @@ void main() {
     await tapTab(tester, '준비');
     expect(find.byType(Card), findsNWidgets(2));
     await tapTab(tester, '우리 집');
-    expect(statusFor('로봇청소기', '선택됨 · 토 12:30'), findsOneWidget);
+    expect(statusFor('로봇청소기', '이번 준비에 써요 · 토 12:30'), findsOneWidget);
     final rescheduled = phase(peer.cards.first, 1);
     lines(rescheduled).first['when'] = {'time': '2026-10-17T12:45:00+09:00'};
     peer.cards = [rescheduled, peer.cards.last];
     await app.sync();
     await tester.pumpAndSettle();
-    expect(statusFor('로봇청소기', '선택됨 · 토 12:45'), findsOneWidget);
+    expect(statusFor('로봇청소기', '이번 준비에 써요 · 토 12:45'), findsOneWidget);
     expect(peer.rationaleReads, 1);
   });
 
@@ -1663,10 +1686,11 @@ void main() {
     expect(find.text('거실'), findsOneWidget);
     expect(find.text('주방'), findsOneWidget);
     expect(find.text('확인한 기기 7대'), findsOneWidget);
-    expect(find.textContaining('선택됨'), findsNWidgets(7));
+    expect(find.textContaining('집 기기 목록을 받지 못해'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('이번 준비에 써요 · 안내'), 120);
+    expect(find.textContaining('이번 준비에 써요'), findsNWidgets(7));
     expect(find.text('쉬는 중'), findsNothing);
     expect(find.text('냉장고'), findsOneWidget);
-    expect(find.textContaining('집 기기 목록을 받지 못해'), findsOneWidget);
   });
 
   testWidgets(

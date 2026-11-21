@@ -163,6 +163,7 @@ class _OurHomeState extends State<OurHome> {
         ];
         final rooms = <String, List<Widget>>{};
         final selectionKnown = _order == null || result != null;
+        final usedForPreparation = stateWords['used_for_preparation']!;
         for (final (:id, :type, :room, :label) in devices) {
           final roomName = roomLabel(room);
           final name = label?.trim();
@@ -179,8 +180,10 @@ class _OurHomeState extends State<OurHome> {
                   selected: times != null,
                   status: switch (times) {
                     final times? when times.isNotEmpty =>
-                      '${stateWords['selected']} · ${times.join(' · ')}',
-                    _ when times != null => stateWords['selected']!,
+                      '$usedForPreparation · ${times.join(' · ')}',
+                    _ when times != null && type == 'fridge' =>
+                      '$usedForPreparation · ${stateWords['guidance']}',
+                    _ when times != null => usedForPreparation,
                     _ when selectionKnown => stateWords['resting']!,
                     _ => '준비 미확인',
                   },
@@ -332,8 +335,6 @@ class _HomeDevice extends StatelessWidget {
                         ),
                         KoreanText(
                           status,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: foreground,
                             fontFeatures: const [FontFeature.tabularFigures()],
