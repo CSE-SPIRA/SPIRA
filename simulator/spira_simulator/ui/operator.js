@@ -105,10 +105,12 @@ async function init() {
 
 const homeEvents = document.querySelector("[data-home-endpoint]");
 const guestWindow = byId("guest-window");
+const guestWindowDetail = byId("guest-window-detail");
 async function refreshGuestWindow() {
   try {
-    const { label } = await request("/operator/guest-window");
+    const { label, detail } = await request("/operator/guest-window");
     guestWindow.textContent = label;
+    if (guestWindowDetail.textContent !== detail) guestWindowDetail.textContent = detail;
   } catch {
     // Preserve the last window through a transient read failure.
   } finally {

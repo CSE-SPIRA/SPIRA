@@ -68,6 +68,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--space-8) 0 v
 .house-event button:hover { background: var(--green-deep); }
 .house-event:has(.guest-window:not(:empty)) button { width: auto; }
 .guest-window:not(:empty) { display: inline-block; margin: 4px var(--space-8); color: var(--ink); }
+.guest-window-detail { display: block; color: var(--muted); font-size: var(--size-14); }
 .house-event button:disabled { opacity: .65; cursor: wait; }
 .house-event p {
   margin: var(--space-4) 0 0;

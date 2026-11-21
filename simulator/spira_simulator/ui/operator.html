@@ -19,7 +19,8 @@
         <div class="house-event">
           <button type="button" data-home-action="{{ event.action }}" aria-describedby="home-observation-{{ loop.index }}">{{ event.label }}</button>
           {% if event.action == "guests_arrive" %}
-          <span id="guest-window" class="guest-window">{{ guest_window }}</span>
+          <span id="guest-window" class="guest-window">{{ guest_window.label }}</span>
+          <small id="guest-window-detail" class="guest-window-detail" aria-live="polite">{{ guest_window.detail }}</small>
           {% endif %}
           <p id="home-observation-{{ loop.index }}" aria-live="polite">
             {% if event.occurred_at %}

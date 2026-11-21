@@ -24,7 +24,7 @@ from .surfaces import (
     device_controls,
     device_name,
     display_time,
-    guest_window_text,
+    guest_window_status,
     home_event_controls,
     home_event_observation,
     peer_viewers,
@@ -268,17 +268,18 @@ def create_app(
         data = await operator_window(request)
         if data["errors"]:
             raise HTTPException(503, "Plan source unavailable")
-        return {"label": guest_window_label(data["guest_windows"])}
+        return guest_window_status(request.app.state.world, data["guest_windows"])
 
     @application.get("/operator", dependencies=[Depends(require_operator)])
     async def operator(request: Request):
         world = request.app.state.world
+        data = await operator_window(request)
         return templates.TemplateResponse(
             request,
             "operator.html",
             {
                 "home_events": home_event_controls(world),
-                "guest_window": guest_window_label((await operator_window(request))["guest_windows"]),
+                "guest_window": guest_window_status(world, data["guest_windows"]),
                 "household_id": world.profile.household_id,
                 "inventory": world.devices.values(),
                 "people": world.profile.demo_people,
@@ -499,10 +500,6 @@ def create_app(
 def mqtt_status(request: Request):
     broker = request.app.state.broker
     return broker.status() if broker else None
-
-
-def guest_window_label(windows: list[dict]) -> str:
-    return f"손님 맞이 {guest_window_text(windows[-1])}" if windows else ""
 
 
 def dispatch(request: Request, action, *args, **kwargs):

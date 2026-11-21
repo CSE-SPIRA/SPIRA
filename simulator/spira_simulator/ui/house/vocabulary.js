@@ -45,6 +45,8 @@ export const STATE_WORDS = Object.freeze({
   "household_profile": "우리 집 구성",
   "preparation_status_unknown": "자동 준비가 켜져 있는지 아직 알 수 없어요.",
   "order_without_preparation": "준비할 일 없는 주문",
+  "guest_window_explanation": "이 시간 안에 손님이 오면 켜져요. 지나면 실행하지 않아요.",
+  "guest_window_passed": "손님 맞이 시간이 지났어요",
   "scene_kids_party": "공주 화면",
   "scene_party": "파티 화면",
   "scene_calm": "잔잔한 화면",
