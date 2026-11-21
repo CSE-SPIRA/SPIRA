@@ -21,6 +21,7 @@ class OrderExtraction extends StatefulWidget {
     super.key,
     required this.episode,
     required this.images,
+    required this.sharedImages,
     required this.status,
     required this.awaitingEpisode,
     required this.onComplete,
@@ -34,6 +35,7 @@ class OrderExtraction extends StatefulWidget {
 
   final wire.Episode? episode;
   final List<Uint8List> images;
+  final List<Uint8List> sharedImages;
   final String? status;
   final bool awaitingEpisode;
   final ValueChanged<List<Uint8List>> onComplete;
@@ -94,7 +96,7 @@ class _OrderExtractionState extends State<OrderExtraction>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _reduceMotion = MediaQuery.disableAnimationsOf(context);
-    if (_reduceMotion && widget.images.isNotEmpty) _finish();
+    _advance();
   }
 
   @override
@@ -111,7 +113,8 @@ class _OrderExtractionState extends State<OrderExtraction>
       _reveal.reset();
       _startPresentationWindow();
     }
-    if (!widget.hasRows || widget.images.isNotEmpty) {
+    if ((!widget.hasRows && widget.sharedImages.isEmpty) ||
+        widget.images.isNotEmpty) {
       _expanded = false;
     }
     _advance();
@@ -160,7 +163,10 @@ class _OrderExtractionState extends State<OrderExtraction>
     if (widget.images.isEmpty || _finished) return;
     // Slow replies can use up the presentation window while the items are up.
     if (_reduceMotion ||
-        (widget.canShowJudgment && _presentationWindow?.isActive == false)) {
+        widget.episode?.status == wire.EpisodeStatus.CLOSED ||
+        (_reveal.isCompleted &&
+            widget.canShowJudgment &&
+            _presentationWindow?.isActive == false)) {
       _finish();
     } else if (_reveal.isCompleted) {
       if (_stepTimer != null || widget.waitingForJudgment) return;
@@ -186,6 +192,38 @@ class _OrderExtractionState extends State<OrderExtraction>
     }
   }
 
+  void _openSharedOrder() {
+    final images = widget.sharedImages;
+    Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => Scaffold(
+          appBar: AppBar(title: const KoreanText('공유한 주문 보기')),
+          body: SafeArea(
+            top: false,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                spacing: 12,
+                children: [
+                  for (final (index, image) in images.indexed)
+                    Image.memory(
+                      image,
+                      fit: BoxFit.contain,
+                      semanticLabel: _captureLabel(index, images.length),
+                      errorBuilder: (_, _, _) =>
+                          const StatusMessage('공유한 주문 화면을 열 수 없어요.'),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _scanWindow?.cancel();
@@ -204,14 +242,19 @@ class _OrderExtractionState extends State<OrderExtraction>
       builder: (context, following) {
         final episode = widget.episode;
         final presenting = widget.images.isNotEmpty && !_finished;
-        final previewing = presenting && !_reveal.isCompleted;
-        final revealing = previewing && _reveal.isAnimating;
+        final revealing = presenting && _reveal.isAnimating;
+        final previewing = presenting && !_reveal.isCompleted && !revealing;
         final expanded =
-            _expanded ||
-            (presenting && !previewing && _step == null) ||
-            revealing;
+            _expanded || (presenting && !previewing && _step == null);
         final progress = revealing ? appEase.transform(_reveal.value) : 1.0;
-        final preview = revealing ? 1 - progress : 1.0;
+        final canOpenCapture = !presenting && widget.sharedImages.isNotEmpty;
+        final captureButton = Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            onPressed: _openSharedOrder,
+            child: const KoreanText('공유한 주문 보기'),
+          ),
+        );
         final status = presenting && episode != null
             ? (previewing ? '주문을 읽고 있어요.' : null)
             : widget.status;
@@ -228,23 +271,14 @@ class _OrderExtractionState extends State<OrderExtraction>
                 ),
               ),
             if (previewing)
-              ClipRect(
-                child: Align(
-                  alignment: Alignment.topCenter,
-                  heightFactor: preview,
-                  child: Opacity(
-                    opacity: preview,
-                    child: _CapturePreview(
-                      images: widget.images,
-                      animate:
-                          _scanWindow != null && !revealing && !_reduceMotion,
-                      onFrame: _previewFrame,
-                    ),
-                  ),
-                ),
+              _CapturePreview(
+                images: widget.images,
+                animate: _scanWindow != null && !_reduceMotion,
+                onFrame: _previewFrame,
               ),
-            if ((!previewing || revealing) && episode != null)
-              if (widget.hasRows) ...[
+            if (!previewing && episode != null)
+              if (widget.hasRows ||
+                  (canOpenCapture && episode.itemCount > 0)) ...[
                 Align(
                   alignment: Alignment.centerLeft,
                   child: Semantics(
@@ -260,7 +294,8 @@ class _OrderExtractionState extends State<OrderExtraction>
                     ),
                   ),
                 ),
-                if (expanded)
+                if (_expanded && canOpenCapture) captureButton,
+                if (expanded && widget.hasRows)
                   ClipRect(
                     child: Align(
                       alignment: Alignment.topCenter,
@@ -277,7 +312,9 @@ class _OrderExtractionState extends State<OrderExtraction>
                 if (_expanded && !previewing && widget.edit != null)
                   Align(alignment: Alignment.centerLeft, child: widget.edit),
               ] else if (episode.itemCount > 0)
-                KoreanText('읽은 품목 ${episode.itemCount}개'),
+                KoreanText('읽은 품목 ${episode.itemCount}개')
+              else if (canOpenCapture)
+                captureButton,
             if (!presenting)
               following!
             else if (_step case final step?)
@@ -292,6 +329,9 @@ class _OrderExtractionState extends State<OrderExtraction>
     );
   }
 }
+
+String _captureLabel(int index, int count) =>
+    count == 1 ? '공유한 주문 화면' : '공유한 주문 화면 ${index + 1}';
 
 class _CapturePreview extends StatelessWidget {
   const _CapturePreview({
@@ -317,13 +357,11 @@ class _CapturePreview extends StatelessWidget {
                 image: ResizeImage(
                   MemoryImage(image),
                   width: 360,
-                  height: 400,
+                  height: 600,
                   policy: ResizeImagePolicy.fit,
                 ),
                 fit: BoxFit.contain,
-                semanticLabel: images.length == 1
-                    ? '공유한 주문 화면'
-                    : '공유한 주문 화면 ${index + 1}',
+                semanticLabel: _captureLabel(index, images.length),
                 frameBuilder: (_, child, frame, _) {
                   if (frame != null) onFrame();
                   return child;
@@ -339,7 +377,7 @@ class _CapturePreview extends StatelessWidget {
     );
     return Container(
       constraints: const BoxConstraints(maxWidth: 400),
-      height: 184,
+      height: 240,
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: colors.surfaceContainerHighest,
@@ -392,13 +430,6 @@ class _ScanningCaptureState extends State<_ScanningCapture>
                   key: const ValueKey('order-scan-line'),
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: .75 * opacity),
-                    boxShadow: [
-                      BoxShadow(
-                        color: color.withValues(alpha: .55 * opacity),
-                        blurRadius: 12,
-                        spreadRadius: 3,
-                      ),
-                    ],
                   ),
                   child: const SizedBox(height: 2),
                 ),

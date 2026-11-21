@@ -9,6 +9,7 @@ import '../korean_text.dart';
 import 'labels.dart';
 import 'order_extraction.dart';
 import 'setup.dart';
+import 'status_badge.dart';
 
 typedef RationaleTaskLink = ({String cardId, String taskId});
 typedef _BasisLabels = List<String> Function(
@@ -194,6 +195,37 @@ class _RationaleScreen extends StatelessWidget {
   );
 }
 
+wire.LineElement? rationaleLine(
+  wire.Task task,
+  List<wire.Task> tasks,
+  wire.Card? card,
+) {
+  if (card == null) return null;
+  final exact = card.lines
+      .where((line) => line.taskId == task.taskId)
+      .firstOrNull;
+  if (exact != null) return exact;
+  // Re-enabling a line assigns a new task number. Reuse the basis only
+  // when the task name and displayed line still agree within this card.
+  String taskName(String id) => id.split('#').first;
+  bool matches(String id, String text) =>
+      text == task.line && taskName(id) == taskName(task.taskId);
+  final matchingBasis = tasks.where(
+    (other) => other.cardId == task.cardId && matches(other.taskId, other.line),
+  );
+  if (matchingBasis.singleOrNull == null) return null;
+  final taskIds = {
+    for (final other in tasks)
+      if (other.cardId == task.cardId) other.taskId,
+  };
+  return card.lines
+      .where(
+        (line) =>
+            !taskIds.contains(line.taskId) && matches(line.taskId, line.text),
+      )
+      .singleOrNull;
+}
+
 class _RationaleContent extends StatefulWidget {
   const _RationaleContent({
     required this.result,
@@ -252,44 +284,43 @@ class _RationaleContentState extends State<_RationaleContent> {
             when calendar.containsKey(intent.calendarEventId))
           cardId: app.cards[cardId]?.startsAt,
     };
-
     wire.LineElement? cardLine(String cardId, String taskId) => app
         .cards[cardId]
         ?.lines
         .where((line) => line.taskId == taskId)
         .firstOrNull;
 
-    final taskLinks = {
+    final liveLines = {
       for (final task in result.tasks)
-        (cardId: task.cardId, taskId: task.taskId),
+        task: rationaleLine(task, result.tasks, app.cards[task.cardId]),
     };
-    // Re-enabling a line assigns a new task number. Reuse the basis only
-    // when the task name and displayed line still agree within this card.
-    String taskName(String id) => id.split('#').first;
-    wire.LineElement? liveLine(wire.Task task) {
-      final exact = cardLine(task.cardId, task.taskId);
-      if (exact != null) return exact;
-      final matchingBasis = result.tasks.where(
-        (other) =>
-            other.cardId == task.cardId &&
-            other.line == task.line &&
-            taskName(other.taskId) == taskName(task.taskId),
-      );
-      if (matchingBasis.singleOrNull == null) return null;
-      return app.cards[task.cardId]?.lines
-          .where(
-            (line) =>
-                !taskLinks.contains((
-                  cardId: task.cardId,
-                  taskId: line.taskId,
-                )) &&
-                line.text == task.line &&
-                taskName(line.taskId) == taskName(task.taskId),
-          )
-          .singleOrNull;
+    final shared = episode == null ? null : DateTime.parse(episode.sharedAt);
+    final runTimes = <String, DateTime>{};
+    for (final execution in result.executions) {
+      if (execution.status != wire.ExecutionStatus.RUNNING &&
+          execution.status != wire.ExecutionStatus.COMPLETED) {
+        continue;
+      }
+      final time = DateTime.parse(execution.at);
+      if (shared == null || time.isBefore(shared)) continue;
+      final first = runTimes[execution.taskId];
+      if (first == null || time.isBefore(first)) {
+        runTimes[execution.taskId] = time;
+      }
     }
 
-    final liveLines = {for (final task in result.tasks) task: liveLine(task)};
+    String? immediateTime(wire.LineElement? line) {
+      final time = line?.when?.time;
+      if (time == null ||
+          shared == null ||
+          !DateTime.parse(time).isBefore(shared)) {
+        return null;
+      }
+      return seoulDateTime(
+        (runTimes[line!.taskId] ?? shared).toIso8601String(),
+      );
+    }
+
     final focus = widget.focus;
     final focusedTask = focus == null
         ? null
@@ -347,6 +378,7 @@ class _RationaleContentState extends State<_RationaleContent> {
             key: _taskAnchor,
             current: unmatchedLine,
             scheduleStart: scheduleStarts[focus?.cardId],
+            immediateTime: immediateTime(unmatchedLine),
             selected: true,
             showSituation: showSituation,
           ),
@@ -356,6 +388,7 @@ class _RationaleContentState extends State<_RationaleContent> {
             task: task,
             current: liveLines[task],
             scheduleStart: scheduleStarts[task.cardId],
+            immediateTime: immediateTime(liveLines[task]),
             selected: task == focusedTask,
             showSituation: task == focusedTask ? showSituation : null,
           ),
@@ -913,12 +946,38 @@ class _IntentPanel extends StatelessWidget {
   }
 }
 
+final _taskWords = RegExp(r'[\p{L}\p{N}]+', unicode: true);
+
+bool _repeatsTask(String need, String line) {
+  final a = _taskWords.allMatches(need).map((word) => word[0]).toList();
+  final b = _taskWords.allMatches(line).map((word) => word[0]).toList();
+  if (a.isEmpty || b.isEmpty) return false;
+  if (a.length == b.length) {
+    final differences = a.indexed.where((pair) => pair.$2 != b[pair.$1]).length;
+    return differences == 0 || (differences == 1 && a.length >= 3);
+  }
+  final shorter = a.length < b.length ? a : b;
+  final longer = a.length < b.length ? b : a;
+  if (shorter.length < 3 || longer.length != shorter.length + 1) return false;
+  final added =
+      shorter.indexed
+          .where((pair) => pair.$2 != longer[pair.$1])
+          .firstOrNull
+          ?.$1 ??
+      shorter.length;
+  return shorter
+      .skip(added)
+      .indexed
+      .every((pair) => pair.$2 == longer[added + pair.$1 + 1]);
+}
+
 class _TaskPanel extends StatelessWidget {
   const _TaskPanel({
     super.key,
     this.task,
     required this.current,
     required this.scheduleStart,
+    required this.immediateTime,
     required this.selected,
     required this.showSituation,
   }) : assert(task != null || current != null);
@@ -926,6 +985,7 @@ class _TaskPanel extends StatelessWidget {
   final wire.Task? task;
   final wire.LineElement? current;
   final String? scheduleStart;
+  final String? immediateTime;
   final bool selected;
   final VoidCallback? showSituation;
 
@@ -933,7 +993,9 @@ class _TaskPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-    final need = task?.need ?? '';
+    final need = task?.need.trim() ?? '';
+    final line = current?.text ?? task!.line;
+    final repeated = need.isNotEmpty && _repeatsTask(need, line);
     final devices = (task?.devices ?? const <wire.Device>[])
         .map((device) {
           final type = deviceLabel(device.type, unknownLabel: '기기');
@@ -943,17 +1005,21 @@ class _TaskPanel extends StatelessWidget {
         .toSet()
         .join(' · ');
     final way = switch (task?.way) {
-      wire.Way.RUN => '실행',
-      wire.Way.STANDBY => '설정 대기',
-      wire.Way.NOTICE => '안내',
+      wire.Way.RUN => ('실행', colors.primary),
+      wire.Way.STANDBY => ('설정 대기', colors.onSurfaceVariant),
+      wire.Way.NOTICE => ('안내', colors.onSurfaceVariant),
       null => null,
     };
     final timing =
         lineTimeDerivation(current, scheduleStart) ?? lineTimeLabel(current);
     final status = switch (current?.state) {
       null || wire.LineState.HELD || wire.LineState.SCHEDULED => null,
-      final state => lineLabel(state),
+      final state => (lineLabel(state), lineStatusColor(context, state)),
     };
+    final timingStyle = theme.textTheme.bodySmall?.copyWith(
+      color: colors.onSurfaceVariant,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
 
     return _Panel(
       selected: selected,
@@ -966,7 +1032,7 @@ class _TaskPanel extends StatelessWidget {
               '선택한 할 일',
               style: theme.textTheme.bodySmall?.copyWith(color: colors.primary),
             ),
-          if (need.trim().isNotEmpty) ...[
+          if (need.isNotEmpty && !repeated) ...[
             KoreanText(need, style: theme.textTheme.bodyMedium),
             Align(
               alignment: Alignment.centerLeft,
@@ -979,18 +1045,10 @@ class _TaskPanel extends StatelessWidget {
               ),
             ),
           ],
-          KoreanText(
-            current?.text ?? task!.line,
-            style: theme.textTheme.titleMedium,
-          ),
-          if (timing != null)
-            KoreanText(
-              timing,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: colors.onSurfaceVariant,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            ),
+          KoreanText(line, style: theme.textTheme.titleMedium),
+          if (timing != null) KoreanText(timing, style: timingStyle),
+          if (immediateTime case final time?)
+            KoreanText('바로 실행 · $time', style: timingStyle),
           if (devices.isNotEmpty) ...[
             const SizedBox(height: 8),
             KoreanText(
@@ -1002,8 +1060,38 @@ class _TaskPanel extends StatelessWidget {
           ],
           if (way != null || status != null) ...[
             const SizedBox(height: 8),
-            _Chips([?way, ?status]),
+            Wrap(
+              spacing: 12,
+              runSpacing: 4,
+              children: [
+                for (final (label, color) in [?way, ?status])
+                  StatusBadge(label, color: color),
+              ],
+            ),
           ],
+          if (repeated)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  animationStyle: MediaQuery.disableAnimationsOf(context)
+                      ? AnimationStyle.noAnimation
+                      : null,
+                  builder: (context) => AlertDialog(
+                    title: const KoreanText('왜 이 일?'),
+                    content: KoreanText(need),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const KoreanText('닫기'),
+                      ),
+                    ],
+                  ),
+                ),
+                child: const KoreanText('왜 이 일?'),
+              ),
+            ),
           if (task == null) const KoreanText('이 할 일의 자세한 근거를 볼 수 없어요.'),
           if (current?.endState == wire.EndState.WITHHELD)
             KoreanText(endLabel(wire.EndState.WITHHELD)!),

@@ -100,10 +100,7 @@ String? lineRelationLabel(wire.LineElement? line, wire.Card card) {
   if (time == null) return lineTimeLabel(line);
   final start = card.startsAt;
   if (start == null) return null;
-  final event = switch (card.intentId) {
-    'kid_birthday_party' || 'home_party' || 'christmas_party' => '파티',
-    _ => '일정',
-  };
+  final event = isPartyPreparation(card) ? '파티' : '일정';
   final relation = DateTime.parse(time).compareTo(DateTime.parse(start));
   return switch (relation) {
     < 0 => '$event 전',
@@ -111,6 +108,11 @@ String? lineRelationLabel(wire.LineElement? line, wire.Card card) {
     _ => '$event 시작 후',
   };
 }
+
+bool isPartyPreparation(wire.Card card) => switch (card.intentId) {
+  'kid_birthday_party' || 'home_party' || 'christmas_party' => true,
+  _ => false,
+};
 
 String? lineTimeDerivation(wire.LineElement? line, String? scheduleStart) {
   final time = line?.when?.time;

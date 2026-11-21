@@ -4,12 +4,14 @@ import 'package:flutter/material.dart';
 import '../app_controller.dart';
 import '../contracts.dart' as wire;
 import '../design_tokens.g.dart';
+import '../design_vocabulary.g.dart';
 import '../korean_text.dart';
 import '../theme.dart';
 import 'labels.dart';
 import 'order_extraction.dart';
 import 'rationale.dart';
 import 'setup.dart';
+import 'status_badge.dart';
 
 class Preparations extends StatelessWidget {
   const Preparations(this.app, {super.key});
@@ -23,9 +25,11 @@ class Preparations extends StatelessWidget {
     final current = app.currentPreparationOrder;
     bool hasFinishedPreparation(wire.Episode episode) =>
         episode.status == wire.EpisodeStatus.CLOSED &&
-        episode.cardIds.isNotEmpty &&
-        app.orderImages(episode.episodeId).isEmpty;
+        episode.cardIds.isNotEmpty;
     final pending = app.accepted.where((id) => !app.episodes.containsKey(id));
+    final recentlyClosed = known.where(
+      (episode) => app.recentlyClosed(episode.episodeId),
+    );
     final reading = known.where(
       (episode) =>
           episode != current &&
@@ -37,9 +41,10 @@ class Preparations extends StatelessWidget {
     final candidates = app.demoPreview
         ? {if (pending.isEmpty || app.serverUnavailable) ?latest}
         : {...reading, ?current, ?latest};
-    final visible = candidates.where(
-      (episode) => !hasFinishedPreparation(episode),
-    );
+    final visible = {
+      ...recentlyClosed,
+      ...candidates.where((episode) => !hasFinishedPreparation(episode)),
+    };
     final previous = known.where((episode) => !visible.contains(episode));
     final showEmpty =
         known.isEmpty &&
@@ -97,7 +102,9 @@ class Preparations extends StatelessWidget {
           expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             for (final episode in previous)
-              if (app.demoPreview && !hasFinishedPreparation(episode))
+              if (app.demoPreview &&
+                  !hasFinishedPreparation(episode) &&
+                  app.sharedOrderImages(episode.episodeId).isEmpty)
                 ListTile(
                   key: ValueKey(episode.episodeId),
                   contentPadding: EdgeInsets.zero,
@@ -262,7 +269,7 @@ class _OrderSection extends StatelessWidget {
       wire.EpisodeStatus.JUDGED => '집에서 준비할 일이 없어요.',
       wire.EpisodeStatus.NOTIFIED => current ? null : '준비를 확인했어요.',
       wire.EpisodeStatus.HELD => '준비할 시간을 기다리고 있어요.',
-      wire.EpisodeStatus.CLOSED => '주문을 마쳤어요.',
+      wire.EpisodeStatus.CLOSED => cards.isEmpty ? '준비를 마쳤어요.' : null,
       wire.EpisodeStatus.PAUSED_SKIP =>
         '주문을 보관했어요. 자동 준비가 일시정지 중이라 주문을 판단하지 않았어요.',
     };
@@ -279,6 +286,7 @@ class _OrderSection extends StatelessWidget {
           OrderExtraction(
             episode: episode,
             images: app.orderImages(episodeId),
+            sharedImages: app.sharedOrderImages(episodeId),
             status: status,
             awaitingEpisode: app.accepted.contains(episodeId),
             onComplete: (images) => app.finishOrderCapture(episodeId, images),
@@ -366,6 +374,48 @@ class _PreparationCard extends StatelessWidget {
   final wire.Card card;
   final bool hero;
 
+  String _closureSummary(wire.Rationale? rationale) {
+    final tasks = rationale?.tasks ?? const <wire.Task>[];
+    final inventory = app.homeInventory ?? app.discovered;
+    final devices = <String>{};
+    for (final task in tasks.where((task) => task.cardId == card.cardId)) {
+      if (rationaleLine(task, tasks, card)?.endState !=
+          wire.EndState.RESTORED) {
+        continue;
+      }
+      for (final device in task.devices) {
+        final appliance = device.type == 'smart_plug'
+            ? inventory?.devices
+                  .where((entry) => entry.id == device.id)
+                  .firstOrNull
+                  ?.label
+                  ?.trim()
+            : null;
+        devices.add(
+          appliance == null || appliance.isEmpty
+              ? deviceNames[device.type] ?? '기기'
+              : appliance,
+        );
+      }
+    }
+    if (devices.isEmpty) {
+      return card.stopped ? '이 준비가 중지됐어요.' : '준비를 마쳤어요.';
+    }
+    final subject = card.stopped
+        ? '준비를 중지해'
+        : isPartyPreparation(card)
+        ? '파티가 끝나'
+        : '준비를 마쳐';
+    // Zero-width breaks let a long device list wrap between names.
+    final names = devices.join('·\u200B');
+    final last = names.codeUnitAt(names.length - 1);
+    final particle =
+        last >= 0xAC00 && last <= 0xD7A3 && (last - 0xAC00) % 28 != 0
+        ? '을'
+        : '를';
+    return '$subject $names$particle 원래대로 돌렸어요.';
+  }
+
   Future<void> _confirmStop(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -398,9 +448,10 @@ class _PreparationCard extends StatelessWidget {
     final colors = theme.colorScheme;
     final stopPending = app.stopPending(card.cardId);
     final stopUncertain = app.stopUncertain(card.cardId);
-    final intent = app
-        .rationaleFor(card.episodeId)
-        ?.intents
+    final closed =
+        app.episodes[card.episodeId]?.status == wire.EpisodeStatus.CLOSED;
+    final rationale = app.rationaleFor(card.episodeId);
+    final intent = rationale?.intents
         .where((intent) => intent.cardId == card.cardId)
         .firstOrNull;
     final eventName = intent?.situation.event?.trim();
@@ -446,8 +497,7 @@ class _PreparationCard extends StatelessWidget {
                   ),
                 ),
                 if (!card.stopped &&
-                    app.episodes[card.episodeId]?.status !=
-                        wire.EpisodeStatus.CLOSED &&
+                    !closed &&
                     card.buttons.contains(wire.CardButton.STOP))
                   PopupMenuButton<bool>(
                     tooltip: '준비 더보기 · ${card.text}',
@@ -493,9 +543,17 @@ class _PreparationCard extends StatelessWidget {
                 ],
               ),
             ),
+            if (closed)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: KoreanText(
+                  _closureSummary(rationale),
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ),
             if (stopPending)
               StatusMessage(card.stopped ? '종료 결과 확인 중…' : '이 준비의 중지 요청 확인 중…')
-            else if (card.stopped)
+            else if (card.stopped && !closed)
               const StatusMessage('이 준비가 중지됐어요.'),
             if (app.controlErrors[card.cardId] case final error?)
               StatusMessage(error),
@@ -611,9 +669,9 @@ class _PreparationLine extends StatelessWidget {
                                     ),
                                   ),
                                 if (state != null && state != timing)
-                                  KoreanText(
+                                  StatusBadge(
                                     state,
-                                    style: theme.textTheme.bodySmall,
+                                    color: lineStatusColor(context, line.state),
                                   ),
                               ],
                             ),
@@ -703,7 +761,10 @@ class _ItemGuidance extends StatelessWidget {
                     if (!closed && !_waitingForPackage(task)) ...[
                       if (task.text case final text?)
                         KoreanText(text, style: hintStyle),
-                      KoreanText(lineLabel(task.state), style: hintStyle),
+                      StatusBadge(
+                        lineLabel(task.state),
+                        color: lineStatusColor(context, task.state),
+                      ),
                     ] else if (task.kind case final kind?)
                       KoreanText(switch (kind) {
                         wire.NoticeKind.STORAGE => '보관 방법',

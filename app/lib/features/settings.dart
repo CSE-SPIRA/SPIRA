@@ -50,15 +50,16 @@ class SettingsScreen extends StatelessWidget {
         '일시정지하면 시작 전 준비를 취소하고, 진행 중인 준비는 그대로 이어가요. '
         '일시정지 중 공유한 주문은 보관해요. 재개하면 이후 주문부터 새로 준비해요.',
       ),
-      StatusMessage(
-        app.pausePending
-            ? '자동 준비 상태 변경을 확인하는 중…'
-            : switch (app.paused) {
-                true => '자동 준비 일시정지됨',
-                false => '자동 준비 켜짐',
-                null => stateWords['preparation_status_unknown']!,
-              },
-      ),
+      if (app.pausePending || app.paused != null || !app.demoPreview)
+        StatusMessage(
+          app.pausePending
+              ? '자동 준비 상태 변경을 확인하는 중…'
+              : switch (app.paused) {
+                  true => '자동 준비 일시정지됨',
+                  false => '자동 준비 켜짐',
+                  null => stateWords['preparation_status_unknown']!,
+                },
+        ),
       if (app.controlErrors['pause'] case final error?) StatusMessage(error),
       Wrap(
         spacing: 8,

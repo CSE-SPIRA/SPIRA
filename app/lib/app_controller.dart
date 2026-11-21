@@ -38,6 +38,7 @@ enum DeviceChoice { undecided, delegated, never }
 
 const _idlePollInterval = Duration(seconds: 30);
 const _activePollInterval = Duration(seconds: 3);
+const _closedPreparationDuration = Duration(minutes: 30);
 
 class AppController extends ChangeNotifier {
   AppController({
@@ -98,8 +99,10 @@ class AppController extends ChangeNotifier {
   final episodes = <String, wire.Episode>{};
   final cards = <String, wire.Card>{};
   final accepted = <String>{};
-  // Keep captures in memory until their extraction sequence has been shown.
   final _orderCaptures = <String, Queue<List<Uint8List>>>{};
+  // Keep the last shown capture per order for this session only.
+  final _shownCaptures = <String, List<Uint8List>>{};
+  final _recentClosures = <String, DateTime>{};
   final _startedTasks = <String, Set<String>>{};
   final _pendingStops = <String, Set<String>>{};
   final _uncertainStops = <String>{};
@@ -116,6 +119,8 @@ class AppController extends ChangeNotifier {
   String? _cursor;
   String? get lastServerCheck => _cursor;
   Timer? _timer;
+  Timer? _closureTimer;
+  DateTime? _closureDeadline;
   Duration? _pollInterval;
   bool _foreground = true;
   StreamSubscription<void>? _shareSubscription;
@@ -153,6 +158,33 @@ class AppController extends ChangeNotifier {
   List<Uint8List> orderImages(String episodeId) =>
       _orderCaptures[episodeId]?.first ?? const [];
 
+  List<Uint8List> sharedOrderImages(String episodeId) =>
+      _orderCaptures[episodeId]?.first ?? _shownCaptures[episodeId] ?? const [];
+
+  bool recentlyClosed(String episodeId) =>
+      _recentClosures.containsKey(episodeId);
+
+  void _scheduleClosureExpiry() {
+    final next = _recentClosures.values.fold<DateTime?>(
+      null,
+      (earliest, expiry) =>
+          earliest == null || expiry.isBefore(earliest) ? expiry : earliest,
+    );
+    if (next == _closureDeadline && _closureTimer?.isActive == true) return;
+    _closureTimer?.cancel();
+    _closureDeadline = next;
+    if (next == null || _disposed) return;
+    _closureTimer = Timer(next.difference(DateTime.now()), () {
+      final now = DateTime.now();
+      _recentClosures.removeWhere(
+        (_, expiry) => !expiry.isAfter(next) || !expiry.isAfter(now),
+      );
+      _scheduleClosureExpiry();
+      _change();
+      unawaited(_serialize(_save).catchError((Object _) {}));
+    });
+  }
+
   void _queueCapture(String episodeId, List<Uint8List> images) {
     if (images.isEmpty) return;
     _orderCaptures.putIfAbsent(episodeId, Queue.new).addLast(images);
@@ -161,7 +193,7 @@ class AppController extends ChangeNotifier {
   void finishOrderCapture(String episodeId, List<Uint8List> images) {
     final captures = _orderCaptures[episodeId];
     if (captures == null || !identical(captures.first, images)) return;
-    captures.removeFirst();
+    _shownCaptures[episodeId] = captures.removeFirst();
     if (captures.isEmpty) _orderCaptures.remove(episodeId);
     _change();
   }
@@ -293,6 +325,17 @@ class AppController extends ChangeNotifier {
       final card = wire.Card.fromJson(data);
       cards[card.cardId] = card;
     }
+    final now = DateTime.now();
+    final closures = value['recentClosures'] as Map<String, dynamic>? ?? {};
+    for (final entry in closures.entries) {
+      final expiry = DateTime.tryParse(entry.value as String);
+      if (expiry != null &&
+          expiry.isAfter(now) &&
+          episodes[entry.key]?.status == wire.EpisodeStatus.CLOSED) {
+        _recentClosures[entry.key] = expiry;
+      }
+    }
+    _scheduleClosureExpiry();
     _cursor = value['cursor'] as String?;
     if (value['inventory'] case final Map<String, dynamic> inventory) {
       final manifest = wire.Devices.fromJson(inventory);
@@ -351,6 +394,9 @@ class AppController extends ChangeNotifier {
       'accepted': accepted.toList(),
       'episodes': episodes.values.map((episode) => episode.toJson()).toList(),
       'cards': cards.values.map((card) => card.toJson()).toList(),
+      'recentClosures': _recentClosures.map(
+        (id, expiry) => MapEntry(id, expiry.toIso8601String()),
+      ),
       'rationales': _storedRationales.values
           .map((value) => value.toJson())
           .toList(),
@@ -535,7 +581,7 @@ class AppController extends ChangeNotifier {
         }
         // Persist the receipt before allowing Android to discard the images.
         final episodeId = receipt.accepted.episodeId;
-        if (receipt.isNew) _rationales.remove(episodeId);
+        if (receipt.isNew) _onNewShare(episodeId);
         accepted.add(episodeId);
         await _save();
         final images = <Uint8List>[];
@@ -586,7 +632,7 @@ class AppController extends ChangeNotifier {
         _exampleShare = null;
         final episodeId = receipt.accepted.episodeId;
         if (receipt.isNew) {
-          _rationales.remove(episodeId);
+          _onNewShare(episodeId);
           _queueCapture(episodeId, [image]);
         }
         accepted.add(episodeId);
@@ -600,6 +646,12 @@ class AppController extends ChangeNotifier {
       sharingExample = false;
       _change();
     }
+  }
+
+  void _onNewShare(String episodeId) {
+    _rationales.remove(episodeId);
+    _recentClosures.clear();
+    _scheduleClosureExpiry();
   }
 
   Future<void> _refresh() async {
@@ -636,7 +688,7 @@ class AppController extends ChangeNotifier {
         DateTime.parse(card.updatedAt);
       }
       await _loadMissingHistory(id, details, poll.cards);
-      final newCardEpisodes = <String>{};
+      final changedRationaleEpisodes = <String>{};
       for (final card in poll.cards) {
         final previous = cards[card.cardId];
         if (previous != null &&
@@ -644,7 +696,9 @@ class AppController extends ChangeNotifier {
                 .isBefore(DateTime.parse(previous.updatedAt))) {
           continue;
         }
-        if (previous == null) newCardEpisodes.add(card.episodeId);
+        if (previous == null || _immediateExecutionChanged(previous, card)) {
+          changedRationaleEpisodes.add(card.episodeId);
+        }
         cards[card.cardId] = card;
         if (platform != null && card.notify) {
           _notifications[jsonEncode([card.cardId, card.updatedAt])] = [
@@ -669,12 +723,33 @@ class AppController extends ChangeNotifier {
           _uncertainStops.remove(card.cardId);
         }
       }
+      final newOrders = details
+          .where((episode) => !episodes.containsKey(episode.episodeId))
+          .toList();
+      bool superseded(wire.Episode episode) => newOrders.any(
+        (order) =>
+            DateTime.parse(order.sharedAt)
+                .isAfter(DateTime.parse(episode.sharedAt)),
+      );
+      _recentClosures.removeWhere((id, _) => superseded(episodes[id]!));
+      var showClosure = false;
       for (final episode in details) {
         final previous = episodes[episode.episodeId];
         if (previous?.status != episode.status ||
             !listEquals(previous?.cardIds, episode.cardIds) ||
-            newCardEpisodes.contains(episode.episodeId)) {
+            changedRationaleEpisodes.contains(episode.episodeId)) {
           _rationales.remove(episode.episodeId);
+        }
+        if (episode.status != wire.EpisodeStatus.CLOSED) {
+          _recentClosures.remove(episode.episodeId);
+        } else if (previous != null &&
+            previous.status != wire.EpisodeStatus.CLOSED &&
+            episode.cardIds.isNotEmpty &&
+            !superseded(episode)) {
+          _recentClosures[episode.episodeId] = DateTime.now().add(
+            _closedPreparationDuration,
+          );
+          showClosure = true;
         }
         episodes[episode.episodeId] = episode;
         accepted.remove(episode.episodeId);
@@ -685,6 +760,10 @@ class AppController extends ChangeNotifier {
             '주문 화면을 캡처해서 다시 공유해 주세요.',
           ];
         }
+      }
+      _scheduleClosureExpiry();
+      if (showClosure && homeHub != null && homeInventory == null) {
+        unawaited(refreshHomeInventory().catchError((Object _) {}));
       }
       final previousCursor = _cursor;
       _cursor = poll.serverTime;
@@ -718,6 +797,23 @@ class AppController extends ChangeNotifier {
     }
     _change();
     await _deliverNotifications();
+  }
+
+  bool _immediateExecutionChanged(wire.Card previous, wire.Card current) {
+    final sharedAt = episodes[current.episodeId]?.sharedAt;
+    if (sharedAt == null) return false;
+    final shared = DateTime.parse(sharedAt);
+    return current.lines.any((line) {
+      final time = line.when?.time;
+      return time != null &&
+          DateTime.parse(time).isBefore(shared) &&
+          _hasStarted(line.state) &&
+          previous.lines
+                  .where((old) => old.taskId == line.taskId)
+                  .firstOrNull
+                  ?.state !=
+              line.state;
+    });
   }
 
   Future<void> _loadMissingHistory(
@@ -1065,6 +1161,7 @@ class AppController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _timer?.cancel();
+    _closureTimer?.cancel();
     unawaited(_shareSubscription?.cancel());
     homeHub?.close();
     super.dispose();

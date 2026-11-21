@@ -75,6 +75,8 @@ correct read product names and quantities; after a line starts, that correction
 affordance MUST be absent. (PC-1, PC-2, PC-4)
 
 **A3-R3.** For a new share, the App MUST show the capture and read items.
+Keep the capture sharp and visible through the reading step. During the same
+session, let the user reopen the capture from the read item count.
 When the card and stored rationale are available, show the situation and
 basis, intent and basis with any set-aside items, and the Server's task lines
 before the card.
@@ -92,8 +94,9 @@ name when available. On the card and in 우리 집, show a line's trigger or its
 relation to the schedule start from the supplied times. Show exact times in
 판단 근거. After a line ends, show the supplied restore outcome when
 `end_state` is other than `none`, and preserve the Server display `note`.
-Keep cards from closed orders under the collapsed 지난 준비 section, with WHY
-still reachable.
+Keep newly closed preparations at the top until the next share or for 30
+minutes. Summarize restoration using only the card's own restored lines.
+Then keep the cards under collapsed 지난 준비, with WHY still reachable.
 (PC-1, PC-3, PC-4, PC-5)
 
 **A4-R2.** A line's planned end condition MUST be shown only when a future
@@ -140,7 +143,10 @@ marked, linked calendar evidence, unusual items and their reasons, similar
 order counts by intent and examples with overlapping items, situation slots
 with their evidence, and intent text with the theme highlighted. Then show each
 task's need, line, devices, way, and available card time and state, followed by
-fridge notice text. Use contract fields only. For no-intent orders, show the
+fridge notice text. If the need repeats the line with a small wording change,
+put the need behind **왜 이 일?**. If a derived time predates the share, show
+the derivation followed by **바로 실행** and the recorded run time or share
+time. Use contract fields only. For no-intent orders, show the
 stored reason and notices and skip empty sections. A line's WHY opens at its
 task and highlights the situation behind its card. Missing rationale remains
 unavailable. (PC-1, PC-2)
