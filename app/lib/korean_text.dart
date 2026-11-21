@@ -29,10 +29,16 @@ class KoreanText extends Text {
     if (maxLines == 1 || softWrap == false) return super.build(context);
     final original =
         data ?? textSpan!.toPlainText(includeSemanticsLabels: false);
-    final joins = _hangulBoundary
-        .allMatches(original)
-        .map((boundary) => boundary.end)
-        .toSet();
+    final joins = <int>{};
+    for (final word in _word.allMatches(original)) {
+      final text = word[0]!;
+      if (!_hangul.hasMatch(text)) continue;
+      var offset = word.start;
+      for (final grapheme in text.characters) {
+        offset += grapheme.length;
+        if (offset < word.end) joins.add(offset);
+      }
+    }
     if (joins.isEmpty) return super.build(context);
 
     return Text.rich(
@@ -47,12 +53,10 @@ class KoreanText extends Text {
   }
 }
 
-// Insert a word joiner at Hangul boundaries inside a word. The label spoken
-// by assistive technology still uses the original text.
-final _hangulBoundary = RegExp(
-  r'\p{Script=Hangul}(?=[\p{L}\p{N}])|[\p{L}\p{N}](?=\p{Script=Hangul})',
-  unicode: true,
-);
+// Keep punctuation and mixed-script text in the same Korean word. Assistive
+// technology still reads the original text without the inserted joiners.
+final _word = RegExp(r'[^\s\u200B]+', unicode: true);
+final _hangul = RegExp(r'\p{Script=Hangul}', unicode: true);
 
 TextSpan _joinWords(TextSpan paragraph, Set<int> joins) {
   var offset = 0;

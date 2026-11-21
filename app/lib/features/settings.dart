@@ -24,6 +24,11 @@ class SettingsScreen extends StatelessWidget {
     padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
     children: [
       KoreanText('설정', style: Theme.of(context).textTheme.headlineMedium),
+      if (!app.demoPreview)
+        KoreanText(
+          app.fixture ? '계약 테스트 서버' : '실제 서버 프로필',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
       if (app.needsToken)
         ListTile(
           contentPadding: EdgeInsets.zero,
@@ -104,30 +109,6 @@ class SettingsScreen extends StatelessWidget {
         ],
       ],
     ],
-  );
-}
-
-class PeerLabel extends StatelessWidget {
-  const PeerLabel(this.fixture, {super.key});
-
-  final bool fixture;
-
-  @override
-  Widget build(BuildContext context) => Align(
-    alignment: Alignment.centerLeft,
-    child: DecoratedBox(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.secondaryContainer,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-        child: KoreanText(
-          fixture ? '계약 테스트 서버' : '실제 서버 프로필',
-          style: Theme.of(context).textTheme.labelMedium,
-        ),
-      ),
-    ),
   );
 }
 
@@ -231,7 +212,6 @@ class _MemoryScreenState extends State<_MemoryScreen> {
     body: ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        PeerLabel(widget.app.fixture),
         if (_message case final message?) StatusMessage(message),
         if (_busy)
           const LinearProgressIndicator(semanticsLabel: '우리 집 기억 확인 중'),

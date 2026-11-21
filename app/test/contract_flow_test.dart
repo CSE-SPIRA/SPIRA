@@ -11,6 +11,7 @@ import 'package:http/testing.dart';
 import 'package:spira_app/api/app_api.dart';
 import 'package:spira_app/app_controller.dart';
 import 'package:spira_app/contracts.dart' as wire;
+import 'package:spira_app/design_tokens.g.dart';
 import 'package:spira_app/main.dart';
 import 'package:spira_app/platform/android_bridge.dart';
 import 'package:spira_app/platform/google_calendar.dart';
@@ -946,7 +947,7 @@ void main() {
       expect(preparationMenu, findsNWidgets(2));
       expect(find.text('이 준비 중지'), findsNothing);
       expect(find.text('승인'), findsNothing);
-      expect(find.text('0/4 준비'), findsOneWidget);
+      expect(find.text('4개 중 0개 끝남'), findsOneWidget);
       expect(find.text('손님 도착 기다리는 중'), findsOneWidget);
       expect(find.text('10월 17일 (토) 14:00'), findsOneWidget);
       expect(find.text('토 12:30'), findsOneWidget);
@@ -992,7 +993,7 @@ void main() {
       peer.cards = [finalCard];
       await app.sync();
       await tester.pumpAndSettle();
-      expect(find.text('3/3 준비'), findsOneWidget);
+      expect(find.text('3개 중 3개 끝남'), findsOneWidget);
       expect(find.text('꺼짐'), findsOneWidget);
       expect(find.text('사용자가 바꾼 상태를 유지함'), findsOneWidget);
       expect(find.text('사용자가 조명을 바꿔 현재 상태를 유지했어요'), findsOneWidget);
@@ -1149,7 +1150,17 @@ void main() {
         return Peer.response(updated);
       };
       final toggle = find.byType(Switch);
-      expect(tester.widget<Switch>(toggle).value, isTrue);
+      final enabled = tester.widget<Switch>(toggle);
+      expect(enabled.value, isTrue);
+      expect(
+        enabled.trackColor?.resolve({WidgetState.selected}),
+        DesignTokens.greenSoft,
+      );
+      expect(
+        enabled.thumbColor?.resolve({WidgetState.selected}),
+        DesignTokens.greenDeep,
+      );
+      expect(tester.getSize(toggle).height, greaterThanOrEqualTo(48));
       await tester.tap(toggle);
       await tester.pumpAndSettle();
       expect(peer.reactions.single.$1, 'nc_331');
@@ -1158,7 +1169,7 @@ void main() {
         'task_id': 't_clean#1',
       });
       expect(find.text('꺼짐'), findsOneWidget);
-      expect(find.text('0/0 준비'), findsOneWidget);
+      expect(find.text('0개 중 0개 끝남'), findsOneWidget);
       expect(preparationMenu, findsOneWidget);
       expect(tester.widget<Switch>(toggle).value, isFalse);
       await tester.tap(toggle);
@@ -1340,17 +1351,77 @@ void main() {
     expect(previousCard, findsNothing);
   });
 
+  testWidgets('preview keeps older orders as summaries below the latest', (
+    tester,
+  ) async {
+    final previous = fixture('card.v1.json');
+    lines(previous).first['state'] = 'unknown';
+    final current = fixture('card.found.json', episode: 'ep_9120');
+    final peer = Peer()..cards = [previous, current];
+    peer.episodes['ep_9031'] = fixture('episode.json');
+    peer.episodes['ep_9120'] = fixture('episode.json')
+      ..['episode_id'] = 'ep_9120'
+      ..['shared_at'] = '2026-11-20T11:00:00+09:00'
+      ..['status'] = 'notified'
+      ..['card_ids'] = [current['card_id']]
+      ..['item_tasks'] = [];
+    final app = AppController(
+      api: peer.client(),
+      platform: null,
+      store: TestStore(),
+      fixture: true,
+      browserPreview: true,
+      configuredHousehold: 'h_042',
+    );
+    await openApp(tester, app, size: const Size(412, 900));
+
+    final currentCard = find.byKey(ValueKey(current['card_id'] as String));
+    final previousTitle = find.text(previous['text'] as String);
+    final share = find.text('예시 주문으로 공유');
+    final history = find.text('지난 준비 1개');
+    expect(currentCard, findsOneWidget);
+    expect(previousTitle, findsNothing);
+    expect(share.hitTestable(), findsOneWidget);
+    expect(find.text('미리보기 · 계약 테스트 서버'), findsOneWidget);
+    expect(
+      tester.getBottomLeft(history).dy,
+      lessThan(tester.getTopLeft(share).dy),
+    );
+    expect(
+      tester.getBottomLeft(share).dy,
+      lessThan(tester.getTopLeft(find.byKey(const ValueKey('home-tabs'))).dy),
+    );
+    await tapText(tester, '지난 준비 1개');
+    expect(previousTitle, findsOneWidget);
+    expect(find.byType(Card), findsOneWidget);
+    expect(find.text('결과 확인 불가'), findsNothing);
+
+    peer.episodes['ep_9150'] = fixture('episode.json', episode: 'ep_9150')
+      ..['shared_at'] = '2026-11-21T11:00:00+09:00';
+    await app.sync();
+    await tester.pumpAndSettle();
+    expect(find.text('지난 준비 2개'), findsOneWidget);
+    expect(find.byType(Card), findsNothing);
+    expect(previousTitle, findsNothing);
+    expect(find.text('집에서 준비할 일이 없어요.'), findsOneWidget);
+    await tapTab(tester, '우리 집');
+    expect(share, findsNothing);
+    expect(find.textContaining('계약 테스트 서버'), findsNothing);
+  });
+
   testWidgets('card lines use the Server trigger in Seoul time', (
     tester,
   ) async {
     final peer = Peer();
     peer.episodes['ep_9031'] = fixture('episode.json');
-    final card = fixture('card.v1.json');
+    final card = fixture('card.v1.json')
+      ..['starts_at'] = '2026-10-16T15:05:00+00:00';
     lines(card).first['when'] = {'time': '2026-10-16T15:05:00+00:00'};
     lines(card)[1]['when'] = null;
     peer.cards = [card];
     await openApp(tester, controller(peer));
 
+    expect(find.text('10월 17일 (토) 00:05'), findsOneWidget);
     expect(find.text('토 00:05'), findsOneWidget);
     expect(find.text('손님이 오면'), findsOneWidget);
     expect(find.text('토 14:00'), findsOneWidget);
@@ -1792,6 +1863,7 @@ void main() {
       expect(find.text('집에서 준비할 일이 없어요.'), findsOneWidget);
       expect(find.text('읽은 품목 6개'), findsOneWidget);
       expect(find.text(releaseNote), findsOneWidget);
+      expect(find.text('보관 방법'), findsOneWidget);
       expect(find.text('예정됨'), findsNothing);
       for (final text in guidance) {
         expect(find.text(text), findsNothing);
@@ -1923,14 +1995,19 @@ void main() {
       peer.cards = [fixture('card.final.json')];
       final store = TestStore();
       await openApp(tester, controller(peer, store: store));
-      expect(find.text('계약 테스트 서버'), findsOneWidget);
+      expect(find.textContaining('미리보기'), findsNothing);
+      expect(find.text('예시 주문으로 공유'), findsNothing);
+      expect(find.text('계약 테스트 서버'), findsNothing);
       expect(find.byType(Card), findsOneWidget);
+      await settings(tester);
+      expect(find.text('계약 테스트 서버'), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
       peer.unavailable = true;
       await openApp(tester, controller(peer, store: store, fixture: false));
+      expect(find.byType(Card), findsNothing);
+      await settings(tester);
       expect(find.text('실제 서버 프로필'), findsOneWidget);
       expect(find.text('계약 테스트 서버'), findsNothing);
-      expect(find.byType(Card), findsNothing);
       expect(
         peer.requests.every(
           (request) =>

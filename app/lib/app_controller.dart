@@ -59,6 +59,8 @@ class AppController extends ChangeNotifier {
   final wire.Devices? discovered;
   final String? configuredHousehold;
 
+  bool get demoPreview => browserPreview && fixture && platform == null;
+
   String get _environment =>
       jsonEncode([fixture, api.baseUrl.toString(), configuredHousehold]);
   String get _scope => jsonEncode([_environment, household]);
@@ -123,7 +125,9 @@ class AppController extends ChangeNotifier {
   ];
 
   wire.Episode? get currentPreparationOrder {
-    for (final (index, episode) in orderedEpisodes.indexed) {
+    final ordered = orderedEpisodes;
+    final candidates = demoPreview ? ordered.take(1) : ordered;
+    for (final (index, episode) in candidates.indexed) {
       // Keep the latest order's card visible after its work ends.
       if (index > 0 && episode.status == wire.EpisodeStatus.CLOSED) continue;
       if (cardsFor(episode).isNotEmpty) return episode;
@@ -467,7 +471,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> shareExample() async {
-    if (!browserPreview || !fixture || !canControl || sharingExample) return;
+    if (!demoPreview || !canControl || sharingExample) return;
     sharingExample = true;
     exampleShareError = null;
     _change();

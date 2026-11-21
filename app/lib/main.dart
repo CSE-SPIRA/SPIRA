@@ -173,46 +173,33 @@ class _HomeState extends State<_Home> with WidgetsBindingObserver {
         ),
         body: SafeArea(
           bottom: !ready,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: PeerLabel(app.fixture),
-              ),
-              Expanded(
-                child: app.starting
-                    ? const Center(
-                        child: CircularProgressIndicator(
-                          semanticsLabel: '앱 시작 중',
-                        ),
-                      )
-                    : ready
-                    ? Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          // Keep the preparation scroll and extraction alive
-                          // while another tab is visible.
-                          Offstage(
-                            offstage: _tab != _HomeTab.preparations,
-                            child: ExcludeFocus(
-                              excluding: _tab != _HomeTab.preparations,
-                              child: Preparations(app),
-                            ),
-                          ),
-                          if (_tab == _HomeTab.ourHome) OurHome(app),
-                          if (_tab == _HomeTab.settings)
-                            SettingsScreen(
-                              app,
-                              onServerToken: _token,
-                              onHomeKey: () => _token(hub: true),
-                            ),
-                        ],
-                      )
-                    : SetupScreen(app),
-              ),
-            ],
-          ),
+          child: app.starting
+              ? const Center(
+                  child: CircularProgressIndicator(semanticsLabel: '앱 시작 중'),
+                )
+              : ready
+              ? Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    // Keep the preparation scroll and extraction alive
+                    // while another tab is visible.
+                    Offstage(
+                      offstage: _tab != _HomeTab.preparations,
+                      child: ExcludeFocus(
+                        excluding: _tab != _HomeTab.preparations,
+                        child: Preparations(app),
+                      ),
+                    ),
+                    if (_tab == _HomeTab.ourHome) OurHome(app),
+                    if (_tab == _HomeTab.settings)
+                      SettingsScreen(
+                        app,
+                        onServerToken: _token,
+                        onHomeKey: () => _token(hub: true),
+                      ),
+                  ],
+                )
+              : SetupScreen(app),
         ),
         bottomNavigationBar: ready
             ? _TabBar(

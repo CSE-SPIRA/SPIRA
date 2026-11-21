@@ -71,8 +71,9 @@ For a manually started stack, save its printed output and pass `--stack-log`
 with that file. Use `--demo-port`, `--proxy-port`, and `--web-port` to change
 the defaults of 8730, 8731, and 8732.
 
-Click **예시 주문으로 공유** to see the screenshot scan, extracted items, and
-preparation card. Tap a preparation line to see its **판단 근거** or open the
+Click **예시 주문으로 공유** in the **미리보기** strip above the tab bar to see
+the screenshot scan, extracted items, and preparation card. Tap a
+preparation line to see its **판단 근거** or open the
 **우리 집** tab to browse the room grids. This preview uses the
 demo shell's sample order and skips Android sharing and Google Calendar. It
 displays the same bundled PNG it uploads to the demo route. The web build

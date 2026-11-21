@@ -13,13 +13,13 @@ void main() {
         textDirection: TextDirection.ltr,
         child: Center(
           child: SizedBox(
-            width: 45,
+            width: 85,
             child: KoreanText.rich(
               TextSpan(
                 text: '가나 다',
                 children: [
                   TextSpan(
-                    text: '라마',
+                    text: '라마-AB)',
                     style: TextStyle(color: Color(0xFF123456)),
                   ),
                 ],
@@ -46,8 +46,8 @@ void main() {
     }
 
     expect(topOf('다'), greaterThan(topOf('가')));
-    expect(topOf('마'), topOf('다'));
-    expect(find.bySemanticsLabel('가나 다라마'), findsOneWidget);
+    expect(topOf(')'), topOf('다'));
+    expect(find.bySemanticsLabel('가나 다라마-AB)'), findsOneWidget);
     semantics.dispose();
   });
 }
