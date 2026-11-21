@@ -27,7 +27,17 @@ SPIRA reads an order screenshot, finds similar cases in a synthetic purchase-int
 
 ## Run the demo
 
-From the repository root, run `scripts/demo-up` with `uv` and Mosquitto installed. Open the first printed URL (default `http://127.0.0.1:8729/`) for the App, Viewer, operator, Hub, and guided replay. Stop with Ctrl-C and relaunch for a fresh run.
+Before the first run, install:
+
+| | macOS | Linux, or Windows through [WSL2](https://learn.microsoft.com/windows/wsl/install) |
+|---|---|---|
+| [uv](https://docs.astral.sh/uv/getting-started/installation/) (fetches Python 3.12) | `brew install uv` | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| Mosquitto | `brew install mosquitto` | `sudo apt install mosquitto` |
+| [Flutter](https://docs.flutter.dev/get-started/install) stable, Dart 3.14 or newer (App preview) | `brew install --cask flutter` | Flutter install guide, then `flutter doctor` |
+
+Native Windows is not supported (the Hub and the launcher use POSIX process and file locking); run everything inside WSL2. Ports 8729–8732 must be free.
+
+From the repository root, run `scripts/demo-up`. Open the first printed URL (default `http://127.0.0.1:8729/`) for the App, Viewer, operator, Hub, and guided replay. Stop with Ctrl-C and relaunch for a fresh run.
 
 - Flutter builds the App preview on the first run. Later runs reuse the cached build for the same sources and Dart defines. If Flutter and a matching build are both unavailable, the rest of the demo still starts.
 - `--export-app DIR` copies the App build and exits. On another machine, run `scripts/demo-up --app-web DIR` to serve that build. Use a build made with the same Dart defines, including the same `--proxy-port` (default 8731).

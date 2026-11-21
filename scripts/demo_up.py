@@ -149,9 +149,11 @@ def main():
     requests["start"] = args.start_port
     if not args.no_shell:
         requests["shell"] = args.shell_port or 0
-    mosquitto = shutil.which("mosquitto") or "/opt/homebrew/sbin/mosquitto"
-    if not Path(mosquitto).exists():
-        sys.exit("mosquitto not found (brew install mosquitto)")
+    mosquitto = shutil.which("mosquitto") or next(
+        (path for path in ("/opt/homebrew/sbin/mosquitto", "/usr/local/sbin/mosquitto", "/usr/sbin/mosquitto")
+         if Path(path).exists()), None)
+    if mosquitto is None:
+        sys.exit("mosquitto not found: macOS `brew install mosquitto`, Linux/WSL2 `sudo apt install mosquitto`")
     directory = run_directory(args.port, args.episode)
     with (directory / "lock").open("w") as lock:
         try:
