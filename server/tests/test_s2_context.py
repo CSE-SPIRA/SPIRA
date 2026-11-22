@@ -103,10 +103,8 @@ def test_kb_neighbours_counts_and_examples(kb):
     assert [e["intent_id"] for e in nb["examples"]] == ["kid_birthday_party", "home_baking"]
     ex = nb["examples"][0]
     assert set(ex) == {"case_id", "items", "intent_id", "intent_text", "situation", "calendar_tags",
-                       "case_household_types", "overlap"}
+                       "case_household_types"}       # R49: no exact-name overlap
     assert ex["calendar_tags"] == ["생일"]                    # the c1 tag bonus puts a tagged case first
-    assert ex["overlap"]["k"] == len(ex["overlap"]["items"]) == 6 and ex["overlap"]["n"] == 7
-    assert ex["overlap"]["items"] == sorted(ex["overlap"]["items"])
     assert len(ctx["snapshot"]) == 12 and not any(c.startswith("syn_T9") for c in ctx["snapshot"])
 
 

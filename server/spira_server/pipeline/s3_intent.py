@@ -94,7 +94,6 @@ def build_intent_message(context: dict, items: list[dict]) -> str:
                 sit = ex.get("situation") or {}
                 lines += ["", prompts.fill(
                     k["example"], I=i, NAME=get_lists().intent_name(ex["intent_id"]), INTENT_ID=ex["intent_id"],
-                    N=ex["overlap"]["n"], K=ex["overlap"]["k"], OVERLAP=", ".join(ex["overlap"]["items"]) or none_word,
                     ITEMS=", ".join(ex["items"]), INTENT_TEXT=ex.get("intent_text") or none_word,
                     EVENT=sit.get("event") or none_word, GUESTS=sit.get("guests") or none_word,
                     ACTIVITY=sit.get("activity") or none_word, THEME=sit.get("theme") or none_word,

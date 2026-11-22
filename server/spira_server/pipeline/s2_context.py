@@ -195,17 +195,14 @@ def summarize_neighbors(cases: list[KbCase], types: list[str], calendar: list[di
         best.setdefault(c.intent_id, c)
     order = sorted(counts, key=lambda i: (-counts[i], -scores[best[i].case_id], best[i].case_id))
     reps = pick_reps(order, counts, len(ranked), n.cover, n.none_min, n.max_reps)
-    order_set = set(types)
     examples = []
     for intent_id in reps:
         c = best[intent_id]
-        shared = sorted(order_set & set(c.items))
         examples.append({
             "case_id": c.case_id, "items": sorted(c.items), "intent_id": c.intent_id,
             "intent_text": c.intent_text, "situation": c.situation,
             "calendar_tags": list(c.when.get("calendar_tags") or []),
             "case_household_types": list(c.household.get("types") or []),
-            "overlap": {"k": len(shared), "n": len(c.items), "items": shared},
         })
     rows = [{"intent_id": i, "name": lists.intent_name(i), "n": counts[i]} for i in order]
     block: dict = {"similar_count": len(ranked), "intent_counts": rows, "examples": examples, "note": None}
