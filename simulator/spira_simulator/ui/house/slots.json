@@ -1,0 +1,127 @@
+[
+  {
+    "id": "balloon",
+    "kind": "goods",
+    "label": "풍선 다발",
+    "parameters": {
+      "palette": {"enum": ["pink_white_gold", "princess_pink", "ocean_blue", "sunny_yellow"], "default": "pink_white_gold"},
+      "placement": {"enum": ["bunch", "floor"], "default": "bunch"},
+      "count": {"type": "integer", "minimum": 1, "maximum": 8, "default": 5}
+    },
+    "anchors": ["living_room"]
+  },
+  {
+    "id": "party_hat",
+    "kind": "goods",
+    "label": "고깔모자",
+    "parameters": {
+      "count": {"type": "integer", "minimum": 1, "maximum": 8, "default": 3}
+    },
+    "anchors": ["kitchen"]
+  },
+  {
+    "id": "cake_topper",
+    "kind": "goods",
+    "label": "왕관 장식 컵케이크",
+    "parameters": {},
+    "anchors": ["kitchen"]
+  },
+  {
+    "id": "strawberry",
+    "kind": "goods",
+    "label": "딸기 팩",
+    "parameters": {
+      "placement": {"enum": ["fridge", "counter"], "default": "fridge"}
+    },
+    "anchors": ["fridge_01", "kitchen"]
+  },
+  {
+    "id": "cream",
+    "kind": "goods",
+    "label": "휘핑크림 팩",
+    "parameters": {
+      "placement": {"enum": ["fridge", "counter"], "default": "fridge"}
+    },
+    "anchors": ["fridge_01", "kitchen"]
+  },
+  {
+    "id": "child",
+    "kind": "person",
+    "label": "생일 주인공",
+    "parameters": {
+      "skin": {"enum": ["peach", "tan", "brown"], "default": "peach"},
+      "outfit": {"enum": ["princess_pink", "ocean_blue", "forest_green", "sunny_yellow"], "default": "princess_pink"}
+    },
+    "anchors": ["living_room"]
+  },
+  {
+    "id": "guest_child",
+    "kind": "person",
+    "label": "어린이 손님",
+    "parameters": {
+      "variant": {"enum": ["bob", "curls", "crop"], "default": "bob"},
+      "skin": {"enum": ["peach", "tan", "brown"], "default": "tan"},
+      "outfit": {"enum": ["princess_pink", "ocean_blue", "forest_green", "sunny_yellow"], "default": "ocean_blue"}
+    },
+    "anchors": ["entrance", "living_room"]
+  },
+  {
+    "id": "adult",
+    "kind": "person",
+    "label": "보호자",
+    "parameters": {
+      "skin": {"enum": ["peach", "tan", "brown"], "default": "peach"},
+      "outfit": {"enum": ["princess_pink", "ocean_blue", "forest_green", "sunny_yellow"], "default": "forest_green"}
+    },
+    "anchors": ["entrance", "living_room"]
+  },
+  {
+    "id": "confetti",
+    "kind": "effect",
+    "label": "꽃종이 팡",
+    "parameters": {
+      "count": {"enum": [12, 24, 36], "default": 24}
+    },
+    "anchors": ["living_room"]
+  },
+  {
+    "id": "ceiling_cove",
+    "kind": "effect",
+    "label": "천장 간접조명",
+    "parameters": {},
+    "anchors": ["light_01", "living_room"]
+  },
+  {
+    "id": "banner",
+    "kind": "surface",
+    "label": "벽걸이 가랜드",
+    "parameters": {
+      "color": {"enum": ["princess_pink", "ocean_blue", "sunny_yellow"], "default": "princess_pink"},
+      "artwork": {"type": ["string", "null"], "format": "uri-reference", "minLength": 1, "default": null}
+    },
+    "anchors": ["living_room"]
+  },
+  {
+    "id": "cleaner_sweep",
+    "kind": "motion",
+    "label": "거실 청소 동선",
+    "parameters": {},
+    "anchors": ["cleaner_01", "living_room"]
+  },
+  {
+    "id": "guests_enter",
+    "kind": "motion",
+    "label": "손님 입장",
+    "parameters": {},
+    "anchors": ["entrance", "living_room"]
+  },
+  {
+    "id": "light_spread",
+    "kind": "motion",
+    "label": "무드등 빛 퍼짐",
+    "parameters": {
+      "color": {"enum": ["princess_pink", "ocean_blue", "sunny_yellow"], "default": "princess_pink"}
+    },
+    "anchors": ["light_01", "living_room"]
+  }
+]

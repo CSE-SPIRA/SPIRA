@@ -8,11 +8,11 @@ from typing import Protocol
 
 import httpx
 from pydantic import AwareDatetime, BaseModel, StrictBool, TypeAdapter
-from spira_contracts.common import ExecutionStatus, Substrate
+from spira_contracts.common import ExecutionStatus, Substrate, TaskSource, TriggerEvent
 from spira_contracts.event import Event
 from spira_contracts.event_batch import EventBatch
 from spira_contracts.execution_result import ExecutionResult, RestoreResult, RunResult
-from spira_contracts.plan import Plan, TimeTrigger
+from spira_contracts.plan import EventTrigger, Plan, TimeTrigger
 from spira_contracts.plan_pull import PlanPull
 
 from .profile import public_value
@@ -87,7 +87,11 @@ def execution_evidence(payload, *, from_hub: bool):
             and step.get("status") in ExecutionStatus
         ]
         reports = hub_restores.validate_python(hub_rows(payload, "restoration"))
-        return runs, [(row.packet, row.delivered) for row in reports]
+        triggered = {
+            (story.plan_id, story.task_id) for story in stories
+            if any(step.get("kind") == "triggered" for step in story.steps)
+        }
+        return runs, [(row.packet, row.delivered) for row in reports], triggered
 
     if isinstance(payload, dict):
         payload = payload.get("executions")
@@ -97,7 +101,16 @@ def execution_evidence(payload, *, from_hub: bool):
         for record in records
         if isinstance(record, RunResult)
     ]
-    return runs, [(record, None) for record in records if isinstance(record, RestoreResult)]
+    return runs, [(record, None) for record in records if isinstance(record, RestoreResult)], set()
+
+
+async def read_plans(household_id: str, source: Source) -> list[Plan]:
+    payload = plan_source.validate_python(await source.fetch())
+    if isinstance(payload, Plan):
+        return [payload] if payload.household_id == household_id else []
+    if payload.household_id != household_id:
+        return []
+    return [plan for plan in payload.plans if plan.household_id == household_id]
 
 
 async def stage_overlay(
@@ -105,27 +118,25 @@ async def stage_overlay(
     plans: Source | None,
     executions: Source | None,
     *,
+    now: datetime,
     from_hub: bool = False,
 ) -> dict:
     errors = []
-    plan_payload = None
+    stage_plans = []
     run_evidence, restore_evidence = [], []
+    triggered = set()
     if plans:
         try:
-            plan_payload = plan_source.validate_python(await plans.fetch())
+            stage_plans = await read_plans(household_id, plans)
         except (OSError, ValueError, httpx.HTTPError):
             errors.append("Plan source unavailable")
     if executions:
         try:
-            run_evidence, restore_evidence = execution_evidence(
+            run_evidence, restore_evidence, triggered = execution_evidence(
                 await executions.fetch(), from_hub=from_hub
             )
         except (OSError, ValueError, httpx.HTTPError):
             errors.append("Execution source unavailable")
-
-    stage_plans = [plan_payload] if isinstance(plan_payload, Plan) else []
-    if isinstance(plan_payload, PlanPull) and plan_payload.household_id == household_id:
-        stage_plans = plan_payload.plans
 
     runs = {}
     for record in run_evidence:
@@ -134,9 +145,9 @@ async def stage_overlay(
             runs[key] = record
     preparation = []
     notices = []
+    guest_windows = []
+    has_preparation = False
     for plan in stage_plans:
-        if plan.household_id != household_id:
-            continue
         cancelled = {task.task_id for task in plan.cancelled}
         for task in plan.tasks:
             if task.task_id in cancelled:
@@ -146,7 +157,21 @@ async def stage_overlay(
                 if isinstance(task.trigger, TimeTrigger)
                 else task.trigger.event.value
             )
-            overlay = notices if task.source.value == "item" else preparation
+            item_notice = task.source == TaskSource.ITEM
+            has_preparation |= not item_notice
+            overlay = notices if item_notice else preparation
+            window = None
+            if isinstance(task.trigger, EventTrigger) and task.trigger.event == TriggerEvent.GUEST_ARRIVED:
+                if task.trigger.window:
+                    window = task.trigger.window.model_dump(by_alias=True)
+                    if window not in guest_windows:
+                        guest_windows.append(window)
+            missed = (
+                window is not None and now > datetime.fromisoformat(window["to"])
+                and not errors
+                and (plan.plan_id, task.task_id) not in triggered
+                and not any((plan.plan_id, task.task_id, action.device) in runs for action in task.actions)
+            )
             for action in task.actions:
                 if (
                     plan.plan_id,
@@ -160,9 +185,10 @@ async def stage_overlay(
                             "device": action.device,
                             "command": action.cmd,
                             # Item notice text stays out of the stage (E5-R6).
-                            "target_value": None if overlay is notices else action.value,
+                            "target_value": None if item_notice else action.value,
                             "wait": wait,
                             "protective": task.protective is True,
+                            **({"window": window, "missed": missed} if window else {}),
                         }
                     )
 
@@ -189,6 +215,8 @@ async def stage_overlay(
     return {
         "preparation": preparation,
         "notices": notices,
+        "guest_windows": sorted(guest_windows, key=lambda window: datetime.fromisoformat(window["from"])),
+        "has_preparation": has_preparation,
         "restores": restores,
         "errors": errors,
     }

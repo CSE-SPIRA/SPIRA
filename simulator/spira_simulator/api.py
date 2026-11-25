@@ -12,17 +12,21 @@ import httpx
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
+from .design_vocabulary import ROOM_NAMES
 from .mqtt import Broker, DeviceProtocol
 from .profile import DEFAULT_PROFILE, Profile, load_profile
 from .sources import JsonSource, Source, judge, stage_overlay
 from .surfaces import (
-    ROOM_NAMES,
     device_controls,
     device_name,
     display_time,
+    guest_window_status,
+    home_event_controls,
+    home_event_observation,
     peer_viewers,
     tiles,
     viewer_plan,
@@ -34,6 +38,13 @@ UI = Path(__file__).with_name("ui")
 templates = Jinja2Templates(directory=UI)
 basic = HTTPBasic(auto_error=False)
 log = logging.getLogger(__name__)
+
+
+class HouseAssets(StaticFiles):
+    async def get_response(self, path, scope):
+        if path == "three.module.min.js":
+            path = "vendor/three.module.min.js"
+        return await super().get_response(path, scope)
 
 
 class OperatorInput(BaseModel):
@@ -80,11 +91,16 @@ def create_app(
     profile: Profile | None = None,
     operator_enabled: bool | None = None,
     operator_token: str | None = None,
+    bind_host: str | None = None,
     broker_enabled: bool = True,
     received_source: Source | None = None,
     plan_source: Source | None = None,
     execution_source: Source | None = None,
 ) -> FastAPI:
+    # The launcher supplies its configured listen address. An ASGI request's
+    # local address can be loopback even when the server listens on every interface.
+    operator_loopback = bind_host == "127.0.0.1"
+
     async def jobs(protocol: DeviceProtocol):
         while True:
             await asyncio.sleep(0.2)
@@ -102,7 +118,7 @@ def create_app(
             if operator_token is not None
             else os.getenv("WORLD_OPERATOR_TOKEN")
         )
-        if enabled and not token:
+        if enabled and not operator_loopback and not token:
             raise RuntimeError("WORLD_OPERATOR_TOKEN is required when WORLD_OPERATOR=1")
         config = profile or load_profile(
             Path(os.getenv("WORLD_PROFILE") or DEFAULT_PROFILE)
@@ -111,7 +127,7 @@ def create_app(
         prefix = os.getenv("MQTT_PREFIX") or "spira/g0"
         world = World(path, config)
         broker = None
-        timer = None
+        tasks = []
         try:
             if broker_enabled:
                 broker = Broker(
@@ -131,7 +147,8 @@ def create_app(
             app.state.world = world
             app.state.broker = broker
             app.state.protocol = protocol
-            app.state.operator_token = token if enabled else None
+            app.state.operator_enabled = enabled
+            app.state.operator_token = token
             app.state.peer_viewers = peer_viewers(os.getenv("WORLD_PEER_VIEWERS", ""))
             hub_state = env_source("WORLD_HUB_STATE_URL")
             app.state.evidence_from_hub = hub_state is not None
@@ -146,14 +163,15 @@ def create_app(
             app.state.executions = hub_state or execution_source or env_source(
                 "WORLD_EXECUTIONS", "WORLD_EXECUTIONS_TOKEN"
             )
-            timer = asyncio.create_task(jobs(protocol))
+            tasks.append(asyncio.create_task(jobs(protocol)))
             yield
         finally:
             try:
-                if timer:
-                    timer.cancel()
+                for task in tasks:
+                    task.cancel()
+                for task in tasks:
                     with suppress(asyncio.CancelledError):
-                        await timer
+                        await task
             finally:
                 try:
                     if broker:
@@ -169,12 +187,13 @@ def create_app(
         redoc_url=None,
     )
 
-    def require_operator(
-        request: Request, credentials: HTTPBasicCredentials | None = Depends(basic)
-    ):
-        token = request.app.state.operator_token
-        if token is None:
+    async def require_operator(request: Request):
+        if not request.app.state.operator_enabled:
             raise HTTPException(404, "Operator disabled")
+        if operator_loopback:
+            return
+        token = request.app.state.operator_token
+        credentials: HTTPBasicCredentials | None = await basic(request)
         if (
             credentials is None
             or credentials.username != "operator"
@@ -207,6 +226,7 @@ def create_app(
             state.world.profile.household_id,
             state.plans,
             state.executions,
+            now=state.world.clock(),
             from_hub=state.evidence_from_hub,
         )
 
@@ -228,19 +248,23 @@ def create_app(
             "home.html" if fragment else "viewer.html",
             {
                 **display,
-                "home": world.profile.display_name or world.profile.household_id,
-                "household_id": world.profile.household_id,
+                "fragment": fragment,
+                "home": world.profile.display_name or "우리 집",
                 "peers": request.app.state.peer_viewers,
                 "rooms": rooms,
                 "room_names": ROOM_NAMES,
-                "unplaced": planned,
-                "has_preparation": bool(overlay_data["preparation"]),
+                "unplaced": planned.items(),
+                "has_preparation": overlay_data["has_preparation"],
                 "overlay_errors": overlay_data["errors"],
                 "restores": restores,
                 "mqtt_online": mqtt.get("connected", False),
                 "mqtt_gap": display_time(gap) if gap else None,
             },
         )
+
+    @application.get("/sim/library")
+    def library():
+        return FileResponse(UI / "library.html", media_type="text/html")
 
     @application.get("/sim/stage.js")
     def stage_js():
@@ -250,13 +274,33 @@ def create_app(
     def style():
         return FileResponse(UI / "style.css", media_type="text/css")
 
+    application.mount("/sim/assets/house", HouseAssets(directory=UI / "house"))
+
+    async def operator_window(request: Request):
+        state = request.app.state
+        return await stage_overlay(
+            state.world.profile.household_id, state.plans, None, now=state.world.clock(),
+        )
+
+    @application.get("/operator/guest-window", dependencies=[Depends(require_operator)])
+    async def operator_guest_window(request: Request):
+        data = await operator_window(request)
+        if data["errors"]:
+            raise HTTPException(503, "Plan source unavailable")
+        return guest_window_status(request.app.state.world, data["guest_windows"])
+
     @application.get("/operator", dependencies=[Depends(require_operator)])
-    def operator(request: Request):
+    async def operator(request: Request):
         world = request.app.state.world
+        data = await operator_window(request)
         return templates.TemplateResponse(
             request,
             "operator.html",
             {
+                "home_events": home_event_controls(world),
+                "guest_window": guest_window_status(world, data["guest_windows"]),
+                "household_id": world.profile.household_id,
+                "inventory": world.devices.values(),
                 "people": world.profile.demo_people,
                 "devices": [
                     (
@@ -280,7 +324,7 @@ def create_app(
             request,
             "appliance.html",
             {
-                "home": world.profile.display_name or world.profile.household_id,
+                "home": world.profile.display_name or "우리 집",
                 "tiles": device_tiles,
                 "room_names": ROOM_NAMES,
                 "people": names,
@@ -378,7 +422,8 @@ def create_app(
 
     @application.post("/operator/home", dependencies=[Depends(require_operator)])
     def home(body: HomeAction, request: Request):
-        return apply(request, request.app.state.world.home_event, body.action)
+        signals = dispatch(request, request.app.state.world.home_event, body.action)
+        return {"applied": True, **home_event_observation(signals[-1])}
 
     @application.post("/operator/device", dependencies=[Depends(require_operator)])
     def device(body: DeviceAction, request: Request):
@@ -476,11 +521,15 @@ def mqtt_status(request: Request):
     return broker.status() if broker else None
 
 
-def apply(request: Request, action, *args, **kwargs):
+def dispatch(request: Request, action, *args, **kwargs):
     try:
-        request.app.state.protocol.dispatch(action, *args, **kwargs)
+        return request.app.state.protocol.dispatch(action, *args, **kwargs)
     except InvalidMutation as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+def apply(request: Request, action, *args, **kwargs):
+    dispatch(request, action, *args, **kwargs)
     return {"applied": True}
 
 

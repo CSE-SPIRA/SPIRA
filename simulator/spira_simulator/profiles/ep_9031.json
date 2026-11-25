@@ -173,6 +173,9 @@
                       "calm",
                       "cinema"
                     ]
+                  },
+                  "theme": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -350,6 +353,61 @@
         }
       },
       "label": "Kettle plug"
+    },
+    {
+      "target": "mqtt:purifier_01",
+      "logical_id": "purifier_01",
+      "device_type": "purifier",
+      "room": "living_room",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": true,
+      "assumption": "Virtual LG local-operation reporting",
+      "commands": ["mode"],
+      "properties": {
+        "mode": {
+          "initial": "auto",
+          "schema": {"enum": ["auto", "turbo", "sleep"]}
+        }
+      }
+    },
+    {
+      "target": "mqtt:styler_01",
+      "logical_id": "styler_01",
+      "device_type": "styler",
+      "room": "entrance",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": true,
+      "assumption": "Virtual LG local-operation reporting",
+      "commands": ["set_course_standby"],
+      "properties": {
+        "course_standby": {
+          "initial": null,
+          "schema": {
+            "type": ["object", "null"],
+            "properties": {"course": {"enum": ["standard", "wool_care"]}},
+            "required": ["course"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "prohibited_properties": ["start"]
+    },
+    {
+      "target": "mqtt:aircon_01",
+      "logical_id": "aircon_01",
+      "device_type": "air_conditioner",
+      "room": "living_room",
+      "substrate": "virtual",
+      "available": true,
+      "local_operation_reporting": true,
+      "assumption": "Virtual LG local-operation reporting",
+      "commands": ["mode", "target_temp"],
+      "properties": {
+        "mode": {"initial": "off", "schema": {"enum": ["off", "cool", "heat", "auto"]}},
+        "target_temp": {"initial": 24, "schema": {"type": "number", "minimum": 18, "maximum": 30}}
+      }
     }
   ],
   "home_signals": {

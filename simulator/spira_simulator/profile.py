@@ -122,6 +122,13 @@ class Profile(ProfileModel):
     demo_people: list[DemoPerson] = Field(default_factory=list)
     devices: list[Device]
     home_signals: dict[str, list[SensorFact]] = Field(default_factory=dict)
+    home_action_labels: dict[str, str] = Field(
+        default_factory=lambda: {
+            "delivery": "택배 들이기",
+            "guests_arrive": "손님 도착",
+            "event_end": "파티 끝",
+        }
+    )
 
     @model_validator(mode="after")
     def check_devices(self):

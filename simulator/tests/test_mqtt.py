@@ -4,6 +4,7 @@ import socket
 import subprocess
 import time
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 from queue import Queue
 from threading import Event
@@ -14,7 +15,7 @@ import pytest
 from conftest import LIGHT, PREFIX
 from fastapi.testclient import TestClient
 from spira_simulator.api import create_app
-from spira_simulator.world import DEVICE_SCHEMA
+from spira_simulator.world import DEVICE_SCHEMA, World
 
 
 def test_protocol_rejects_retained_requests_and_foreign_reply_topics(wire):
@@ -141,7 +142,7 @@ def test_mosquitto_requests_signals_availability_and_reconnect(tmp_path, monkeyp
 
                 send("discover", "rq_discover")
                 _, response, _, _ = frames.get(timeout=5)
-                assert len(response["data"]["devices"]) == 7
+                assert len(response["data"]["devices"]) == 10
 
                 send(
                     "command",
@@ -222,3 +223,41 @@ def test_mosquitto_requests_signals_availability_and_reconnect(tmp_path, monkeyp
                 assert topic == f"{PREFIX}/reply/hub/rq_after_gap"
                 assert readback["data"]["values"]["power"]
                 assert http.get("/health").json()["mqtt"]["last_gap_at"] >= prior_gap
+
+
+def test_world_receives_story_clock_retained_before_subscribing(tmp_path, monkeypatch):
+    binary = shutil.which("mosquitto")
+    if binary is None:
+        pytest.skip("Mosquitto is required for the retained clock check")
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    monkeypatch.setenv("MQTT_PREFIX", PREFIX)
+    monkeypatch.setenv("MQTT_PORT", str(port))
+
+    real = datetime.fromisoformat("2026-11-24T12:00:00+09:00")
+    story = datetime.fromisoformat("2026-10-15T20:59:00+09:00")
+
+    def now():
+        return real
+
+    monkeypatch.setattr("spira_simulator.api.World", lambda path, profile: World(path, profile, now))
+    with mosquitto(binary, port), mqtt_peer(port) as (peer, _):
+        body = {
+            "version": 3, "real_at": real.isoformat(), "story_at": story.isoformat(),
+            "rate": 20, "ramp_until": (real + timedelta(seconds=6)).isoformat(),
+        }
+        peer.publish(f"{PREFIX}/clock", json.dumps(body), qos=1, retain=True).wait_for_publish(4)
+        with TestClient(create_app(tmp_path / "world.db", operator_enabled=True, bind_host="127.0.0.1")) as http:
+            def snapshot():
+                return http.get("/sim/snapshot").json()
+
+            wait_until(lambda: snapshot()["now"] == story.isoformat())
+            real += timedelta(seconds=3)
+            assert snapshot()["now"] == (story + timedelta(minutes=1)).isoformat()
+            page = http.get("/sim/viewer?fragment=true").text
+            assert 'datetime="2026-10-15T21:00:00+09:00">목 21:00</time>' in page
+            event = http.post("/operator/home", json={"action": "delivery"}).json()
+            assert event["occurred_at"] == snapshot()["now"]
+            real += timedelta(seconds=4)
+            assert snapshot()["now"] == (story + timedelta(minutes=2, seconds=1)).isoformat()

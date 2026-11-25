@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>생일 장면 소품실 · SPIRA</title>
+  <link rel="stylesheet" href="/sim/assets/house/fonts.css">
+  <link rel="stylesheet" href="/sim/assets/house/tokens.css">
+  <link rel="stylesheet" href="/sim/assets/house/house.css">
+  <link rel="stylesheet" href="/sim/assets/house/library.css">
+  <script type="module" src="/sim/assets/house/library.js"></script>
+</head>
+<body>
+  <main class="library">
+    <header class="library-header">
+      <h1>생일 장면 소품실</h1>
+      <nav aria-label="미리보기">
+        <a href="#house">집 안에서</a>
+        <a href="#shelf">소품 선반</a>
+      </nav>
+    </header>
+    <p id="load-error" role="alert" hidden>3D 미리보기를 불러오지 못했습니다.</p>
+
+    <section id="house" aria-labelledby="house-title">
+      <div class="section-head">
+        <h2 id="house-title">지아네 생일 준비</h2>
+        <div class="house-controls">
+          <div id="cameras" class="cameras" role="group" aria-label="카메라 시점">
+            <button type="button" data-camera="overview" aria-pressed="true">집 전체</button>
+            <button type="button" data-camera="living_room" aria-pressed="false">거실 가까이</button>
+            <button type="button" data-camera="dining_table" aria-pressed="false">식탁 가까이</button>
+          </div>
+          <div id="replay" class="replay" role="group" aria-label="움직임 재생"></div>
+        </div>
+      </div>
+      <p class="sample-state">
+        <span>거실 조명 예시 상태 <strong id="sample-light-status" aria-live="polite">꺼짐</strong> · 천장 간접조명은 이 상태를 따릅니다.</span>
+        <button id="sample-light-off" type="button">조명 끄기</button>
+      </p>
+      <div class="house-view library-house" role="img" aria-label="풍선과 생일 가랜드, 분홍 성이 나오는 TV, 컵케이크와 고깔모자가 놓인 식탁이 보이는 지아네">
+        <div id="house-stage" class="house-world"></div>
+      </div>
+    </section>
+
+    <section id="shelf" aria-labelledby="shelf-title">
+      <div class="section-head">
+        <h2 id="shelf-title">소품 선반</h2>
+      </div>
+      <div id="slot-grid" class="shelf"></div>
+    </section>
+  </main>
+</body>
+</html>

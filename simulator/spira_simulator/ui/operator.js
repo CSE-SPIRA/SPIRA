@@ -103,4 +103,48 @@ async function init() {
   }));
 }
 
+const homeEvents = document.querySelector("[data-home-endpoint]");
+const guestWindow = byId("guest-window");
+const guestWindowDetail = byId("guest-window-detail");
+async function refreshGuestWindow() {
+  try {
+    const { label, detail } = await request("/operator/guest-window");
+    guestWindow.textContent = label;
+    if (guestWindowDetail.textContent !== detail) guestWindowDetail.textContent = detail;
+  } catch {
+    // Preserve the last window through a transient read failure.
+  } finally {
+    window.setTimeout(refreshGuestWindow, 2000);
+  }
+}
+if (guestWindow) window.setTimeout(refreshGuestWindow, 2000);
+
+async function observeHomeAction(control) {
+  const { occurred_at, at, observation } = await request(
+    homeEvents.dataset.homeEndpoint, { action: control.dataset.homeAction },
+  );
+  const time = document.createElement("time");
+  time.dateTime = occurred_at;
+  time.textContent = at;
+  byId(control.getAttribute("aria-describedby")).replaceChildren(time, ` · ${observation}`);
+}
+if (homeEvents) {
+  const controls = homeEvents.querySelectorAll("[data-home-action]");
+  const status = homeEvents.querySelector('[role="status"]');
+  for (const control of controls) {
+    control.addEventListener("click", async () => {
+      for (const entry of controls) entry.disabled = true;
+      status.textContent = "";
+      try {
+        await observeHomeAction(control);
+      } catch {
+        status.textContent = "집에서 일어난 일을 기록하지 못했어요. 다시 눌러 주세요.";
+      } finally {
+        for (const entry of controls) entry.disabled = false;
+        control.focus();
+      }
+    });
+  }
+}
+
 init().catch((error) => { byId("notice").textContent = error.message; });

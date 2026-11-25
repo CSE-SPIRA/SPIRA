@@ -1,0 +1,15 @@
+.house-view{position:relative;min-width:0;height:100%;border:1px solid #e1d9c9;border-radius:var(--radius-32);background:radial-gradient(ellipse at 54% 56%,#f9f6ed,var(--cream) 78%);overflow:hidden;isolation:isolate}
+.house-world{position:absolute;inset:0}
+.house-world canvas{display:block;width:100%;height:100%}
+.tv-music{position:absolute;transform:translate(-50%,-50%);pointer-events:none;align-items:end;gap:2px;padding:3px 4px;border-radius:4px;background:#211829a8}
+.tv-music:not([hidden]){display:flex}
+.tv-music i{width:2px;height:7px;border-radius:2px;background:#ffe0cb;transform:scaleY(.6);transform-origin:bottom}
+.tv-music i:nth-child(2){transform:scaleY(.9)}
+@media (prefers-reduced-motion:no-preference){
+  .tv-music i{animation:tv-music 1.9s ease-in-out infinite alternate}
+  .tv-music i:nth-child(2){animation-delay:-.8s}
+  .tv-music i:nth-child(3){animation-delay:-1.3s}
+}
+@keyframes tv-music{from{transform:scaleY(.35)}to{transform:scaleY(1)}}
+.room-key{position:absolute;top:17px;left:17px;display:flex;gap:8px;align-items:center;font-size:var(--size-16);color:var(--muted);pointer-events:none}
+.room-key span{border:1px solid #ded9ce;border-radius:var(--radius-pill);background:#fffcf5b8;padding:4px 9px}
