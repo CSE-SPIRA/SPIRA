@@ -11,7 +11,7 @@ from spira_contracts.plan import Action
 from hub.spira_hub.config import Installation
 from hub.tests.fixture_server import create_app as fixture_app
 
-from .peers import Clock, Scenario, Stub, action, fixture, light_config, task
+from .peers import Clock, Scenario, Stub, action, fixture, light_config, plan, task
 
 INSTALLATION = Path(__file__).resolve().parents[2] / "installation.example.json"
 
@@ -283,7 +283,8 @@ def test_hub_at08_and_at17_property_ownership_and_dashboard_provisional(tmp_path
         line = task(clock, action(), action("light_02"), action("display_01", "play_mood", {"scene": "kids_party"}))
         waiting = task(clock, n=2, trigger={"event": "guest_arrived"})
         uncertain = task(clock, action("display_01", "play_mood", {"scene": "party"}), n=3)
-        stub = Stub(clock, line, waiting, uncertain)
+        failed = task(clock, action("display_01", "play_mood", {"scene": "cinema"}), n=4)
+        stub = Stub(clock, line, waiting, uncertain, failed)
         hub = Scenario(tmp_path, clock, stub=stub)
         hub.world.add(*first_native, local=True)
         hub.world.add(*second_native, substrate="physical")
@@ -295,10 +296,13 @@ def test_hub_at08_and_at17_property_ownership_and_dashboard_provisional(tmp_path
 
         async def resist(command):
             hub.world.unchanged = command["desired"] == {"scene": {"scene": "party"}}
+            if command["desired"] == {"scene": {"scene": "cinema"}}:
+                hub.world.native["display"].available = False
 
         hub.world.before_command = resist
         await hub.cycle()
         assert "unverifiable" in [row["status"] for row in stub.executions]
+        hub.world.native["display"].available = True
         desired = deepcopy(hub.world.native["other"].values)
         clock.advance(seconds=1)
         hub.world.change("light", {"color": {"kelvin": 2700}}, local=True)
@@ -316,14 +320,19 @@ def test_hub_at08_and_at17_property_ownership_and_dashboard_provisional(tmp_path
         assert [row["by"] for row in state["ledger"]
                 if row.get("device") == "light_02" and row["kind"] == "event"] == ["unknown", "unknown"]
         kept = next(row for row in state["ledger"] if row["kind"] == "restore" and row["device"] == "light_02")
-        assert kept["what"] == "그대로 (기기 상태가 바뀜)" and kept["by"] == "hub"
+        assert kept["what"] == "바뀐 기기 상태 유지" and kept["by"] == "hub"
         page = (await hub.dashboard.get("/")).text
-        order = [page.index(title) for title in ("Waiting work", "Command acknowledgement and read-back",
+        ledger, detail = page.split('<section id="detail"', 1)
+        assert '<strong class="outcome-unverifiable">TV · 파티 화면 · 보고 없음</strong>' in ledger
+        assert '<strong class="outcome-failed">TV · 영화 화면 · 실행 실패</strong>' in ledger
+        assert ledger.count('aria-label="기기가 알림"') >= 2
+        assert "바뀐 기기 상태 유지" in ledger
+        order = [detail.index(title) for title in ("Waiting work", "Command acknowledgement and read-back",
                  "Person actions and C-3 events", "Restoration and skips")]
         assert order == sorted(order)
-        assert all(label in page for label in ("Class A assumption", "virtual", "physical", "ACCEPTED",
+        assert all(label in detail for label in ("Class A assumption", "virtual", "physical", "ACCEPTED",
                    "unverifiable", "skipped_user_changed", "restored", "Received by Server", "C-3 payload"))
-        assert "actor" not in page and "ground_truth_actor" not in page
+        assert "ground_truth_actor" not in page
         await hub.close()
     run(exercise)
 
@@ -442,7 +451,11 @@ def test_hub_at09_dispatch_crash_and_byte_stable_resend(tmp_path):
         pending = (await hub.state())["ledger"][-1]["reports"]
         assert [report["kind"] for report in pending] == ["run", "event"]
         assert all(not report["delivered"] and report["delivery_error"] == "HTTP 503" for report in pending)
-        assert "재전송 대기" in (await hub.dashboard.get("/")).text
+        page = (await hub.dashboard.get("/")).text
+        ledger, detail = page.split('<section id="detail"', 1)
+        assert 'class="delivery delivery-failed">전송 실패 · 다시 보내는 중' in ledger
+        assert "HTTP 503" not in ledger
+        assert "HTTP 503" in detail
 
         can_crash = asyncio.Event()
         keep_waiting = asyncio.Event()
@@ -669,7 +682,12 @@ def test_hub_at16_fixture_protective_release(tmp_path, observed_end):
             "t_safe#2": {"cooktop_01": release_status, "plug_kettle": release_status},
             "t_mood#3": {"display_01": "restored", "light_01": "restored"},
         }
-        assert release_status in (await hub.dashboard.get("/")).text
+        page = (await hub.dashboard.get("/")).text
+        ledger, detail = page.split('<section id="detail"', 1)
+        assert release_status in detail
+        assert "되돌림 확인" in ledger
+        assert ("끝난 뒤 되돌림 확인" in ledger) == observed_end
+        assert ("그대로 둠 · 끝남 확인 없음" in ledger) == (not observed_end)
         state = (await hub.dashboard.get("/state")).json()
         summary, = state["plan_summaries"]
         assert summary["restored"] == (2 if observed_end else 1)
@@ -1134,7 +1152,10 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
         assert pending["reports"] == [
             {"kind": "ack", "id": "ep_9031/1", "delivered": False, "delivery_error": None},
         ]
-        assert "ack 전송 대기" in (await hub.dashboard.get("/")).text
+        page = (await hub.dashboard.get("/")).text
+        ledger_page, _ = page.split('<section id="detail"', 1)
+        assert '<time datetime="2026-10-15T21:11:55+09:00">목 21:11</time>' in ledger_page
+        assert "보내는 중" in ledger_page and "서버에 보냄" not in ledger_page
         await hub.runtime.flush()
 
         def at(instant):
@@ -1184,26 +1205,26 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
         assert [row["at"] for row in ledger] == sorted(row["at"] for row in ledger)
         assert [(row["label"], row["what"], row["by"], [item["kind"] for item in row["reports"]])
                 for row in ledger] == [
-            ("—", "계획 v1 받음 · 할 일 6", "hub", ["ack"]),
-            ("—", "계획 v2 받음 · 할 일 5 · 청소기 취소", "hub", ["ack"]),
+            ("—", "계획 v1 받음 · 할 일 4 · 품목 안내 2", "hub", ["ack"]),
+            ("—", "계획 v2 받음 · 할 일 3 · 품목 안내 2 · 청소기 취소", "hub", ["ack"]),
             ("현관", "택배 들임", "hub", ["event"]),
-            ("—", "계획 v3 받음 · 할 일 5 · 택배 기다림 해제", "hub", ["ack"]),
+            ("—", "계획 v3 받음 · 할 일 3 · 품목 안내 2 · 택배 기다림 끝", "hub", ["ack"]),
             ("냉장고", "안내 표시", "spira", ["run", "event"]),
             ("냉장고", "안내 표시", "spira", ["run", "event"]),
             ("냉장고", "문 열림", "user", ["event"]),
             ("인덕션", "잠금", "spira", ["run", "event"]),
-            ("전기포트", "끔", "spira", ["run", "event"]),
+            ("전기포트", "꺼짐", "spira", ["run", "event"]),
             ("현관", "손님 도착", "hub", ["event"]),
-            ("TV", "어린이 파티 화면", "spira", ["run", "event"]),
-            ("조명", "색조 330°", "spira", ["run", "event"]),
+            ("TV", "공주 화면", "spira", ["run", "event"]),
+            ("조명", "분홍 빛", "spira", ["run", "event"]),
             ("오븐", "170° 20분 대기", "spira", ["run", "event"]),
             ("오븐", "시작", "user", ["event"]),
-            ("조명", "색조 330° → 2700K", "user", ["event"]),
-            ("—", "일정 끝 관찰", "hub", ["event"]),
-            ("인덕션", "되돌림 → 잠금 해제", "spira", ["restore", "event"]),
-            ("전기포트", "되돌림 → 켜짐", "spira", ["restore", "event"]),
-            ("TV", "되돌림 → 꺼짐", "spira", ["restore", "event"]),
-            ("조명", "그대로 (사람이 바꿈)", "hub", ["restore"]),
+            ("조명", "분홍 빛 → 따뜻한 빛", "user", ["event"]),
+            ("—", "일정이 끝난 것을 확인", "hub", ["event"]),
+            ("인덕션", "일정이 끝난 뒤 되돌림 확인 · 잠금 해제", "spira", ["restore", "event"]),
+            ("전기포트", "일정이 끝난 뒤 되돌림 확인 · 켜짐", "spira", ["restore", "event"]),
+            ("TV", "일정이 끝난 뒤 되돌림 확인 · 꺼짐", "spira", ["restore", "event"]),
+            ("조명", "사람이 바꾼 설정 유지", "hub", ["restore"]),
         ]
         assert ledger[12]["acknowledgement"]["status"] == "ACCEPTED"
         assert ledger[12]["read_back"]["preset"] == {"temp_c": 170, "minutes": 20}
@@ -1219,14 +1240,122 @@ def test_hub_at20_birthday_seen_ledger(tmp_path):
         }
 
         page = (await hub.dashboard.get("/")).text
-        assert page.index("Hub · 이 집이 본 것") < page.index("Waiting work")
-        assert "h_042 · ep_9031 계획 v3 · 할 일 5 · Server 연결됨" in page
-        assert 'href="#detail"' in page and 'id="detail"' in page
-        assert page.count('<tr class="recent">') == 3
-        assert all(f'<th scope="col">{label}</th>' in page for label in ("시각", "기기", "일", "누가", "Server로"))
-        assert all(label in page for label in ("ack 204", "event 보냄", "결과 보냄", "restore 보냄", "사람이 바꿈"))
-        assert 'class="by user">사람' in page and 'class="by hub">집' in page
+        ledger_page, detail = page.split('<section id="detail"', 1)
+        assert '<h1 id="seen-title">이 집이 본 것</h1>' in ledger_page
+        assert "우리 집 · 받은 준비 · 서버 연결됨" in ledger_page
+        assert 'href="#detail">자세한 기록</a>' in ledger_page
+        assert 'href="/state"' in detail and "Waiting work" in detail
+        assert all(label not in ledger_page for label in (
+            "서버에 보냄", "보내는 중", "전송 실패", "계획 v", " · v2", " · v3", "ep_9031", "h_042", "pill actor",
+        ))
+        newest, = ledger_page.split('<details class="ledger-group"')[1:]
+        assert 'data-newest open><summary>받은 준비 · 받은 시각 ' in newest
+        assert '>21:11</time> · 할 일 3 · 품목 안내 2</summary>' in newest
+        assert newest.count('<li class="ledger-row') == len(ledger) - 1
+        assert newest.count('<li class="ledger-row plan-change">') == 2
+        assert newest.index('>토 17:50</time>') < newest.index('>토 13:30</time>')
+        assert "택배 들임" in newest
+        assert "준비가 바뀌었어요 · 청소기 취소" in newest
+        assert "준비가 바뀌었어요 · 택배 기다림 끝" in newest
+        assert "사람이 조작함" in newest
+        for source, label in (("command", "SPIRA가 시킴"), ("report", "기기가 알림"), ("restore", "집이 되돌림")):
+            assert f'class="source-mark source-{source}" aria-hidden="true"></span>{label}' in ledger_page
+        assert '<h2 id="device-title">이 집의 기기</h2>' in ledger_page
+        assert '<li><span>냉장고</span><span>주방</span></li>' in ledger_page
+        for asset in ("tokens.css", "dashboard.css", "dashboard.js"):
+            assert f'"/assets/{asset}"' in page
+            assert (await hub.dashboard.get(f"/assets/{asset}")).status_code == 200
         await hub.close()
+    run(exercise)
+
+
+def test_dashboard_labels_each_fridge_notice_with_its_item(tmp_path):
+    async def exercise():
+        clock = Clock()
+        items = fixture("episode.json")["item_tasks"]
+        notices = []
+        for item in items:
+            notice = next(task for task in fixture("plan.v1.json")["tasks"] if task["task_id"] == item["task_id"])
+            notice["trigger"].update(released=True, at=clock().isoformat())
+            notice["actions"][0]["value"] = f'{item["item"]} · {item["text"]}'
+            notices.append(notice)
+        hub = Scenario(tmp_path, clock, stub=Stub(clock, *notices))
+        install_birthday(hub)
+        hub.boot()
+        try:
+            await hub.reconcile()
+            await hub.cycle()
+            ledger = (await hub.dashboard.get("/")).text
+            assert "할 일 0 · 품목 안내 2" in ledger
+            assert ledger.count("냉장고 · 딸기 · 안내 표시") == 1
+            assert ledger.count("냉장고 · 휘핑크림 · 안내 표시") == 1
+        finally:
+            await hub.close()
+    run(exercise)
+
+
+def test_dashboard_keeps_cleaning_and_lock_with_their_preparation_across_versions(tmp_path):
+    async def exercise():
+        clock = Clock()
+        cleaning = task(clock, action("cleaner_01", "clean", {"room": "거실"}), restore=False)
+        safety = task(clock, action("cooktop_01", "child_lock"), n=2, restore=False)
+        stub = Stub(clock, cleaning, safety)
+        hub = Scenario(tmp_path, clock, stub=stub)
+        install_birthday(hub)
+        hub.boot()
+        try:
+            await hub.reconcile()
+            await hub.cycle()
+            original = (await hub.dashboard.get("/")).text
+            group_key = original.split('data-group="', 1)[1].split('"', 1)[0]
+            clock.advance(minutes=1)
+            future = task(clock, trigger={"time": (clock() + timedelta(minutes=5)).isoformat()})
+            stub.plans.append(dict(plan(clock, future), plan_id="ep_other"))
+            await hub.reconcile()
+            clock.advance(minutes=1)
+            stub.advance(cleaning, safety)
+            await hub.reconcile()
+
+            page = (await hub.dashboard.get("/")).text
+            newest, older = page.split('<details class="ledger-group"')[1:]
+            assert "data-newest open" in newest and " open>" not in older
+            assert f'data-group="{group_key}"' in older
+            assert "인덕션 · 잠금" in older and "청소기 · 청소 시작" in older
+            assert older.index("준비가 바뀌었어요") < older.index("인덕션 · 잠금")
+            assert "준비가 바뀌었어요" not in newest
+        finally:
+            await hub.close()
+    run(exercise)
+
+
+def test_dashboard_keeps_late_restoration_with_its_preparation(tmp_path):
+    async def exercise():
+        clock = Clock()
+        stub = Stub(clock, task(clock, action(cmd="color_temp", value={"kelvin": 4000})))
+        hub = Scenario(tmp_path, clock, stub=stub)
+        install_light(hub)
+        hub.boot()
+        try:
+            await hub.reconcile()
+            await hub.cycle()
+            clock.advance(minutes=1)
+            future = task(clock, trigger={"time": (clock() + timedelta(minutes=5)).isoformat()})
+            stub.plans.append(dict(plan(clock, future), plan_id="ep_other"))
+            await hub.reconcile()
+            clock.advance(minutes=1)
+            hub.world.signal("event_end", "home")
+            await hub.cycle()
+
+            page = (await hub.dashboard.get("/")).text
+            newest, older = page.split('<details class="ledger-group"')[1:]
+            assert '>13:41</time> · 할 일 1</summary>' in newest
+            assert "되돌림 확인" not in newest
+            assert '>13:40</time> · 할 일 1</summary>' in older
+            assert '>토 13:42</time><div><strong>조명 · 끝난 뒤 되돌림 확인 · 따뜻한 빛' in older
+            assert "조명 · 흰 빛" in older
+            assert "3000K" not in older and "4000K" not in older
+        finally:
+            await hub.close()
     run(exercise)
 
 

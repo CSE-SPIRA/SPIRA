@@ -2,12 +2,13 @@
 
 import json
 from datetime import datetime, timedelta, timezone
+from enum import IntEnum, auto
 from pathlib import Path
 
 from spira_contracts.ack import Ack
 from spira_contracts.calendar import Calendar
 from spira_contracts.card import Card, Line, Summary
-from spira_contracts.common import AckStatus, EpisodeStatus, ExecutionStatus, LineState, TriggerEvent
+from spira_contracts.common import AckStatus, EpisodeStatus, ExecutionStatus, HomeEvent, LineState, TriggerEvent
 from spira_contracts.devices import Devices
 from spira_contracts.episode import Episode
 from spira_contracts.event import Event
@@ -15,14 +16,27 @@ from spira_contracts.execution_result import ExecutionResult, RestoreResult, Run
 from spira_contracts.household_created import HouseholdCreated
 from spira_contracts.memory import Memory
 from spira_contracts.plan import Cancelled, EventTrigger, Plan
+from spira_contracts.rationale import Execution, Observation, Rationale
 from spira_contracts.reaction import Reaction
 
+from .observation import SEOUL, ObservationWindow
 from .projection import action_results, line_end, matching_trigger, run_state, task_end, user_changed
+from .story_clock import story_now
 
 CONTRACTS = Path(__file__).resolve().parents[3] / "contracts"
 FIXTURES = CONTRACTS / "fixtures"
 EPISODES = ("ep_9031", "ep_9150", "ep_9120")
 INACTIVE = (LineState.OFF, LineState.STOPPED, LineState.CANCELLED)
+
+
+class JudgmentStage(IntEnum):
+    RECEIVED = auto()
+    READING = auto()
+    ITEMS = auto()
+    EVIDENCE = auto()
+    INTENTS = auto()
+    TASKS = auto()
+    PUBLISHED = auto()
 
 
 def read_json(path: Path):
@@ -93,6 +107,18 @@ class Replay:
         ).model_copy(update={"household_id": self.household_id})
         self.memory = Memory(household_id=self.household_id, intents=[])
         self.live = False
+        self.story_clock = None
+        self.ready_at = None
+        self.judgment_at: dict[JudgmentStage, datetime] = {}
+        self.quiet_end: datetime | None = None
+        self.judgment_stage = JudgmentStage.RECEIVED
+        self.judgment_hold = None
+        self.read_failure = False
+        self.skipped = False
+        self.derived_tasks = {}
+        self.observation_window = ObservationWindow()
+        self.observation: Observation | None = None
+        self.checked_changed_at: dict[str, datetime] = {}
         self.acks: dict[int, Ack] = {}
         self.profile: list[str] = []
 
@@ -128,11 +154,119 @@ class Replay:
             return model.model_validate(self.files[name])
         return None
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.__dict__.setdefault("story_clock", None)
+        self.__dict__.setdefault("ready_at", None)
+        self.__dict__.setdefault("judgment_at", {})
+        self.__dict__.setdefault("quiet_end", None)
+        self.__dict__.setdefault("judgment_stage", JudgmentStage.RECEIVED)
+        self.__dict__.setdefault("judgment_hold", None)
+        self.__dict__.setdefault("read_failure", False)
+        self.__dict__.setdefault("skipped", False)
+        self.__dict__.setdefault("derived_tasks", {})
+        if "observation_window" in state:
+            return
+        # The demo launcher's --keep can resume a checkpoint made before S7.
+        self.observation_window = ObservationWindow()
+        self.observation = None
+        self.checked_changed_at = {}
+        if not self.live or self.card is None:
+            return
+        for plan in self.plans.values():
+            for entry in plan.cancelled:
+                self.checked_changed_at.setdefault(entry.task_id, datetime.fromisoformat(plan.sent_at))
+        self.prepare_observation()
+
+    def prepare_observation(self):
+        if not self.card or not self.card.starts_at or self.observation_window.scheduled_start is not None:
+            return
+        template = self.load(Plan, "plan.v2.json" if self.calendar_applied else "plan.v1.json")
+        starts = datetime.fromisoformat(self.card.starts_at)
+        end_due = min(
+            datetime.fromisoformat(task.end.or_time) for task in template.tasks
+            if task.end.on == HomeEvent.EVENT_END and task.end.or_time is not None
+        )
+        guest_opens = min((
+            datetime.fromisoformat(task.trigger.window.from_) for task in template.tasks
+            if isinstance(task.trigger, EventTrigger) and task.trigger.event == "guest_arrived" and task.trigger.window
+        ), default=starts)
+        self.observation_window = ObservationWindow(
+            scheduled_start=starts, end_due=end_due, guest_lead=starts - guest_opens,
+        )
+
+    def judgment(self, now=None):
+        now = now or self.now()
+        for stage, at in self.judgment_at.items():
+            if (
+                self.judgment_hold == stage.name.lower()
+                or (self.judgment_hold == "quiet_window" and stage >= JudgmentStage.EVIDENCE)
+                or (self.read_failure and stage > JudgmentStage.ITEMS)
+            ):
+                break
+            if now >= at and stage > self.judgment_stage:
+                self.judgment_stage = stage
+        return self.judgment_stage
+
+    def published(self, now=None):
+        if self.skipped or self.read_failure:
+            return False
+        if self.judgment_at:
+            return self.judgment(now) == JudgmentStage.PUBLISHED
+        # Checkpoints made before staged judgment still have one publication time.
+        if self.ready_at is not None and (now or self.now()) >= self.ready_at:
+            self.ready_at = None
+        return self.ready_at is None
+
+    def episode_detail(self, now=None):
+        if not self.judgment_at:
+            return self.episode
+        stage = self.judgment(now)
+        if stage == JudgmentStage.PUBLISHED:
+            return self.episode
+        status = EpisodeStatus.READING
+        if stage == JudgmentStage.RECEIVED:
+            status = EpisodeStatus.RECEIVED
+        elif self.read_failure and stage >= JudgmentStage.ITEMS:
+            status = EpisodeStatus.READ_FAILED
+        elif stage == JudgmentStage.TASKS:
+            status = EpisodeStatus.JUDGED
+        changes = {"status": status, "card_ids": []}
+        if stage < JudgmentStage.ITEMS or self.read_failure:
+            changes.update(items=[], item_count=0, masked_count=0)
+        if stage < JudgmentStage.TASKS:
+            changes["item_tasks"] = []
+        return self.episode.model_copy(update=changes)
+
+    def rationale_detail(self):
+        rationale = self.load(Rationale, "rationale.json")
+        if not self.judgment_at:
+            return rationale if self.published() else None
+        stage = self.judgment()
+        if rationale is None or stage < JudgmentStage.EVIDENCE:
+            return None
+        if stage < JudgmentStage.INTENTS:
+            rationale.intents = []
+            rationale.none_reason = None
+            rationale.unbundled = []
+        if stage < JudgmentStage.TASKS:
+            rationale.tasks = []
+            rationale.item_tasks = []
+        else:
+            states = {line.task_id: line.state for line in self.card.lines} if self.card else {}
+            for task in rationale.tasks:
+                if task.task_id in states:
+                    task.state = states[task.task_id]
+            rationale.item_tasks = self.episode.item_tasks
+        return rationale
+
     def now(self):
-        return max(self.clock, datetime.now(timezone.utc)) if self.live else self.clock
+        if self.story_clock is not None:
+            return story_now(self.story_clock.state, datetime.now(timezone.utc)).astimezone(SEOUL)
+        return self.clock
 
     def tick(self):
-        self.clock = max(self.clock + timedelta(microseconds=1), self.now())
+        self.clock = self.now() if self.story_clock is not None else self.clock + timedelta(microseconds=1)
         return self.clock.isoformat()
 
     def set_plan(self, plan: Plan):
@@ -151,14 +285,34 @@ class Replay:
             )
         )
 
-    def started(self, task_id: str):
-        return any(
-            isinstance(result.root, RunResult)
-            and result.root.task_id == task_id
-            and result.root.status
-            in (ExecutionStatus.RUNNING, ExecutionStatus.COMPLETED)
-            for result in self.results.values()
+    def started_at(self, task_id: str, *, by: datetime | None = None):
+        times = (
+            datetime.fromisoformat(packet.at) for result in self.results.values()
+            if isinstance(packet := result.root, RunResult)
+            and packet.task_id == task_id
+            and packet.status in (ExecutionStatus.RUNNING, ExecutionStatus.COMPLETED)
         )
+        return min((at for at in times if by is None or at <= by), default=None)
+
+    def started(self, task_id: str):
+        return self.started_at(task_id) is not None
+
+    def rationale_executions(self) -> list[Execution]:
+        finals = (
+            packet for result in self.results.values()
+            if isinstance(packet := result.root, RunResult)
+            and packet.status != ExecutionStatus.RUNNING
+        )
+        latest: dict[tuple[str, str], RunResult] = {}
+        for packet in sorted(finals, key=lambda packet: datetime.fromisoformat(packet.at)):
+            latest[packet.task_id, packet.device] = packet
+        return [
+            Execution(
+                task_id=packet.task_id, device=packet.device, status=packet.status,
+                substrate=packet.substrate, at=packet.at,
+            )
+            for packet in latest.values()
+        ]
 
     def cancel_tasks(self, task_ids: set[str], *, restore_started: bool):
         cancelled = [
@@ -180,13 +334,19 @@ class Replay:
     def update_card(
         self, lines: list[Line], *, stopped: bool = False, updated_at: str | None = None
     ):
+        updated_at = updated_at or self.tick()
+        if self.live:
+            checked = {line.task_id: line.checked for line in self.card.lines}
+            for line in lines:
+                if not line.checked and checked.get(line.task_id):
+                    self.checked_changed_at[line.task_id] = datetime.fromisoformat(updated_at)
         self.card = self.card.model_copy(
             update={
                 "lines": lines,
                 "stopped": stopped,
                 "buttons": [] if stopped else self.card.buttons,
                 "notify": False,
-                "updated_at": updated_at or self.tick(),
+                "updated_at": updated_at,
                 "summary": Summary(
                     done=sum(
                         line.state
@@ -241,7 +401,9 @@ class Replay:
         return rejected
 
     def project(self):
-        """Refresh the projection after a receipt or when the App polls wall time."""
+        """Refresh the projection after a receipt or when the App polls."""
+        if self.live and not self.published():
+            return
         tasks = {task.task_id: task for plan in self.plans.values() for task in plan.tasks}
         cancelled = {entry.task_id: entry.restore for entry in self.plan.cancelled}
         rejected = self.rejected_tasks()
@@ -405,7 +567,7 @@ class Replay:
         ]
 
     def pause(self, paused: bool):
-        if paused and not self.paused and not self.finished:
+        if paused and not self.paused and not self.finished and not self.skipped and not self.read_failure:
             task_ids = {
                 task.task_id
                 for task in self.plan.tasks
@@ -462,9 +624,7 @@ class Replay:
             ]
             if not added:
                 return
-            self.clock = max(self.clock, datetime.fromisoformat(plan.sent_at))
             self.replace_plan(
-                sent_at=plan.sent_at if self.live else None,
                 tasks=[
                     *added,
                     *self.plan.tasks,

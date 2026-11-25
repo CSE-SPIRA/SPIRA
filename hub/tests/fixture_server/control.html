@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'">
+<title>SPIRA Fixture 제어</title>
+<style>
+:root{color-scheme:light;--paper:#fbfaf5;--surface:#fffefb;--soft:#f0f2e9;--ink:#202c25;--muted:#52635a;--line:#d5ddd2;--green:#24513a;--green-soft:#e7efe5;--warn:#8d402c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.55 system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;word-break:keep-all}
+main,header>div{max-width:1344px;margin:auto;padding:22px clamp(16px,3vw,40px)}
+header{border-bottom:1px solid var(--line);background:var(--surface)}
+header>div{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+h1,h2,h3,p{margin:0}
+h1{font-size:1.45rem;letter-spacing:-.03em}
+h2{font-size:1.15rem;margin-bottom:12px}
+h3{font-size:.95rem;margin:0 0 7px}
+small,.muted,.source{color:var(--muted)}
+a{color:var(--green);text-underline-offset:3px}
+nav,.row{display:flex;gap:8px 14px;flex-wrap:wrap;align-items:center}
+nav{font-size:.88rem}
+section{padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--surface);margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}
+.overview{display:grid;grid-template-columns:1fr 1fr;gap:20px 26px}
+.overview>div{min-width:0}
+.summary{padding:10px 12px;margin-bottom:16px;background:var(--soft);border-radius:8px}
+.summary p+p{margin-top:4px}
+table{width:100%;border-collapse:collapse;text-align:left;line-height:1.4}
+th,td{border-bottom:1px solid var(--line);padding:7px 8px;vertical-align:top}
+th{color:var(--muted);font-size:.83rem;font-weight:600}
+tbody tr:last-child td{border-bottom:0}
+.scroll{overflow:auto;max-height:26rem}
+.scroll th{position:sticky;top:0;background:var(--surface)}
+input,select,button{font:inherit;color:inherit;border:1px solid var(--line);border-radius:6px;background:var(--surface);padding:5px 9px;max-width:100%}
+button{cursor:pointer;font-weight:600}
+button:hover:not(:disabled){background:var(--green-soft)}
+button:disabled{opacity:.48;cursor:default}
+button.primary{color:white;background:var(--green);border-color:var(--green)}
+button.primary:hover:not(:disabled){background:#34664a}
+:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+label{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+label input[type=number]{width:6.5em}
+form,.stack>*,.case-list article{margin-top:10px}
+code,time,.tabular{font-variant-numeric:tabular-nums}
+code{overflow-wrap:anywhere;font-size:.89em}
+details{margin:8px 0}
+summary{cursor:pointer;font-weight:600}
+ul{padding-left:1.25em;margin:5px 0}
+#feedback{padding:0 0 12px;color:var(--warn)}
+.state-tag{display:inline-block;padding:1px 7px;border-radius:5px;background:var(--soft);font-size:.83rem}
+.held,.error{color:var(--warn)}
+.case-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:16px}
+article{border:1px solid var(--line);border-radius:8px;padding:11px}
+article .row{justify-content:space-between}
+article p,.source{font-size:.85rem;margin-top:5px}
+article dl{display:grid;grid-template-columns:auto 1fr;gap:1px 8px;margin:7px 0;font-size:.88rem}
+dt{font-weight:600;color:var(--muted)}
+dd{margin:0}
+.open-case{background:#f3f3ee;color:var(--muted)}
+.active{border-color:var(--green);background:var(--green-soft)}
+#requests td{font-size:.85rem}
+#requests td:first-child{white-space:nowrap}
+[hidden]{display:none!important}
+@media(max-width:900px){.overview,.grid{grid-template-columns:1fr}.overview{gap:17px}.case-list{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header><div>
+  <div><h1>SPIRA Fixture 제어</h1><p class="muted">예시 판단, 추론 아님 · 실제 서버가 아닌 시연용 Fixture</p></div>
+  <nav aria-label="제어 항목"><a href="#now">지금</a><a href="#clock">시계</a><a href="#judgment">판단 속도</a><a href="#episode">회차</a><a href="#cases">경우</a><a href="#faults">고장</a><a href="#log">요청 기록</a></nav>
+</div></header>
+<main>
+<p id="feedback" role="status" hidden></p>
+<section id="now">
+  <h2>지금</h2>
+  <div class="summary tabular" id="overview">Fixture 상태 읽는 중…</div>
+  <div class="overview">
+    <div><h3>판단 시간표 <small id="countdown"></small></h3>
+      <table><thead><tr><th>단계</th><th>이야기 시각</th><th>상태</th></tr></thead><tbody id="timeline"></tbody></table>
+    </div>
+    <div><h3>최근 요청 · 실제 시각</h3>
+      <div id="peers"></div>
+      <details open><summary>계획 버전 · 허브 응답</summary><div class="scroll" id="plans"></div></details>
+      <details open><summary>카드 · 줄 상태</summary><div class="scroll" id="cards"></div></details>
+    </div>
+  </div>
+</section>
+<div class="grid">
+<section id="clock">
+  <h2>시계</h2>
+  <div class="row">
+    <button data-route="clock" data-action="pause">멈춤</button>
+    <button data-route="clock" data-action="resume">재개</button>
+    <label>배속 <select id="rate"><option>1</option><option>4</option><option>10</option><option>30</option><option>60</option><option>120</option></select>×</label>
+    <button id="set-rate">배속 적용</button>
+  </div>
+  <form class="row" id="set-clock">
+    <label>이야기 시각 <input id="clock-at" placeholder="2026-10-15T21:00:08+09:00" size="29" required></label>
+    <button>시각 설정</button>
+  </form>
+  <form class="row" id="advance">
+    <label>예정된 순간 <select id="moments"></select></label>
+    <label>이동 시간 <input id="ramp-seconds" type="number" min="1" max="60" value="6" required>초</label>
+    <button id="advance-moment">선택한 순간으로</button>
+    <button id="next-moment" type="button">다음 순간으로</button>
+  </form>
+</section>
+<section id="judgment">
+  <h2>판단 속도</h2>
+  <p class="muted">조용한 시간은 서버 설정을 따릅니다. 단계 간격과 리허설 배속은 가정입니다.</p>
+  <form class="stack" id="pace">
+    <div class="row">
+      <label>대상 <select id="scope"><option value="next">다음 공유</option><option value="current">현재 회차</option></select></label>
+      <label>속도 <select id="preset"><option value="server">서버 기본 숫자</option><option value="fast">빠른 리허설</option><option value="slow">느린 LLM</option><option value="stuck">단계에서 멈춤</option><option value="custom">직접 지정</option></select></label>
+      <label id="hold-label" hidden>멈출 단계 <select id="hold"></select></label>
+      <button>속도 적용</button><button type="button" id="release">지금 해제</button>
+    </div>
+    <div id="offsets" class="row" hidden>
+      <label>조용한 시간 <input id="quiet" type="number" min="0" max="86400" placeholder="기본값">초</label>
+      <span class="muted">읽기 간격은 공유부터, 근거 이후 간격은 조용한 시간 종료부터 계산합니다.</span>
+    </div>
+  </form>
+  <p id="next-pace" class="muted"></p>
+  <form class="row" id="realistic">
+    <label>현실 지연 시드 <input id="realistic-seed" type="number" step="1" value="7" required></label>
+    <button>현실 지연</button><button type="button" id="realistic-off">끄기</button>
+  </form>
+  <p id="realistic-status" class="muted"></p>
+</section>
+<section id="episode">
+  <h2>회차</h2>
+  <div class="stack">
+    <div class="row">
+      <label>다음 주문 <select id="order"></select></label><button id="select">선택 예약</button>
+      <button class="primary" data-route="episode" data-action="share">샘플 공유</button>
+    </div>
+    <div class="row">
+      <button id="repeat" data-route="episode" data-action="repeat">같은 요청 재전송</button>
+      <button id="capture" data-route="episode" data-action="capture">두 번째 캡처</button>
+      <button id="calendar" data-route="episode" data-action="calendar">기록된 일정 적용</button>
+      <button id="unpause" data-route="episode" data-action="resume">가구 재개</button>
+      <button id="reset">공유 1분 전으로 초기화</button>
+    </div>
+    <p class="muted">초기화는 이 Fixture의 회차를 지웁니다. 허브 장부와 집 상태는 그대로입니다. 전체를 새로 시작하려면 데모를 중지한 뒤 <code>scripts/demo-up</code>을 다시 실행하세요.</p>
+    <p id="sample" class="tabular"></p>
+  </div>
+</section>
+<section id="faults">
+  <h2>고장</h2>
+  <p class="muted">각 경로 그룹에 고장 하나를 예약합니다. <code>null</code> 횟수는 직접 해제할 때까지입니다.</p>
+  <form class="row" id="fault">
+    <label>경로 <select id="group"><option>app</option><option>hub</option><option>clock</option><option>health</option></select></label>
+    <label>종류 <select id="kind"><option value="latency">응답 지연</option><option value="status">상태 코드</option><option value="apply_then_fail">적용 후 503</option><option value="drop">연결 끊김</option></select></label>
+    <label id="duration-label">지연 <input id="delay" type="number" min="1" max="120000" value="1500">ms</label>
+    <label id="status-label" hidden>HTTP <select id="status"></select></label>
+    <label>횟수 <input id="count" type="number" min="1" max="10000" value="1"></label>
+    <label><input id="until" type="checkbox"> 해제할 때까지</label>
+    <button>고장 예약</button>
+  </form>
+  <div id="armed-faults" class="stack"></div>
+</section>
+</div>
+<section id="cases">
+  <h2>경우</h2>
+  <p id="active-case" class="summary"></p>
+  <div id="catalogue"></div>
+</section>
+<section id="log">
+  <div class="row">
+    <h2>요청 기록</h2>
+    <label>보기 <select id="client"><option value="">전체</option><option>app</option><option>hub</option><option>loopback-control</option><option value="shell">데모 셸</option><option value="anonymous">인증 정보 없음</option></select></label>
+    <small>최근 300개 · 최신 순 · 실제 시각</small>
+  </div>
+  <div class="scroll">
+    <table><thead><tr><th>시각</th><th>클라이언트</th><th>요청</th><th>HTTP</th><th>지연</th><th>적용한 고장</th></tr></thead><tbody id="requests"></tbody></table>
+  </div>
+</section>
+</main>
+<script>
+const base = "/_fixture/control";
+const $ = id => document.getElementById(id);
+const groups = {order:"주문과 읽기", results:"판단 결과", timing:"판단 시간", plans:"계획과 허브", reactions:"앱 반응", availability:"서버 연결"};
+const orderNames = {ep_9031:"생일", ep_9150:"장보기", ep_9120:"일정 대기"};
+const paceNames = {server:"서버 기본 숫자", fast:"빠른 리허설", slow:"느린 LLM", stuck:"단계 멈춤", custom:"직접 지정"};
+const stageNames = {received:"공유 접수", reading:"읽기 시작", items:"상품 읽기 완료", quiet_window:"조용한 시간 종료", evidence:"근거", intents:"의도", tasks:"작업", published:"카드·계획 공개"};
+const faultNames = {latency:"지연", status:"상태 코드", apply_then_fail:"적용 후 503", drop:"연결 끊김"};
+const number = new Intl.NumberFormat("ko-KR", {maximumFractionDigits: 2});
+const time = new Intl.DateTimeFormat("ko-KR", {timeZone:"Asia/Seoul", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", second:"2-digit", hourCycle:"h23"});
+let rows = [], after = 0, revision = 0, busy = false, polling = false, catalogueHouse;
+let priorFaults, priorOrder;
+
+function node(tag, value, className) {
+  const element = document.createElement(tag);
+  if (value !== undefined) element.textContent = value;
+  if (className) element.className = className;
+  return element;
+}
+function timestamp(value) {
+  if (!value) return node("span", "—", "muted");
+  const stamp = node("time", time.format(new Date(value)));
+  stamp.dateTime = stamp.title = value;
+  return stamp;
+}
+function tableRow(values) {
+  const tr = node("tr");
+  for (const value of values) {
+    const td = node("td");
+    td.append(value instanceof Node ? value : String(value));
+    tr.append(td);
+  }
+  return tr;
+}
+function showOptions(id, options) {
+  const select = $(id);
+  const before = select.value;
+  select.replaceChildren(...options.map(([value, text]) => {
+    const option = node("option", text);
+    option.value = value;
+    return option;
+  }));
+  if (options.some(([value]) => String(value) === before)) select.value = before;
+}
+function actionButton(text, callback) {
+  const button = node("button", text);
+  button.type = "button";
+  button.onclick = callback;
+  return button;
+}
+function faultLabel(fault) {
+  if (!fault) return "—";
+  const suffix = fault.kind === "latency" ? ` ${fault.delay_ms}ms` : fault.status ? ` ${fault.status}` : "";
+  return `${faultNames[fault.kind]}${suffix}${fault.route ? " · " + fault.route : ""}`;
+}
+function httpStatus(row) {
+  if (row.status === null) return node("span", "끊김", "error");
+  return node("span", row.status, row.status >= 400 ? "error" : "");
+}
+function presentRequests() {
+  const client = $("client").value;
+  const visible = rows.filter(row => !client || row.client === client || row.surface === client);
+  $("requests").replaceChildren(...visible.map(row => tableRow([
+    timestamp(row.at), row.surface ? `${row.client} · 셸` : row.client,
+    node("code", `${row.method} ${row.path}`), httpStatus(row), `${number.format(row.latency_ms)}ms`, faultLabel(row.fault),
+  ])));
+}
+
+function presentCatalogue(state) {
+  if (catalogueHouse === state.household.id) return;
+  catalogueHouse = state.household.id;
+  $("catalogue").replaceChildren(...Object.entries(groups).map(([group, title]) => {
+    const details = node("details");
+    details.open = group === "order";
+    const list = node("div", undefined, "case-list");
+    for (const item of state.catalogue.filter(item => item.group === group)) {
+      const card = node("article", undefined, item.reproducible ? "" : "open-case");
+      card.dataset.case = item.id;
+      const head = node("div", undefined, "row");
+      const arm = actionButton("예약", () => mutate("/case", {id:item.id}));
+      arm.disabled = !item.reproducible;
+      head.append(node("strong", item.title), arm);
+      const expected = node("dl");
+      for (const [label, key] of [["앱","app"],["허브","hub"],["집","house"],["셸","shell"]]) {
+        expected.append(node("dt", label), node("dd", item[key]));
+      }
+      card.append(head, node("p", item.source, "source"), expected,
+        node("p", item.reproducible ? item.arm : `재현 불가 (not reproducible: needs ${item.needs})`, "muted"));
+      list.append(card);
+    }
+    details.append(node("summary", title), list);
+    return details;
+  }));
+  showOptions("order", state.available_episodes.map(id => [id, `${orderNames[id]} · ${id}`]));
+  if (state.next_order) $("order").value = state.next_order;
+}
+function presentState(state) {
+  presentCatalogue(state);
+  if (state.next_order && priorOrder !== state.next_order) $("order").value = state.next_order;
+  priorOrder = state.next_order;
+  const {clock, household, episode} = state;
+  const clockText = node("p");
+  clockText.append(timestamp(clock.now), ` · ${clock.paused ? "멈춤" : number.format(clock.rate) + "×"}`,
+    clock.ramp_active ? " · 이동 중, 종료 " : "", ...(clock.ramp_active ? [timestamp(clock.ramp_until)] : []));
+  const episodeText = node("p", `${household.id}${household.paused ? " · 가구 일시정지" : ""}`);
+  if (episode) episodeText.append(` · ${episode.id} · ${episode.status} · 상품 ${episode.item_count}개 · 공유 `, timestamp(episode.shared_at));
+  else episodeText.append(" · 아직 공유된 주문 없음");
+  episodeText.append(` · 다음 주문 ${state.next_order ?? "미선택"}${state.queued_next_order ? " (예약)" : ""}`);
+  $("overview").replaceChildren(clockText, episodeText);
+  $("countdown").textContent = state.seconds_until_next_stage !== null
+    ? `· 다음까지 실제 ${number.format(state.seconds_until_next_stage)}초`
+    : state.next_stage ? "· 진행 대기" : "";
+  $("timeline").replaceChildren(...state.timeline.map(step => tableRow([
+    step.label, timestamp(step.at),
+    node("span", step.done ? "완료" : step.unreachable ? "종료 후 미진행" : step.held ? "멈춤" : "대기", step.held ? "held" : "state-tag"),
+  ])));
+  $("peers").replaceChildren(...[["허브 계획 풀","hub_pull"],["앱 카드 폴링","app_card_poll"],["셸 요청","shell_request"]].map(([label, key]) => {
+    const line = node("p", `${label} · `);
+    const row = state.last[key];
+    line.append(row ? timestamp(row.at) : "—");
+    if (row) line.append(" · ", httpStatus(row), ` · ${number.format(row.latency_ms)}ms`, row.fault ? " · " + faultLabel(row.fault) : "");
+    return line;
+  }));
+  const expanded = new Set(Array.from($("plans").querySelectorAll("details[open]"), item => item.dataset.plan));
+  $("plans").replaceChildren(...(state.plans.length ? state.plans.toReversed().map(plan => {
+    const details = node("details");
+    details.dataset.plan = `${plan.episode_id}/${plan.version}`;
+    details.open = expanded.has(details.dataset.plan);
+    details.append(node("summary", `${plan.episode_id} v${plan.version} · ${plan.ack?.status ?? "ack 대기"} · 풀 ${plan.count}회`));
+    const line = node("p", "공개 ");
+    line.append(timestamp(plan.published_at), " · 첫 풀 ", timestamp(plan.pulled_at), " · 최근 풀 ", timestamp(plan.last_pulled_at), " · ack ", timestamp(plan.acked_at));
+    const tasks = node("ul");
+    for (const task of plan.tasks) tasks.append(node("li", `${task.task_id} · ${task.status}${task.reason ? " · " + task.reason : ""}`));
+    for (const task of plan.cancelled) tasks.append(node("li", `${task.task_id} · cancelled · restore: ${task.restore}`));
+    details.append(line, tasks);
+    return details;
+  }) : [node("p", "공개된 계획 없음", "muted")]));
+  $("cards").replaceChildren(...(state.cards.length ? state.cards.map(card => {
+    const title = node("p", `${card.card_id}${card.stopped ? " · stopped" : ""} · ${card.text}`);
+    const lines = node("ul");
+    for (const line of card.lines) {
+      lines.append(node("li", [line.text, line.state, line.end_state, line.note].filter(Boolean).join(" · ")));
+    }
+    const entry = node("div");
+    entry.append(title, lines);
+    return entry;
+  }) : [node("p", "공개된 카드 없음", "muted")]));
+  showOptions("moments", state.moments.map(moment => [moment.id, `${time.format(new Date(moment.at))} · ${moment.label}`]));
+  $("advance-moment").disabled = $("next-moment").disabled = !state.moments.length;
+  $("realistic-status").textContent = state.realistic_seed === null ? "" :
+    `현실 지연 · 시드 ${state.realistic_seed} · 다음 공유의 판단 단계와 앱 응답에 적용`;
+  $("realistic-off").disabled = state.realistic_seed === null;
+  const pace = state.next_pace;
+  $("next-pace").textContent = pace ? `다음 공유 · ${paceNames[pace.preset]}${pace.hold ? " · " + stageNames[pace.hold] : ""}` : "";
+  $("repeat").disabled = !state.can_repeat;
+  $("capture").disabled = !state.can_capture;
+  $("unpause").disabled = !household.paused;
+  $("calendar").disabled = household.id !== "h_051" || !state.cards.some(card => card.episode_id === episode?.id && !card.starts_at);
+  const sample = state.sample_response;
+  $("sample").textContent = sample ? `앱 경로 응답 · ${sample.status ?? "연결 끊김"} ${sample.body?.code ?? sample.body?.status ?? ""} ${sample.body?.episode_id ?? ""}` : "";
+  const active = state.catalogue.find(item => item.id === state.active_case);
+  $("active-case").replaceChildren(active ? `${active.title} · ${active.arm} ` : "예약된 경우 없음");
+  if (active) $("active-case").append(actionButton("경우 해제", () => mutate("/case", {id:null})));
+  document.querySelectorAll("[data-case]").forEach(card => card.classList.toggle("active", card.dataset.case === state.active_case));
+  const faultList = JSON.stringify(state.faults);
+  if (faultList !== priorFaults) {
+    priorFaults = faultList;
+    $("armed-faults").replaceChildren(...(state.faults.length ? state.faults.map(fault => {
+      const row = node("div", undefined, "row");
+      row.append(node("strong", fault.group), `${faultLabel(fault)} · ${fault.count === null ? "해제할 때까지" : fault.count + "회 남음"}`,
+        node("small", fault.source), actionButton("해제", () => mutate(`/fault/${fault.group}/clear`, {})));
+      return row;
+    }) : [node("p", "예약된 고장 없음", "muted")]));
+  }
+}
+
+async function request(path, payload) {
+  const options = payload === undefined ? {cache:"no-store"} : {
+    method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload),
+  };
+  const response = await fetch(base + path, options);
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.message || `HTTP ${response.status}`);
+  return body;
+}
+function feedback(message) {
+  $("feedback").textContent = message;
+  $("feedback").hidden = !message;
+}
+async function mutate(path, payload) {
+  if (busy) return;
+  busy = true;
+  revision++;
+  try {
+    presentState(await request(path, payload));
+    feedback("");
+  } catch (error) {
+    feedback(`제어 요청 실패 · ${error.message}`);
+  } finally {
+    busy = false;
+    poll();
+  }
+}
+async function poll() {
+  if (polling || busy) return;
+  polling = true;
+  const started = revision;
+  try {
+    const [state, log] = await Promise.all([request("/state"), request(`/log?after=${after}`)]);
+    if (started !== revision) return;
+    presentState(state);
+    if (log.last_id < after) rows = [];
+    after = log.last_id;
+    rows = [...log.requests, ...rows].slice(0, 300);
+    presentRequests();
+    if ($("feedback").textContent.startsWith("상태 읽기 실패")) feedback("");
+  } catch (error) {
+    if (started === revision) feedback(`상태 읽기 실패 · ${error.message}`);
+  } finally {
+    polling = false;
+  }
+}
+function onSubmit(id, callback) {
+  $(id).onsubmit = event => {
+    event.preventDefault();
+    callback();
+  };
+}
+document.querySelectorAll("[data-route]").forEach(button => {
+  button.onclick = () => mutate("/" + button.dataset.route, {action:button.dataset.action});
+});
+$("set-rate").onclick = () => mutate("/clock", {action:"rate", rate:Number($("rate").value)});
+onSubmit("set-clock", () => mutate("/clock", {action:"set", at:$("clock-at").value.trim()}));
+onSubmit("advance", () => mutate("/clock", {action:"advance", moment:$("moments").value, over_seconds:Number($("ramp-seconds").value)}));
+$("next-moment").onclick = () => mutate("/clock", {action:"next", over_seconds:Number($("ramp-seconds").value)});
+showOptions("hold", Object.entries(stageNames));
+for (const [stage, label] of Object.entries(stageNames)) {
+  if (["received", "quiet_window"].includes(stage)) continue;
+  const input = node("input");
+  Object.assign(input, {type:"number", min:0, max:86400, placeholder:"기본값", id:"offset-" + stage});
+  const wrapper = node("label", label + " ");
+  wrapper.append(input, "초");
+  $("offsets").append(wrapper);
+}
+$("preset").onchange = () => {
+  $("offsets").hidden = $("preset").value !== "custom";
+  $("hold-label").hidden = $("preset").value !== "stuck";
+};
+onSubmit("pace", () => {
+  const body = {preset:$("preset").value, scope:$("scope").value};
+  if (body.preset === "stuck") body.hold = $("hold").value;
+  if (body.preset === "custom") {
+    body.offsets = {};
+    $("offsets").querySelectorAll("input[id^=offset-]").forEach(input => {
+      if (input.value !== "") body.offsets[input.id.slice(7)] = Number(input.value);
+    });
+    if ($("quiet").value !== "") body.quiet_seconds = Number($("quiet").value);
+  }
+  mutate("/judgment", body);
+});
+$("release").onclick = () => mutate("/judgment", {preset:"release", scope:"current"});
+onSubmit("realistic", () => mutate("/realistic", {seed:Number($("realistic-seed").value)}));
+$("realistic-off").onclick = () => mutate("/realistic", {seed:null});
+$("select").onclick = () => mutate("/episode", {action:"select", episode_id:$("order").value});
+$("reset").onclick = () => {
+  if (confirm("이 Fixture의 회차를 모두 초기화할까요?")) mutate("/episode", {action:"reset", episode_id:$("order").value});
+};
+function faultControls() {
+  const kind = $("kind").value;
+  const health = $("group").value === "health";
+  $("kind").querySelector("[value=apply_then_fail]").disabled = health;
+  if (health && kind === "apply_then_fail") $("kind").value = "status";
+  $("duration-label").hidden = $("kind").value !== "latency";
+  $("status-label").hidden = $("kind").value !== "status";
+  showOptions("status", (health ? [503] : [500,401,403,404,503]).map(code => [code, String(code)]));
+}
+$("kind").onchange = $("group").onchange = faultControls;
+$("until").onchange = () => { $("count").disabled = $("until").checked; };
+onSubmit("fault", () => {
+  const payload = {group:$("group").value, kind:$("kind").value, count:$("until").checked ? null : Number($("count").value)};
+  if (payload.kind === "latency") payload.delay_ms = Number($("delay").value);
+  if (payload.kind === "status") payload.status = Number($("status").value);
+  mutate("/fault", payload);
+});
+$("client").onchange = presentRequests;
+faultControls();
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>
