@@ -407,11 +407,7 @@ export function createPhone(context, ui) {
     <div class="record-grid"><section>${recordReviews(state.chain.cards, "h2") ||
         (problem ? `<p>${problem}</p>` : "")}</section>
     <section class="memory-panel"><h2>이 집의 기억</h2>${memoryContent()}</section></div></div>`;
-    const copy = $("stage-copy");
-    if (copy.dataset.content !== markup) {
-      copy.dataset.content = markup;
-      copy.innerHTML = markup;
-    }
+    setMarkup($("stage-copy"), markup);
   }
 
   return {

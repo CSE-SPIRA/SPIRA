@@ -41,7 +41,7 @@ Server mode enabled and keeps its credentials in the proxy. In the shell,
 share your own screenshot. A missing Server read shows
 서버가 아직 이 단계를 내보내지 않아요 on its stage. The shell uses the Server's
 clock and moments when available. With no rehearsal clock, the shell displays
-one line and hides 다음 시연 시각. Tags and generated display artwork are
+one line and hides 다음 시연 시각. Text tags and illustrated device displays are
 disabled for these runs. The run logs include the selected Server URL.
 
 The judgment scene advances as its data arrives. The strip names the pending
@@ -162,7 +162,13 @@ Add `owners=1` to the query string to show the owner tags. They are hidden by de
 | Judgment beat order and evidence display | `ui/judgment.js` and `ui/judgment-view.js` | Server rationale |
 | Text tagger lists, validation and cache | `tag-lists.json` and `tagger.py` | |
 | Prepared item icons, storage words and props per unit | `ui/item-types.json` | Item names |
-| Data fetching, scene pacing, phone and house | `ui/demo.js` | |
+| App contract polling and tag reads | `ui/episode.js` | |
+| Reasoning stages and pacing | `ui/reasoning.js` | |
+| Phone, sharing, reactions and final review | `ui/phone.js` | |
+| House timeline and cameras | `ui/house-timeline.js` | |
+| Presenter navigation, actions and rehearsal clock | `ui/presenter.js` | |
+| Recording timestamps and playback | `ui/recording.js`, `ui/run.js` | |
+| Shell setup and Simulator renderer loading | `ui/demo.js` | |
 | Story clock and time formatting | `ui/story-time.js` | |
 | Allowed assets and upstream routes | `demo.py` | |
 

@@ -48,8 +48,7 @@ function retryNotice(error, reader) {
 async function observe(kind, path, options, { text = false, transform = (value) => value, read } = {}) {
   const { reader, record } = state;
   try {
-    const response = await fetch(path, options);
-    if (!response.ok) throw Object.assign(new Error(response.status), { status: response.status });
+    const response = await fetchResponse(path, options);
     const data = transform(await (text ? response.text() : response.json()));
     if (state.reader === reader) {
       const story = kind === "clock" ? Date.parse(data.now ?? data.story_at) : undefined;
@@ -62,10 +61,14 @@ async function observe(kind, path, options, { text = false, transform = (value) 
   }
 }
 
-async function api(path, options) {
+async function fetchResponse(path, options) {
   const response = await fetch(path, options);
   if (!response.ok) throw Object.assign(new Error(response.status), { status: response.status });
-  return response.json();
+  return response;
+}
+
+async function api(path, options) {
+  return (await fetchResponse(path, options)).json();
 }
 
 function notice(text = "") {

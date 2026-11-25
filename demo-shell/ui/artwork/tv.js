@@ -7,7 +7,7 @@ export const TV_DEFAULTS = {
   calm: { palette: "forest_green", center: "moon", side: "waves", ambient: "stars" },
   cinema: { palette: "calm_neutral", center: "film", side: "popcorn", ambient: "stars" },
 };
-export const MOTIF_SLOTS = ["center", "side", "ambient"];
+const MOTIF_SLOTS = ["center", "side", "ambient"];
 
 export function tvValues(template, tag) {
   if (typeof template !== "string" || !Object.hasOwn(TV_DEFAULTS, template)) return;

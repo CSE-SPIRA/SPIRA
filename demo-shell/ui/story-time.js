@@ -9,7 +9,7 @@ const clock = new Intl.DateTimeFormat("ko-KR", {
   timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
 });
 
-export function storyTimeOffset(event, rebasedStart) {
+function storyTimeOffset(event, rebasedStart) {
   const start = Date.parse(rebasedStart);
   const day = WEEKDAYS.indexOf(event?.day);
   if (!Number.isFinite(start) || day < 0) return null;

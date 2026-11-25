@@ -308,8 +308,7 @@ export function createReasoning(context, ui) {
     <h1${headline ? ' class="headline"' : ""}>${esc(title)}</h1><p class="lead">${esc(stageReady(scene.id) ? scene.lead : "")}</p>
     </header>${stageBody(scene)}</div>`;
     if (copy.dataset.content !== markup) {
-      copy.dataset.content = markup;
-      copy.innerHTML = markup;
+      setMarkup(copy, markup);
       ++flightVersion;
     }
     ui.presenter.renderControls();
