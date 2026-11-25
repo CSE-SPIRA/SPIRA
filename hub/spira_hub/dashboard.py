@@ -1,23 +1,36 @@
-"""Read-only Hub evidence for operators."""
+"""Read-only household ledger and Hub diagnostics."""
 
+from bisect import bisect_right
+from collections import defaultdict
+from hashlib import blake2s
 from html import escape
+from pathlib import Path
+from secrets import compare_digest
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from spira_contracts.devices import Devices
+from spira_contracts.error import Error
 
-from .contracts import offset_time
+from .contracts import offset_time, wire
 from .dashboard_state import state_view
+from .dashboard_words import device_words, task_count_words
+from .design_vocabulary import ROOM_NAMES
 from .store import encode
 
 HOUSEHOLD_TIME = ZoneInfo("Asia/Seoul")
-BY_LABEL = {"spira": "SPIRA", "user": "사람", "unknown": "모름", "hub": "집"}
-REPORT_LABEL = {"ack": "ack", "event": "event", "run": "결과", "restore": "restore"}
+SOURCE_LABELS = {"command": "SPIRA가 시킴", "report": "기기가 알림", "restore": "집이 되돌림"}
 
 
-def create_app(runtime, *, lifespan=None):
+def create_app(runtime, *, lifespan=None, hub_key=None, home_name="우리 집"):
     app = FastAPI(title="SPIRA Home Hub", lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
+    app.mount("/assets", StaticFiles(directory=Path(__file__).with_name("dashboard_assets")), name="dashboard-assets")
+
+    def installed_devices() -> Devices | None:
+        return None if runtime.config_error else runtime.installation.devices
 
     @app.get("/health")
     async def health():
@@ -29,54 +42,147 @@ def create_app(runtime, *, lifespan=None):
     async def state():
         return state_view(runtime)
 
+    @app.get("/home/onboarding/devices", response_model=Devices, response_model_exclude_unset=True)
+    async def home_devices(request: Request, response: Response):
+        supplied = request.headers.get("X-API-Key", "")
+        if not hub_key or not compare_digest(supplied.encode(), hub_key.encode()):
+            error = Error(code="unauthorized", message="Household Hub key required")
+            return JSONResponse(wire(error), status_code=401)
+        devices = installed_devices()
+        if devices is None:
+            error = Error(code="internal", message="Hub installation is unavailable")
+            return JSONResponse(wire(error), status_code=503)
+        response.headers["Cache-Control"] = "no-store"
+        return devices
+
     @app.get("/", response_class=HTMLResponse)
     async def dashboard():
-        return render(state_view(runtime))
+        return render(state_view(runtime, dashboard=True), home_name=home_name, devices=installed_devices())
 
     return app
 
 
-def seen(state):
-    plans = " · ".join(
-        f'{escape(plan["plan_id"])} 계획 v{plan["plan_version"]} · 할 일 {plan["task_count"]}'
-        for plan in state["current_plans"]
-    ) or "현재 계획 없음 · 할 일 0"
-    connection = ("연결됨" if state["server_confirmed"] else
-                  "연결 실패" if state["server_error"] else "연결 확인 중")
-    dated_rows = [(row, offset_time(row["at"]).astimezone(HOUSEHOLD_TIME)) for row in state["ledger"]]
-    multi_day = bool(dated_rows and dated_rows[0][1].date() != dated_rows[-1][1].date())
-    rows = []
-    for index, (row, at) in enumerate(dated_rows):
-        time_label = at.strftime("%m/%d %H:%M" if multi_day else "%H:%M")
-        by = row["by"]
-        reports = " ".join(report_badge(report) for report in row["reports"]) or "—"
-        recent = ' class="recent"' if index >= len(dated_rows) - 3 else ""
-        rows.append(
-            f'<tr{recent}><td><time datetime="{escape(row["at"])}" title="{at:%Y-%m-%d %H:%M:%S %Z}">'
-            f'{time_label}</time></td><td>{escape(row["label"])}</td><td>{escape(row["what"])}</td>'
-            f'<td class="by {by}">{BY_LABEL[by]}</td><td>{reports}</td></tr>'
-        )
-    body = "".join(rows) or '<tr><td class="empty" colspan="5">아직 기록된 일이 없어요.</td></tr>'
-    return f"""<section class="seen" aria-labelledby="seen-title">
-<header><h1 id="seen-title">Hub · 이 집이 본 것</h1>
-<p>{escape(state["household"])} · {plans} · Server {connection}</p>
-<a href="#detail">자세한 기록</a></header>
-<div class="ledger"><table aria-labelledby="seen-title"><thead>
-<tr><th scope="col">시각</th><th scope="col">기기</th><th scope="col">일</th>
-<th scope="col">누가</th><th scope="col">Server로</th></tr>
-</thead><tbody>{body}</tbody></table></div></section>"""
+def seen(state, home_name):
+    plans = "받은 준비" if state["plan_history"] else "받은 준비 없음"
+    connection = ("서버 연결됨" if state["server_confirmed"] else
+                  "서버 연결 실패" if state["server_error"] else "서버 연결 확인 중")
+    legend = "".join(f'<li>{source_mark(source)}{label}</li>' for source, label in SOURCE_LABELS.items())
+    body = preparation_groups(state) or '<p class="subtext">기록을 기다리고 있어요.</p>'
+    return f"""<section class="ledger" aria-labelledby="seen-title">
+<header class="ledger-head"><h1 id="seen-title">이 집이 본 것</h1>
+<a href="#detail">자세한 기록</a>
+<p id="ledger-summary">{escape(home_name)} · {plans} · {connection}</p></header>
+<ul class="source-legend" role="list" aria-label="기록 표시 안내">{legend}</ul>
+<div id="ledger" aria-live="polite">{body}</div></section>"""
 
 
-def report_badge(report):
-    label = REPORT_LABEL[report["kind"]]
-    if report["delivered"]:
-        return f'<span class="sent">{label} {"204" if report["kind"] == "ack" else "보냄"}</span>'
-    if report["delivery_error"]:
-        return f'<span class="retry" title="{escape(report["delivery_error"])}">{label} 재전송 대기</span>'
-    return f'<span class="pending">{label} 전송 대기</span>'
+def ledger_time(value, *, short=False):
+    at = offset_time(value).astimezone(HOUSEHOLD_TIME)
+    weekday = "월화수목금토일"[at.weekday()]
+    if short:
+        return f'<time datetime="{escape(value)}" title="{at:%Y-%m-%d} ({weekday})">{at:%H:%M}</time>'
+    return f'<time datetime="{escape(value)}">{weekday} {at:%H:%M}</time>'
 
 
-def render(state):
+def preparation_groups(state):
+    ledger = state["ledger"]
+    receipts = [row for row in ledger if row["kind"] == "plan"]
+    versions = defaultdict(list)
+    for receipt in receipts:
+        versions[receipt["plan_id"]].append(receipt)
+    plan_ids = list(versions)
+    receipt_times = [offset_time(versions[plan_id][0]["at"]) for plan_id in plan_ids]
+    groups = {plan_id: [] for plan_id in plan_ids}
+    household_rows = []
+    for row in reversed(ledger):
+        if row["kind"] == "plan":
+            plan_id = row["plan_id"]
+            if row is not versions[plan_id][0]:
+                change = "준비가 바뀌었어요"
+                what = f'{change} · {row["what"]}' if row["what"] else change
+                groups[plan_id].append({**row, "kind": "plan_change", "what": what})
+            elif row["what"] or delivery_mark(row):
+                groups[plan_id].append(row)
+            continue
+        preparation = row.get("preparation")
+        if preparation is None:
+            # Place ordinary household activity in the matching time period.
+            index = bisect_right(receipt_times, offset_time(row["at"])) - 1
+            if index >= 0:
+                preparation = plan_ids[index]
+        groups.get(preparation, household_rows).append(row)
+
+    sections = []
+    for index, (plan_id, history) in enumerate(reversed(versions.items())):
+        first, latest = history[0], history[-1]
+        counts = task_count_words(latest["task_count"], latest["notice_count"])
+        tasks = "".join(f" · {count}" for count in counts)
+        title = f'받은 준비 · 받은 시각 {ledger_time(first["at"], short=True)}{tasks}'
+        key = blake2s(plan_id.encode(), digest_size=8).hexdigest()
+        sections.append(ledger_group(key, title, groups[plan_id], newest=index == 0))
+    if household_rows:
+        sections.append(ledger_group("household", "집에서 일어난 일", household_rows, newest=not receipts))
+    return "".join(sections)
+
+
+def ledger_group(key, title, rows, *, newest):
+    body = "".join(ledger_row(row) for row in rows)
+    body = (f'<ol class="ledger-rows" role="list">{body}</ol>' if body else
+            '<p class="subtext">기록을 기다리고 있어요.</p>')
+    opened = ' data-newest open' if newest else ''
+    return f'<details class="ledger-group" data-group="{key}"{opened}><summary>{title}</summary>{body}</details>'
+
+
+def source_mark(source, label=None):
+    accessibility = f'role="img" aria-label="{label}"' if label else 'aria-hidden="true"'
+    return f'<span class="source-mark source-{source}" {accessibility}></span>'
+
+
+def delivery_mark(row):
+    pending = [report for report in row["reports"] if not report["delivered"]]
+    if any(report["delivery_error"] for report in pending):
+        return '<span class="delivery delivery-failed">전송 실패 · 다시 보내는 중</span>'
+    if pending:
+        return '<span class="delivery">서버에 보내는 중</span>'
+    return ""
+
+
+def ledger_row(row):
+    label = f'{escape(row["label"])} · ' if row["label"] != "—" else ""
+    kind, by = row["kind"], row["by"]
+    source = {"restore": "restore", "event": "report"}.get(kind, "command")
+    actor = SOURCE_LABELS[source]
+    if kind == "plan":
+        actor = "준비를 받음"
+    elif kind == "plan_change":
+        actor = "준비 변경을 받음"
+    elif kind == "event" and by == "hub":
+        actor = "집이 감지함"
+    detail = ' <span class="person">· 사람이 조작함</span>' if by == "user" else ""
+    status = row.get("status")
+    tone = f' class="outcome-{status}"' if status in {"unverifiable", "failed"} else ""
+    row_class = "ledger-row plan-change" if kind == "plan_change" else "ledger-row"
+    return (
+        f'<li class="{row_class}">{source_mark(source, actor)}{ledger_time(row["at"])}'
+        f'<div><strong{tone}>{label}{escape(row["what"] or "받은 준비")}</strong>{detail}'
+        f'{delivery_mark(row)}</div></li>'
+    )
+
+
+def device_list(inventory):
+    body = '<p class="subtext">기기 목록을 불러오지 못했어요.</p>'
+    if inventory is not None:
+        devices = {device.id: device for device in inventory.devices}
+        items = []
+        for device in inventory.devices:
+            room = f'<span>{escape(ROOM_NAMES.get(device.room, device.room))}</span>' if device.room else ""
+            items.append(f'<li><span>{escape(device_words(device.id, devices))}</span>{room}</li>')
+        body = (f'<ul role="list">{"".join(items)}</ul>' if items else
+                '<p class="subtext">등록된 기기가 없어요.</p>')
+    return f'<aside class="device-panel" aria-labelledby="device-title"><h2 id="device-title">이 집의 기기</h2><div id="device-list">{body}</div></aside>'
+
+
+def render(state, *, home_name="우리 집", devices=None):
     def text(value):
         return escape(str(value))
 
@@ -120,7 +226,7 @@ def render(state):
         f'<p class="mono">{text(row["packet"]["at"])}</p></article>'
         for row in state["restoration"]
     ]
-    devices = [
+    bindings = [
         f'<article><h3>{text(row["device"])} <span>{text(row["substrate"])}</span></h3>'
         f'<p class="mono">{text(row["target"])}</p>'
         + (f'<p><span class="assumption">Class A assumption</span> {text(row["assumption"])}</p>'
@@ -172,42 +278,17 @@ def render(state):
         + section("Plan summaries", summaries, "No plans admitted.")
         + section("Plan history", history, "No plan versions recorded.")
         + section("Task stories", stories, "No task stories recorded.")
-        + section("Device bindings", devices, "No delegated devices.")
+        + section("Device bindings", bindings, "No delegated devices.")
     )
     return f"""<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="5"><title>SPIRA Home Hub</title><style>
-:root {{ color-scheme: light; color: #15191b; background: #f4f4f2; font: 16px system-ui, sans-serif; }}
-body {{ margin: 0; }} main {{ max-width: 1120px; padding: clamp(.75rem, 3vw, 1.5rem); margin: auto; }}
-.seen {{ background: #fff; border: 1.5px solid #b9bebb; border-radius: 8px; padding: clamp(.65rem, 2vw, 1rem); }}
-.seen header {{ display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem 1rem; padding-bottom: .55rem; }}
-.seen h1 {{ margin: 0; font-size: 1.1rem; }} .seen header p {{ color: #6b7378; font-size: .875rem; }}
-.seen header a {{ color: #1f4fb8; font-size: .875rem; margin-left: auto; }}
-.ledger {{ overflow-x: auto; }}
-.ledger table {{ width: 100%; min-width: 350px; border-spacing: 0 .15rem; font-size: .9rem; }}
-.ledger th {{ border-bottom: 1px solid #dadedb; color: #6b7378; text-align: left; font-size: .8rem; font-weight: 500; }}
-.ledger th, .ledger td {{ padding: .3rem .45rem; vertical-align: baseline; }}
-.ledger time {{ color: #6b7378; font: .82rem ui-monospace, monospace; white-space: nowrap; }}
-.ledger td:nth-child(2), .ledger td:nth-child(4) {{ white-space: nowrap; }}
-.ledger .recent td {{ background: #fff8ec; font-weight: 600; }}
-.ledger .recent td:first-child {{ border-radius: 4px 0 0 4px; }}
-.ledger .recent td:last-child {{ border-radius: 0 4px 4px 0; }}
-.ledger .by {{ font-weight: 600; }} .by.spira {{ color: #1f4fb8; }} .by.user {{ color: #a84f0c; }}
-.by.unknown, .ledger .retry {{ color: #b42318; }} .by.hub, .ledger .sent {{ color: #0f6e66; }}
-.ledger span {{ font-size: .8rem; display: inline-block; }} .ledger .pending {{ color: #6b7378; }}
-#detail {{ margin-top: 1.5rem; }}
-.details-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: 1.25rem;
-                 align-items: start; }}
-.details-grid section {{ background: #e9efe8; padding: 1rem; border-radius: .75rem; min-width: 0; }}
-h2 {{ margin: .25rem 0 1rem; font-size: 1.15rem; }} h3, h4 {{ margin: 0 0 .4rem; }}
-article {{ padding: .85rem; margin: .5rem 0; border: 1px solid #cbdad2; border-radius: .5rem; background: white; }}
-p, dl {{ margin: .35rem 0; }} dt {{ font-weight: 600; }} dd {{ margin: .2rem 0 .6rem; }}
-.details-grid span {{ display: inline-block; font-size: .78rem; background: #dfefe7; padding: .16rem .4rem; border-radius: .25rem; }}
-.details-grid .assumption {{ background: #f9e7b8; }}
-pre, .mono {{ white-space: pre-wrap; overflow-wrap: anywhere; font: .82rem ui-monospace, monospace; }}
-pre {{ background: #f3f6f3; padding: .5rem; margin: .4rem 0 0; }} .empty {{ color: #43564e; }}
-</style></head><body><main>{seen(state)}
-<section id="detail"><h2>자세한 기록</h2><div lang="en"><p>{text(peer)}</p>
+<meta name="theme-color" content=""><title>SPIRA Home Hub</title>
+<link rel="stylesheet" href="/assets/tokens.css"><link rel="stylesheet" href="/assets/dashboard.css"><script src="/assets/dashboard.js" defer></script>
+</head><body><main><div class="overview">{seen(state, home_name)}{device_list(devices)}</div>
+<section id="detail" tabindex="-1" aria-labelledby="detail-title">
+<h2 id="detail-title">자세한 기록</h2><p><a href="#seen-title">장부로 돌아가기</a> · <a href="/state">JSON</a></p>
+<div id="detail-content" lang="en"><p>{text(peer)}</p>
+<p>Household {text(state["household"])}</p>
 <p>Observation gap last marked at {text(state["observation_gap_at"])}</p>
 <div class="details-grid">{body}</div></div></section></main></body></html>"""
 

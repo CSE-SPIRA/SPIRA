@@ -36,6 +36,7 @@ def admit(store, plan, malformed, installation, now):
                          if task["active"]}
     store.save_plan_version(plan_id, version, {
         "received_at": now.isoformat(), "triggers": triggers, "previous_version": previous_version or None,
+        "notice_count": sum(body["source"] == "item" for body in current.values()),
         "changes": {
             "added": sorted(triggers.keys() - previous_triggers.keys()),
             "removed": sorted(previous_triggers.keys() - triggers.keys()),

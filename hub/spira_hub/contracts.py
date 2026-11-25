@@ -69,16 +69,17 @@ def read_model(model, body, schema):
 
 
 class Server:
-    def __init__(self, http: httpx.AsyncClient, household: str):
+    def __init__(self, http: httpx.AsyncClient, household: str, *, clock=wall_time):
         self.http = http
         self.household = household
+        self.clock = clock
         self.fixture = None
 
     async def pull(self):
         response = await self.http.get("/v1/hub/plans", params={"household": self.household})
         response.raise_for_status()
         self.fixture = response.headers.get("X-SPIRA-Fixture")
-        return parse_pull(response.json(), self.household)
+        return parse_pull(response.json(), self.household, clock=self.clock)
 
     async def register(self, devices: Devices):
         response = await self.http.put(
@@ -101,7 +102,7 @@ class Server:
                 read_model(ExecutionResponse, response.json(), "execution_response.json")
 
 
-def parse_pull(body, household):
+def parse_pull(body, household, *, clock=wall_time):
     """Validate envelopes separately so malformed addressable lines keep valid siblings."""
     if not isinstance(body, dict) or not isinstance(body.get("plans"), list):
         raise ContractError("Unreadable plan snapshot")
@@ -132,7 +133,7 @@ def parse_pull(body, household):
                 continue
             try:
                 read_model(Task, task, "plan.json#/$defs/Task")
-                check_task_times(task)
+                check_task_times(task, clock)
             except (ValueError, OverflowError):
                 rejected.add(task_id)
                 continue
@@ -152,7 +153,7 @@ def parse_pull(body, household):
     return pull, invalid
 
 
-def check_task_times(task):
+def check_task_times(task, clock=wall_time):
     for name in ("time", "at"):
         if name in task["trigger"]:
             offset_time(task["trigger"][name])
@@ -164,7 +165,7 @@ def check_task_times(task):
     for name in ("after", "or_after"):
         if name in task["end"]:
             # A syntactically valid duration must still be representable.
-            wall_time() + duration(task["end"][name])
+            clock() + duration(task["end"][name])
 
 
 def value_reason(action: Action, command: Command):
