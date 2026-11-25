@@ -3,330 +3,642 @@ import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
 import '../contracts.dart' as wire;
-import 'labels.dart';
+import '../design_tokens.g.dart';
+import '../design_vocabulary.g.dart';
+import '../korean_text.dart';
+import '../theme.dart';
+import 'order_extraction.dart';
 import 'setup.dart';
 
-void openRationale(
-  BuildContext context,
-  AppController app,
-  String episode, {
-  String? cardId,
-}) {
-  Navigator.push<void>(
-    context,
-    MaterialPageRoute(
-      builder: (_) => _RationaleScreen(
-        app: app,
-        rationale: app.rationale(episode),
-        cardId: cardId,
+typedef _BasisLabels = List<String> Function(
+  List<String> sources, {
+  bool productName,
+});
+
+_BasisLabels _basisLabelsFor(
+  wire.Rationale result,
+  Iterable<wire.EpisodeItem> items,
+) {
+  final itemsByType = {for (final item in items) item.type: item};
+  final calendar = {
+    for (final event in result.evidence.calendar) event.id: event,
+  };
+  return (sources, {productName = false}) => [
+    for (final source in sources.toSet())
+      if (calendar[source] case final event?)
+        calendarEvidenceLabel(event)
+      else if (source == '가구 유형')
+        stateWords['household_profile']!
+      else if (itemsByType[source] case final item?)
+        if (productName && item.name.trim().isNotEmpty)
+          item.name
+        else
+          item.type,
+  ];
+}
+
+List<(String, String?, List<String>)> situationSlots(
+  wire.IntentElement intent,
+) => [
+  ('행사', intent.situation.event, intent.basis.event),
+  ('손님', intent.situation.guests, intent.basis.guests),
+  ('활동', intent.situation.activity, intent.basis.activity),
+  ('테마', intent.situation.theme, intent.basis.theme),
+];
+
+class OrderJudgment extends StatelessWidget {
+  const OrderJudgment({
+    super.key,
+    required this.step,
+    required this.result,
+    required this.episode,
+  });
+
+  final JudgmentStep step;
+  final wire.Rationale result;
+  final wire.Episode episode;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final basisLabels = _basisLabelsFor(result, episode.items);
+    final title = switch (step) {
+      JudgmentStep.situation => '상황',
+      JudgmentStep.intent => '의도',
+      JudgmentStep.tasks => '할 일',
+    };
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : appSettle,
+      curve: appEase,
+      builder: (context, progress, child) =>
+          Opacity(opacity: progress, child: child),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        spacing: 8,
+        children: [
+          Semantics(
+            header: true,
+            liveRegion: true,
+            child: KoreanText(title, style: theme.textTheme.titleMedium),
+          ),
+          if (step == JudgmentStep.situation)
+            for (final intent in result.intents)
+              EvidencePanel(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  spacing: 6,
+                  children: [
+                    for (final (label, value, sources) in situationSlots(
+                      intent,
+                    ))
+                      EvidenceRow(
+                        title:
+                            '$label · ${value == null || value.trim().isEmpty ? '알 수 없어요' : value}',
+                        detail: basisLabels(
+                          sources,
+                          productName: label == '테마',
+                        ).join(' · '),
+                      ),
+                  ],
+                ),
+              ),
+          if (step == JudgmentStep.intent) ...[
+            for (final intent in result.intents)
+              IntentPanel(
+                sentence: intent.intentText,
+                themePhrase: intent.situation.theme,
+                clues: basisLabels(intent.basis.intent),
+                showLabel: false,
+              ),
+            if (result.unbundled.isNotEmpty)
+              KoreanText(
+                '이번 준비와 상관없는 물건 ${result.unbundled.length}개',
+                style: theme.textTheme.bodySmall,
+              ),
+          ],
+          if (step == JudgmentStep.tasks)
+            EvidencePanel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final (index, task) in result.tasks.indexed) ...[
+                    if (index > 0) const Divider(height: 14),
+                    KoreanText(task.line, style: theme.textTheme.bodyMedium),
+                  ],
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+wire.LineElement? rationaleLine(
+  wire.Task task,
+  List<wire.Task> tasks,
+  wire.Card? card,
+) {
+  if (card == null) return null;
+  final exact = card.lines
+      .where((line) => line.taskId == task.taskId)
+      .firstOrNull;
+  if (exact != null) return exact;
+  // Re-enabling a line assigns a new task number. Reuse the basis only
+  // when the task name and displayed line still agree within this card.
+  String taskName(String id) => id.split('#').first;
+  bool matches(String id, String text) =>
+      text == task.line && taskName(id) == taskName(task.taskId);
+  final matchingBasis = tasks.where(
+    (other) => other.cardId == task.cardId && matches(other.taskId, other.line),
+  );
+  if (matchingBasis.singleOrNull == null) return null;
+  final taskIds = {
+    for (final other in tasks)
+      if (other.cardId == task.cardId) other.taskId,
+  };
+  return card.lines
+      .where(
+        (line) =>
+            !taskIds.contains(line.taskId) && matches(line.taskId, line.text),
+      )
+      .singleOrNull;
+}
+
+String calendarEvidenceLabel(wire.CalendarElement event) {
+  final day = event.day;
+  final weekday = day.length == 1 ? '$day요일' : day;
+  return [
+    weekday,
+    event.tags.join(' · '),
+    '일정',
+  ].where((part) => part.isNotEmpty).join(' ');
+}
+
+class IntentPanel extends StatelessWidget {
+  const IntentPanel({
+    super.key,
+    required this.sentence,
+    required this.themePhrase,
+    required this.clues,
+    this.showLabel = true,
+  });
+
+  final String sentence;
+  final String? themePhrase;
+  final List<String> clues;
+  final bool showLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return EvidencePanel(
+      color: colors.primary,
+      radius: appCardRadius,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (showLabel) ...[
+            KoreanText(
+              '이렇게 판단했어요',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colors.onPrimary,
+              ),
+            ),
+            const SizedBox(height: 6),
+          ],
+          KoreanText.rich(
+            highlightTheme(sentence, themePhrase, appPinkOnGreen),
+            style: theme.textTheme.titleLarge?.copyWith(
+              color: colors.onPrimary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          if (clues.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            KoreanText(
+              '함께 본 근거',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colors.onPrimary,
+              ),
+            ),
+            const SizedBox(height: 4),
+            EvidenceChips(clues, onGreen: true),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+String similarOrderName(wire.KbCount count) => count.intentId == 'none'
+    ? stateWords['order_without_preparation']!
+    : count.name;
+
+class EvidencePanel extends StatelessWidget {
+  const EvidencePanel({
+    super.key,
+    required this.child,
+    this.color,
+    this.border,
+    this.radius = DesignTokens.radius16,
+  });
+
+  final Widget child;
+  final Color? color;
+  final Color? border;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(
+      vertical: DesignTokens.space12,
+      horizontal: DesignTokens.space16,
+    ),
+    decoration: BoxDecoration(
+      color: color ?? DesignTokens.surface,
+      borderRadius: BorderRadius.circular(radius),
+      border: Border.all(color: border ?? DesignTokens.line),
+    ),
+    child: child,
+  );
+}
+
+class EvidenceSection extends StatelessWidget {
+  const EvidenceSection(this.title, {super.key, required this.child});
+
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    spacing: DesignTokens.space4,
+    children: [
+      Semantics(header: true, child: EvidenceCaption(title)),
+      child,
+    ],
+  );
+}
+
+class EvidenceCaption extends StatelessWidget {
+  const EvidenceCaption(this.text, {super.key});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => KoreanText(
+    text,
+    style: Theme.of(context).textTheme.bodySmall
+        ?.copyWith(color: DesignTokens.muted),
+  );
+}
+
+class EvidenceRow extends StatelessWidget {
+  const EvidenceRow({super.key, required this.title, this.detail = ''});
+
+  final String title;
+  final String detail;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    spacing: DesignTokens.space4,
+    children: [
+      KoreanText(title),
+      if (detail.isNotEmpty) EvidenceCaption(detail),
+    ],
+  );
+}
+
+class EvidenceRows extends StatelessWidget {
+  const EvidenceRows(this.children, {super.key});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      for (final (index, child) in children.indexed) ...[
+        if (index > 0)
+          const Divider(height: DesignTokens.space16, color: DesignTokens.soft),
+        child,
+      ],
+    ],
+  );
+}
+
+class EvidenceChips extends StatelessWidget {
+  const EvidenceChips(
+    this.values, {
+    super.key,
+    this.theme,
+    this.onGreen = false,
+    this.onTap,
+  });
+
+  final List<String> values;
+  final String? theme;
+  final bool onGreen;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => Wrap(
+    spacing: DesignTokens.space4,
+    runSpacing: DesignTokens.space4,
+    children: [
+      for (final value in values)
+        if (onTap != null)
+          ActionChip(
+            label: KoreanText(value),
+            labelStyle: Theme.of(context).textTheme.bodySmall,
+            onPressed: onTap,
+            backgroundColor: DesignTokens.soft,
+            side: BorderSide.none,
+            shape: const StadiumBorder(),
+          )
+        else
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: value == theme
+                  ? DesignTokens.pinkSoft
+                  : onGreen
+                  ? DesignTokens.greenSoft
+                  : DesignTokens.soft,
+              borderRadius: BorderRadius.circular(DesignTokens.radiusPill),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                vertical: DesignTokens.space4,
+                horizontal: DesignTokens.space8,
+              ),
+              child: KoreanText(
+                value,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: value == theme
+                      ? DesignTokens.pinkInk
+                      : DesignTokens.ink,
+                ),
+              ),
+            ),
+          ),
+    ],
+  );
+}
+
+class EvidencePage extends StatelessWidget {
+  const EvidencePage({super.key, required this.title, required this.children});
+
+  final String title;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: KoreanText(title, overflow: TextOverflow.ellipsis, maxLines: 2),
+    ),
+    body: SafeArea(
+      top: false,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(
+          DesignTokens.space16,
+          0,
+          DesignTokens.space16,
+          DesignTokens.space24,
+        ),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 600),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              spacing: DesignTokens.space12,
+              children: children,
+            ),
+          ),
+        ),
       ),
     ),
   );
 }
 
-class _RationaleScreen extends StatelessWidget {
-  const _RationaleScreen({
-    required this.app,
-    required this.rationale,
-    required this.cardId,
-  });
+void openFullEvidence(
+  BuildContext context,
+  AppController app,
+  String episodeId,
+) {
+  Navigator.of(context).push<void>(
+    MaterialPageRoute(builder: (_) => _FullEvidenceScreen(app, episodeId)),
+  );
+}
+
+class _FullEvidenceScreen extends StatefulWidget {
+  const _FullEvidenceScreen(this.app, this.episodeId);
 
   final AppController app;
-  final Future<wire.Rationale> rationale;
-  final String? cardId;
+  final String episodeId;
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('WHY · 준비 이유')),
-    body: FutureBuilder<wire.Rationale>(
-      future: rationale,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(
-            child: CircularProgressIndicator(semanticsLabel: '준비 이유 불러오는 중'),
-          );
-        }
-        final result = snapshot.data;
-        if (result == null) {
-          return const Center(child: StatusMessage('저장된 이유를 볼 수 없어요.'));
-        }
-        return ListenableBuilder(
-          listenable: app,
-          builder: (context, _) =>
-              _RationaleContent(result: result, app: app, cardId: cardId),
+  State<_FullEvidenceScreen> createState() => _FullEvidenceScreenState();
+}
+
+class _FullEvidenceScreenState extends State<_FullEvidenceScreen> {
+  late final _request = widget.app.rationale(widget.episodeId);
+  static final _rarePurchase = RegExp(r'^(\d+)일에 (\d+)번 산 드문 물건$');
+
+  String _unusualReason(String reason) {
+    final match = _rarePurchase.firstMatch(reason);
+    return match == null ? reason : '지난 ${match[1]}일 동안 ${match[2]}번 샀어요';
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<wire.Rationale>(
+    future: _request,
+    builder: (context, snapshot) => ListenableBuilder(
+      listenable: widget.app,
+      builder: (context, _) {
+        final result =
+            widget.app.rationaleFor(widget.episodeId) ?? snapshot.data;
+        return EvidencePage(
+          title: '전체 근거',
+          children: result == null
+              ? [
+                  if (snapshot.connectionState != ConnectionState.done)
+                    const Center(
+                      child: CircularProgressIndicator(
+                        semanticsLabel: '준비 이유 불러오는 중',
+                      ),
+                    )
+                  else
+                    const StatusMessage('저장된 이유를 볼 수 없어요.'),
+                ]
+              : _evidence(result, widget.app.episodes[widget.episodeId]),
         );
       },
     ),
   );
-}
 
-class _RationaleContent extends StatelessWidget {
-  const _RationaleContent({
-    required this.result,
-    required this.app,
-    required this.cardId,
-  });
-
-  final wire.Rationale result;
-  final AppController app;
-  final String? cardId;
-
-  @override
-  Widget build(BuildContext context) {
-    final calendar = {
-      for (final event in result.evidence.calendar) event.id: event,
-    };
-    final intents = result.intents.where(
-      (intent) => cardId == null || intent.cardId == cardId,
-    );
-    final unbundled = result.unbundled.where((item) => item.trim().isNotEmpty);
-    if (intents.isEmpty) {
-      // The stored reason can include private purchase-history comparisons.
-      if (result.intents.isEmpty && _hasText(result.noneReason)) {
-        return ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            _sectionHeading(context, '이렇게 알아들었어요'),
-            if (unbundled.isNotEmpty)
-              Text("${unbundled.join(' · ')} 같은 물건을 주문하셨어요."),
-            const Text('이번 주문에 맞춰 집에서 따로 준비할 일은 없어요.'),
-          ],
-        );
-      }
-      return const Center(child: StatusMessage('저장된 이유를 볼 수 없어요.'));
+  List<Widget> _evidence(wire.Rationale result, wire.Episode? episode) {
+    final items = episode?.items ?? const <wire.EpisodeItem>[];
+    final basis = _basisLabelsFor(result, items);
+    final unusual = <String, List<String>>{};
+    for (final entry
+        in result.evidence.unusualItems?.items ??
+            const <wire.UnusualItemsItem>[]) {
+      unusual.putIfAbsent(_unusualReason(entry.why), () => []).add(entry.item);
     }
-
-    final feedback = {
-      for (final observation in result.observations)
-        for (final task in observation.taskFeedback)
-          (observation.cardId, task.taskId): task,
-    };
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        for (final intent in intents) ...[
-          if (_hasText(intent.intentText)) ...[
-            _sectionHeading(context, '이렇게 알아들었어요'),
-            Text(intent.intentText),
-          ],
-          if (_basisSentences(intent, calendar) case final basis
-              when basis.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            _sectionHeading(context, '이렇게 생각했어요'),
-            for (final sentence in basis) _bullet(sentence),
-          ],
-          if (result.tasks
-                  .where(
-                    (task) =>
-                        task.cardId == intent.cardId && _hasText(task.need),
-                  )
-                  .toList()
-              case final tasks when tasks.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            _sectionHeading(context, '그래서 집이 이렇게 준비해요'),
-            for (final task in tasks)
-              _bullet(
-                _taskSentence(
-                  task,
-                  feedback[(task.cardId, task.taskId)],
-                  app.cards[task.cardId]?.lines
-                      .where((line) => line.taskId == task.taskId)
-                      .firstOrNull,
+    final counts = result.evidence.kbCounts ?? const <wire.KbCount>[];
+    final examples = result.evidence.kbExamples;
+    final linked = result.intents
+        .map((intent) => intent.calendarEventId)
+        .toSet();
+    final calendar = result.evidence.calendar.where(
+      (event) => linked.contains(event.id),
+    );
+    return [
+      if (episode != null)
+        EvidenceSection(
+          '주문에서 읽은 것 · ${episode.itemCount}개',
+          child: EvidencePanel(
+            child: Column(
+              spacing: DesignTokens.space4,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (items.isNotEmpty)
+                  KoreanText(
+                    [
+                      for (final item in items)
+                        item.qty == null
+                            ? '${item.type} (수량 미확인)'
+                            : item.qty == 1
+                            ? item.type
+                            : '${item.type} ${item.qty}개',
+                    ].join(' · '),
+                  ),
+                if (setAsideItems(result, episode) case final aside
+                    when aside.isNotEmpty)
+                  EvidenceCaption('${aside.join(' · ')}은 이번 준비와 따로 봤어요.'),
+                if (episode.maskedCount > 0)
+                  EvidenceCaption('가린 물건 ${episode.maskedCount}개'),
+              ],
+            ),
+          ),
+        ),
+      if (unusual.isNotEmpty)
+        EvidenceSection(
+          '평소와 달랐던 물건',
+          child: EvidencePanel(
+            child: EvidenceRows([
+              for (final entry in unusual.entries)
+                KoreanText('${entry.value.join(' · ')} — ${entry.key}'),
+            ]),
+          ),
+        ),
+      if (counts.isNotEmpty || examples.isNotEmpty)
+        EvidenceSection(
+          '비슷한 주문 (다른 집들)',
+          child: EvidencePanel(
+            child: EvidenceRows([
+              if (counts.isNotEmpty)
+                EvidenceChips([
+                  for (final count in counts)
+                    '${similarOrderName(count)} ${count.n}건',
+                ]),
+              for (final example in examples)
+                EvidenceRow(
+                  title:
+                      example.intentText ??
+                      counts
+                          .where((count) => count.intentId == example.intentId)
+                          .map(similarOrderName)
+                          .firstOrNull ??
+                      '비슷한 주문',
+                  detail: [
+                    '${example.overlap.n}개 중 ${example.overlap.k}개가 같아요',
+                    ...example.overlap.items,
+                  ].join(' · '),
                 ),
-              ),
-          ],
-        ],
-        if (unbundled.isNotEmpty) ...[
-          const SizedBox(height: 20),
-          _sectionHeading(context, '이번 준비와 상관없는 물건'),
-          Text(unbundled.join(' · ')),
-        ],
+            ]),
+          ),
+        ),
+      if (result.intents.isNotEmpty)
+        EvidenceSection(
+          '상황 칸과 근거',
+          child: EvidencePanel(
+            child: EvidenceRows([
+              for (final intent in result.intents) ...[
+                if (result.intents.length > 1) KoreanText(intent.intentText),
+                for (final (label, value, sources) in situationSlots(intent))
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: DesignTokens.space48,
+                        child: EvidenceCaption(label),
+                      ),
+                      Expanded(
+                        child: KoreanText(
+                          [
+                            if (value == null || value.trim().isEmpty)
+                              '알 수 없어요'
+                            else ...[
+                              value,
+                              if (basis(sources, productName: label == '테마')
+                                  case final clues when clues.isNotEmpty)
+                                '← ${clues.join(' · ')}',
+                            ],
+                          ].join(' '),
+                          style: label == '테마' && value != null
+                              ? const TextStyle(color: DesignTokens.pinkInk)
+                              : null,
+                        ),
+                      ),
+                    ],
+                  ),
+              ],
+            ]),
+          ),
+        ),
+      if (calendar.isNotEmpty)
+        EvidenceSection(
+          '연결된 일정',
+          child: EvidencePanel(
+            child: EvidenceRows([
+              for (final event in calendar)
+                EvidenceRow(
+                  title: calendarEvidenceLabel(event),
+                  detail: '${event.day} ${event.start}–${event.end}',
+                ),
+            ]),
+          ),
+        ),
+      if (result.intents.isEmpty) ...[
+        if (result.noneReason case final reason? when reason.trim().isNotEmpty)
+          EvidencePanel(child: KoreanText(reason)),
+        if (result.itemTasks.any(
+          (task) => task.text?.trim().isNotEmpty ?? false,
+        ))
+          EvidenceSection(
+            '냉장고 안내',
+            child: EvidencePanel(
+              child: EvidenceRows([
+                for (final task in result.itemTasks)
+                  if (task.text case final detail?
+                      when detail.trim().isNotEmpty)
+                    EvidenceRow(title: task.item, detail: detail),
+              ]),
+            ),
+          ),
       ],
-    );
+    ];
   }
 }
 
-bool _hasText(String? value) => value != null && value.trim().isNotEmpty;
-
-Widget _sectionHeading(BuildContext context, String heading) => Padding(
-  padding: const EdgeInsets.only(bottom: 6),
-  child: Semantics(
-    header: true,
-    child: Text(heading, style: Theme.of(context).textTheme.titleMedium),
-  ),
-);
-
-Widget _bullet(String sentence) => Padding(
-  padding: const EdgeInsets.only(bottom: 6),
-  child: Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const ExcludeSemantics(child: Text('·  ')),
-      Expanded(child: Text(sentence)),
-    ],
-  ),
-);
-
-List<String> _basisSentences(
-  wire.IntentElement intent,
-  Map<String, wire.CalendarElement> calendar,
-) {
-  final situation = intent.situation;
-  final basis = intent.basis;
-  final facetsByItem = <String, Set<String>>{};
-  // General intent evidence does not identify a situation facet.
-  for (final (facet, sources) in [
-    (situation.event, basis.event),
-    (_guestsSentence(situation.guests), basis.guests),
-    (_activitySentence(situation.activity), basis.activity),
-    (_themePhrase(situation.theme), basis.theme),
-  ]) {
-    if (!_hasText(facet)) continue;
-    for (final source in sources) {
-      if (!_hasText(source) ||
-          source == '가구 유형' ||
-          source == intent.calendarEventId ||
-          calendar.containsKey(source)) {
-        continue;
-      }
-      (facetsByItem[source] ??= {}).add(facet!);
-    }
-  }
-  final itemsByFacets = <String, List<String>>{};
-  for (final entry in facetsByItem.entries) {
-    (itemsByFacets[entry.value.join(', ')] ??= []).add(entry.key);
-  }
-  return [
-    for (final id in basis.event.toSet())
-      if (calendar[id] case final event?) ?_calendarSentence(event),
-    for (final entry in itemsByFacets.entries)
-      "${entry.value.join(' · ')} → ${entry.key}",
-  ];
-}
-
-String? _guestsSentence(String? guests) {
-  final match = RegExp(r'^(.+) 여러 명$').firstMatch(guests ?? '');
-  if (match == null) return guests;
-  final subject = match[1]!;
-  return '$subject${_hasFinalConsonant(subject) ? '이' : '가'} 여럿 와요';
-}
-
-String? _activitySentence(String? activity) {
-  final match = RegExp(r'^(.+) 굽고 꾸미기$').firstMatch(activity ?? '');
-  if (match == null) return activity;
-  final object = match[1]!;
-  final particle = object.endsWith('을') || object.endsWith('를')
-      ? ''
-      : _hasFinalConsonant(object)
-      ? '을'
-      : '를';
-  return '$object$particle 굽고 꾸며요';
-}
-
-bool _hasFinalConsonant(String word) {
-  final suffix = word.codeUnitAt(word.length - 1) - 0xAC00;
-  return suffix >= 0 && suffix < 11172 && suffix % 28 != 0;
-}
-
-String? _themePhrase(String? theme) =>
-    !_hasText(theme) || theme!.endsWith('테마') ? theme : '$theme 테마';
-
-String? _calendarSentence(wire.CalendarElement event) {
-  final day = event.day.trim();
-  final tags = event.tags.where(_hasText).join(' · ');
-  final start = DateTime.tryParse('2000-01-01T${event.start}Z');
-  final end = DateTime.tryParse('2000-01-01T${event.end}Z');
-  if (day.isEmpty || tags.isEmpty || start == null || end == null) return null;
-
-  final weekday = koreanWeekdays.where((name) => name[0] == day).firstOrNull;
-  final samePeriod = start.hour ~/ 12 == end.hour ~/ 12 && !end.isBefore(start);
-  final from = koreanClock(
-    start.hour,
-    start.minute,
-    showHourUnit: !samePeriod || end.minute != 0,
-  );
-  final to = koreanClock(end.hour, end.minute, showPeriod: !samePeriod);
-  return "캘린더에 ${weekday ?? day} $from–$to '$tags' 일정이 있어요";
-}
-
-String _taskSentence(
-  wire.Task task,
-  wire.TaskFeedbackElement? feedback,
-  wire.LineElement? current,
-) {
-  final action = _describeActions(task, feedback?.actions ?? const []);
-  final devices = task.devices
-      .map((device) {
-        final type = deviceLabel(device.type);
-        return _hasText(device.room) ? '${device.room} $type' : type;
-      })
-      .toSet()
-      .join(' · ');
-  final description = action ?? devices;
-  final state = switch (current?.state ?? task.state) {
-    wire.LineState.OFF => '꺼 두셨어요',
-    wire.LineState.RUNNING => '진행 중이에요',
-    wire.LineState.DONE => '준비를 마쳤어요',
-    wire.LineState.FAILED => '준비하지 못했어요',
-    final state => visibleLineLabel(state),
-  };
-  final status = [
-    ?state,
-    if (current?.endState == wire.EndState.WITHHELD)
-      endLabel(wire.EndState.WITHHELD),
-  ].join(' · ');
-  return '${task.need}'
-      "${description.isEmpty ? '' : ' — $description'}"
-      "${status.isEmpty ? '' : ' ($status)'}";
-}
-
-String? _describeActions(wire.Task task, List<List<String>> actions) {
-  String? roomFor(String type) {
-    final devices = task.devices.where((device) => device.type == type);
-    if (devices.length != 1) return null;
-    final room = devices.single.room;
-    return _hasText(room) ? room : null;
-  }
-
-  if (actions
-      case [['cooktop', 'child_lock'], [final plug, 'off']] ||
-          [[final plug, 'off'], ['cooktop', 'child_lock']]) {
-    if (_plugName(plug) case final name?) {
-      return '인덕션을 잠그고 $name 전원을 꺼요';
-    }
-  }
-  if (actions
-      case [['display', 'play_mood'], ['light', 'color']] ||
-          [['light', 'color'], ['display', 'play_mood']]) {
-    final room = roomFor('display');
-    if (room != null && room == roomFor('light')) {
-      return '$room 화면과 조명을 바꿔요';
-    }
-  }
-
-  final phrases = <String>[];
-  for (final action in actions) {
-    final phrase = switch (action) {
-      ['cleaner', 'clean'] => "${roomFor('cleaner') ?? ''} 로봇청소기가 청소해요".trim(),
-      ['cooktop', 'child_lock'] => '인덕션을 잠가요',
-      [final plug, 'off'] when _plugName(plug) != null =>
-        '${_plugName(plug)} 전원을 꺼요',
-      ['display', 'play_mood'] => '화면을 분위기에 맞게 바꿔요',
-      ['light', 'color'] => '조명 색을 바꿔요',
-      ['oven', 'set_cook_standby'] => '온도를 맞춰 둘게요. 굽기는 직접 시작해 주세요',
-      ['fridge', 'show_notice'] => '냉장고 화면에 안내를 띄워요',
-      _ => null,
-    };
-    if (phrase == null) return null;
-    phrases.add(phrase);
-  }
-  return phrases.isEmpty ? null : phrases.join('. ');
-}
-
-String? _plugName(String type) {
-  const prefix = 'smart_plug:';
-  if (type.startsWith(prefix) && _hasText(type.substring(prefix.length))) {
-    return type.substring(prefix.length);
-  }
-  return type == 'smart_plug' ? deviceLabel(type) : null;
+List<String> setAsideItems(wire.Rationale result, wire.Episode? episode) {
+  final visibleTypes =
+      episode?.items.map((item) => item.type).toSet() ?? const <String>{};
+  return result.unbundled.toSet().where(visibleTypes.contains).toList();
 }
