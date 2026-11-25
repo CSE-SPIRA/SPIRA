@@ -188,8 +188,11 @@ Polling does not imply guaranteed background delivery.
   projection confirms cancellation and restore outcomes.
 - Render missing WHY as unavailable. Do not regenerate or reconstruct it from
   order, card, execution, or fixture data.
-- Do not log or render the rationale's purchase-history comparison, KB counts,
-  or KB examples in user-facing diagnostics.
+- Keep the WHY chain in order from read items through household context, situation,
+  intent, tasks, and fridge notices. Join item quantities from the episode and
+  line timing from the card. Trace a selected task to its situation by card ID.
+- Keep the rationale's purchase-history comparisons, similar-order counts, and
+  examples out of logs and diagnostics.
 
 The owner also decided that shared household displays such as a refrigerator or
 TV show only item guidance or ambience, never intent text. This cross-surface
