@@ -1,0 +1,46 @@
+{
+  "devices": [
+    {
+      "id": "purifier_01",
+      "type": "purifier",
+      "room": "거실",
+      "substrate": "virtual",
+      "commands": [
+        {"cmd": "mode", "value_schema": {"mode": {"enum": ["auto", "turbo", "sleep"], "default": "auto"}}}
+      ],
+      "events": ["changed"],
+      "never": [],
+      "noisy": false
+    },
+    {
+      "id": "styler_01",
+      "type": "styler",
+      "room": "현관",
+      "substrate": "virtual",
+      "commands": [
+        {"cmd": "set_course_standby", "value_schema": {"course": {"enum": ["standard", "wool_care"], "default": "standard"}}}
+      ],
+      "events": ["changed"],
+      "never": ["start"],
+      "noisy": true
+    },
+    {
+      "id": "aircon_01",
+      "type": "air_conditioner",
+      "room": "거실",
+      "substrate": "virtual",
+      "commands": [
+        {"cmd": "mode", "value_schema": {"mode": {"enum": ["off", "cool", "heat", "auto"], "default": "cool"}}},
+        {"cmd": "target_temp", "value_schema": {"target_temp": {"range": [18, 30], "default": 24}}}
+      ],
+      "events": ["changed"],
+      "never": [],
+      "noisy": false
+    }
+  ],
+  "bindings": {
+    "purifier_01": {"target": "mqtt:purifier_01", "commands": {"mode": {"properties": {"mode": "mode"}}}},
+    "styler_01": {"target": "mqtt:styler_01", "commands": {"set_course_standby": "course_standby"}},
+    "aircon_01": {"target": "mqtt:aircon_01", "commands": {"mode": {"properties": {"mode": "mode"}}, "target_temp": {"properties": {"target_temp": "target_temp"}}}}
+  }
+}

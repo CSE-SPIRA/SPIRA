@@ -1,0 +1,14 @@
+#!/bin/sh
+# One command for the demo stack and App preview. Pass --tagger to enable text tags.
+set -e
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+cd "$ROOT"
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONDONTWRITEBYTECODE=1
+if [ -d /private/tmp ]; then export TMPDIR=/private/tmp; fi
+exec uv --quiet run --no-project --python 3.12 \
+  --with-requirements hub/requirements.txt \
+  --with-requirements hub/tests/fixture_server/requirements.txt \
+  --with-editable contracts/generated/python \
+  --with-editable simulator \
+  python scripts/demo_up.py "$@"
