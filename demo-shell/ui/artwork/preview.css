@@ -1,0 +1,36 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  color: var(--ink);
+  background: var(--paper);
+  font: 16px/1.5 "IBM Plex Sans KR", "Apple SD Gothic Neo", sans-serif;
+  word-break: keep-all;
+}
+main { width: min(100%, 1400px); margin-inline: auto; padding: clamp(16px, 4vw, 48px); }
+header { border-bottom: 1px solid var(--line); padding-bottom: 22px; }
+h1 { margin: 0; font-size: clamp(28px, 4vw, 42px); font-weight: 600; letter-spacing: -.045em; }
+section { margin-top: 32px; }
+h2 { margin: 0 0 12px; font-size: 20px; font-weight: 600; }
+h3 { margin: 14px 0 8px; font-size: 15px; font-weight: 600; }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.grid.examples { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+figure {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--surface);
+}
+figure :is(img, canvas) { width: 100%; height: auto; display: block; background: var(--soft); }
+figure .notice { aspect-ratio: 6 / 7; background: #edf0dc; }
+figcaption { padding: 9px 12px 10px; font: 12px/1.55 ui-monospace, monospace; overflow-wrap: anywhere; }
+.values, .motifs { display: flex; flex-wrap: wrap; gap: 2px 12px; }
+.motifs { margin-top: 3px; }
+.values span, .motifs span { color: var(--muted); }
+.motifs strong { color: var(--ink); font-weight: 500; }
+@media (max-width: 950px) {
+  .grid, .grid.examples { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 450px) {
+  .grid, .grid.examples { grid-template-columns: minmax(0, 1fr); }
+}

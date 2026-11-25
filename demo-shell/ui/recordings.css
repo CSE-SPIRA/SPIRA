@@ -1,0 +1,9 @@
+body{margin:0;background:var(--paper);color:var(--ink);font:16px "IBM Plex Sans KR",sans-serif}
+main{max-width:740px;margin:48px auto;padding:0 20px}
+a{color:var(--green-deep)}
+ul{padding:0;list-style:none}
+li{border-top:1px solid var(--line);padding:16px 0}
+form{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:8px}
+input,button{font:inherit;padding:5px 8px}
+input[type=text]{width:min(240px,100%)}
+small{color:var(--muted);margin-left:10px}

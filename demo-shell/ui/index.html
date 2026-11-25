@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="">
+<title>SPIRA · 주문에서 집까지</title>
+<link rel="stylesheet" href="/demo/shared/tokens.css">
+<link rel="stylesheet" href="/demo/shared/fonts.css">
+<link id="shell-style" rel="stylesheet" href="/demo/assets/demo.css">
+</head>
+<body>
+<div id="frame">
+  <header class="mast">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span>SPIRA</div>
+    <nav class="mast-center segment" aria-label="시연 보기">
+      <button type="button" data-page="reason" aria-pressed="true">판단</button>
+      <button type="button" data-page="house" aria-pressed="false">집</button>
+    </nav>
+    <div class="mast-right">
+      <label class="segment" id="path-control" hidden>시연 경로
+        <select id="demo-path">
+          <option value="house">집까지</option>
+          <option value="plan">계획까지</option>
+        </select>
+      </label>
+      <div class="segment" id="orders" hidden role="group" aria-label="비교할 주문">
+        <button type="button" data-order="birthday" aria-pressed="true">생일 주문</button>
+        <button type="button" data-order="groceries" aria-pressed="false">평소 장보기</button>
+      </div>
+      <time class="mast-clock" id="story-clock" hidden></time>
+      <span class="mast-clock" id="clock-unavailable" role="status" hidden>서버가 시연 시계를 제공하지 않아요.</span>
+    </div>
+  </header>
+  <main class="stage">
+    <aside id="phone-dock" aria-label="휴대전화">
+      <div class="phone-orbit">
+        <span class="owner-tag" id="phone-owner">앱 · 공유</span>
+        <section class="phone" aria-label="SPIRA 앱">
+          <div class="phone-screen">
+            <div class="phone-status"><time id="phone-time"></time><i class="phone-charge" aria-hidden="true"></i></div>
+            <div id="phone-content"></div>
+            <nav class="phone-bar" aria-label="앱 화면">
+              <button type="button" id="phone-order" aria-pressed="true">주문</button>
+              <button type="button" id="phone-map" aria-pressed="false">우리 집</button>
+            </nav>
+          </div>
+        </section>
+      </div>
+    </aside>
+    <div id="right-area">
+      <header class="stage-indicator">
+        <ol id="stage-steps" aria-label="시연 단계"></ol>
+        <p id="stage-beat" aria-live="polite"></p>
+      </header>
+      <section id="reason" aria-label="주문에서 판단까지">
+        <div id="reason-layout">
+          <article id="stage-copy" aria-live="polite"></article>
+        </div>
+      </section>
+      <section id="home" aria-label="입체 집" hidden>
+        <header class="house-head">
+          <div><p class="kicker" id="home-time"></p><h1 id="home-title"></h1></div>
+          <p class="lead" id="home-caption"></p>
+        </header>
+        <figure id="view" class="house-view" aria-label="현관, 거실, 주방의 입체 모형">
+          <p id="house-waiting" role="status">집 상태를 기다려요.</p>
+          <div id="world" class="house-world"></div><div id="viewer-markers"></div>
+          <span class="owner-tag">시뮬레이터 · 집</span>
+          <div class="room-key" role="group" aria-label="카메라 시점">
+            <button type="button" data-room="entrance" aria-pressed="false"></button>
+            <button type="button" data-room="living_room" aria-pressed="false"></button>
+            <button type="button" data-room="kitchen" aria-pressed="false"></button>
+          </div>
+        </figure>
+        <nav aria-label="집 시간표" id="house-timeline">
+          <span class="owner-tag">시뮬레이터 · 집</span><ol id="timeline"></ol>
+          <div id="presenter-controls" aria-label="시연 조작" hidden>
+            <button class="button simple helper" type="button" data-presenter="delivery" data-event="package.brought_in">택배 들이기</button>
+            <button class="button simple helper" type="button" data-presenter="guests_arrive" data-event="guest_arrived">손님 맞이</button>
+            <button class="button simple helper" type="button" data-presenter="mom_light">엄마가 조명 바꾸기</button>
+            <button class="button simple helper" type="button" data-presenter="event_end" data-event="event_end">일정 끝내기</button>
+            <button id="presenter-clock" class="button simple helper" type="button" data-presenter="clock" hidden>다음 시연 시각</button>
+          </div>
+        </nav>
+      </section>
+    </div>
+  </main>
+  <footer class="controls" aria-label="단계 조작">
+    <p id="notice" role="status"></p>
+    <div class="control-right">
+      <button class="button simple helper" type="button" id="previous" aria-keyshortcuts="ArrowLeft" disabled>← 이전</button>
+      <span id="next-share" hidden>먼저 주문을 공유해 주세요</span>
+      <button class="button simple helper" type="button" id="next" aria-keyshortcuts="ArrowRight" aria-describedby="next-share" disabled>다음 →</button>
+    </div>
+  </footer>
+</div>
+<script type="module" src="/demo/assets/demo.js"></script>
+</body>
+</html>
