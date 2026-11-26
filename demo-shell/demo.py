@@ -21,7 +21,6 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from spira_contracts.plan import Action
-from spira_contracts.reaction import Reaction
 
 from recordings import RECORDING_ID, Batch, Label, RecordingStore, directory
 from tagger import TagCache, Tagger
@@ -48,9 +47,8 @@ SHARED_ASSETS = {
 SERVER_READS = (
     re.compile(r"^v1/episodes/ep_[A-Za-z0-9_]+$"),
     re.compile(r"^v1/episodes/ep_[A-Za-z0-9_]+/rationale$"),
-    re.compile(r"^v1/households/h_[A-Za-z0-9_]+/cards$"),
+    re.compile(r"^v1/households/h_[A-Za-z0-9_]+/(cards|episodes)$"),
     re.compile(r"^v1/demo/(clock|moments)$"),
-    re.compile(r"^v1/households/h_[A-Za-z0-9_]+/memory$"),
 )
 SAMPLE_EPISODES = {"birthday": "ep_9031", "groceries": "ep_9150"}
 HOME_ACTIONS = {"delivery", "guests_arrive", "event_end"}
@@ -317,6 +315,7 @@ def create_app():
         cfg = demo_config()
         result = {
             "household_id": cfg["household"],
+            "app_url": os.getenv("DEMO_APP_URL") or None,
             "server": bool(cfg["server"]),
             "hub": bool(cfg["hub"]),
             "fixture": cfg["fixture"],
@@ -392,7 +391,7 @@ def create_app():
         images: list[UploadFile],
         sample: Literal["birthday", "groceries"] | None = Form(default=None),
     ):
-        """Stand-in for the phone's share: send the screenshots as the App would."""
+        """Submit the presenter's sample through the order contract."""
         same_origin(request)
         cfg = demo_config()
         if not cfg["server"]:
@@ -501,33 +500,6 @@ def create_app():
             raise HTTPException(502, "Server clock is unavailable") from error
         return Response(upstream.content, status_code=upstream.status_code,
                         media_type=upstream.headers.get("content-type"))
-
-    @application.post("/demo/api/reaction")
-    async def card_reaction(request: Request):
-        """Forward the App's per-line or per-card intervention."""
-        same_origin(request)
-        cfg = demo_config()
-        if not cfg["server"]:
-            raise HTTPException(503, "DEMO_SERVER_URL is not set")
-        body = await request.json()
-        if not isinstance(body, dict):
-            raise HTTPException(400, "Invalid card reaction")
-        card_id, reaction, task_id = body.get("card_id"), body.get("reaction"), body.get("task_id")
-        if not isinstance(card_id, str) or not re.fullmatch(r"nc_[A-Za-z0-9_]+", card_id):
-            raise HTTPException(400, "card_id is required")
-        if (reaction == "stop" and "task_id" in body) or (reaction != "stop" and task_id is None):
-            raise HTTPException(400, "Invalid card reaction")
-        try:
-            payload = Reaction(reaction=reaction, task_id=task_id)
-        except ValidationError as error:
-            raise HTTPException(400, "Invalid card reaction") from error
-        async with httpx.AsyncClient(timeout=10) as client:
-            upstream = await client.post(
-                f"{cfg['server']}/v1/cards/{card_id}/reactions",
-                json=payload.model_dump(mode="json", exclude_none=True),
-                headers=server_headers(cfg),
-            )
-        return JSONResponse(upstream.json(), status_code=upstream.status_code)
 
     @application.post("/demo/api/person/{action}")
     async def person_action(action: str, request: Request):

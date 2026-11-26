@@ -35,15 +35,11 @@
   <main class="stage">
     <aside id="phone-dock" aria-label="휴대전화">
       <div class="phone-orbit">
-        <span class="owner-tag" id="phone-owner">앱 · 공유</span>
+        <span class="owner-tag">앱</span>
         <section class="phone" aria-label="SPIRA 앱">
           <div class="phone-screen">
-            <div class="phone-status"><time id="phone-time"></time><i class="phone-charge" aria-hidden="true"></i></div>
-            <div id="phone-content"></div>
-            <nav class="phone-bar" aria-label="앱 화면">
-              <button type="button" id="phone-order" aria-pressed="true">주문</button>
-              <button type="button" id="phone-calendar" aria-pressed="false">캘린더</button>
-            </nav>
+            <iframe id="app-preview" title="SPIRA 앱" hidden></iframe>
+            <p id="app-placeholder">앱 미리보기를 켜 주세요</p>
           </div>
         </section>
       </div>
@@ -53,7 +49,7 @@
         <ol id="stage-steps" aria-label="시연 단계"></ol>
         <p id="stage-beat" aria-live="polite"></p>
       </header>
-      <section id="reason" aria-label="주문에서 판단까지">
+      <section id="reason" aria-label="서버 결과">
         <div id="reason-layout">
           <article id="stage-copy" aria-live="polite"></article>
         </div>

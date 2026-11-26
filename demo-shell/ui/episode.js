@@ -1,4 +1,4 @@
-import { readProblem, reactionConfirmed, startedLines } from "./wire.js";
+import { readProblem } from "./wire.js";
 import { createRecorder } from "./run.js";
 
 export function createEpisodeReader(context, ui) {
@@ -21,16 +21,9 @@ export function createEpisodeReader(context, ui) {
       for (const card of cards) {
         if (card.episode_id !== id || Date.parse(card.updated_at) < Date.parse(current.get(card.card_id)?.updated_at)) continue;
         current.set(card.card_id, card);
-        const key = JSON.stringify([card.card_id, card.updated_at]);
-        if (!REPLAY && card.notify && !state.dismissed.has(key)) state.notifications.add(key);
       }
       state.cards = [...current.values()];
-      const pending = state.reactionPending;
-      if (pending && (state.episode?.status === "closed" || reactionConfirmed(current.get(pending.cardId), pending))) {
-        state.reactionPending = null;
-      }
     }
-    state.started = startedLines(state.started, state.cards, state.rationale?.executions);
     ui.reasoning.refreshChain();
     ui.presenter.resolveHouseLink();
   }
@@ -74,11 +67,6 @@ export function createEpisodeReader(context, ui) {
       state.shownAt = null;
       state.cards = [];
       state.cardCursor = null;
-      state.notifications.clear();
-      state.started = new Set();
-      state.reactionPending = null;
-      state.controlError = "";
-      state.houseOnReceipt = state.memoryOpen = false;
       state.finalMemory = state.recordRequested = state.recordVisible = state.recordFinished = false;
       state.quietEnd = null;
       state.waiting = undefined;
@@ -112,12 +100,48 @@ export function createEpisodeReader(context, ui) {
         ui.presenter.moveClockTo(QUIET_END, { episodeId: id, signal: controller.signal }).catch(() => {});
       }
       if (state.episode?.status === "read_failed") return;
-      if (state.episode?.status === "closed" && ui.phone.recordReady()) return;
+      if (state.episode?.status === "closed" && ui.record.ready()) return;
       if (state.chain.cardReady && state.chain.hasEpisode &&
         (state.judgment.some(({ id }) => id === "tasks") || ui.reasoning.missingJudgment())) return;
       if (!state.config.fixture && state.chain.cardReady && state.readProblems.rationale) return;
       await sleep(1000);
       if (controller.signal.aborted) return;
+    }
+  }
+
+  function followOrder(id, share) {
+    state.draft = false;
+    state.draftPath = null;
+    state.houseLink = state.recordLink = null;
+    void readEpisode(id, share);
+    ui.reasoning.setStep(ui.reasoning.reasonStep("extract"));
+    if (state.page === "house") ui.presenter.showPage("reason");
+    ui.reasoning.autoAdvance();
+  }
+
+  async function watchOrders() {
+    const path = `/demo/api/server/v1/households/${encodeURIComponent(state.config.household_id)}/episodes?limit=100`;
+    const seen = new Set();
+    let initialized = false;
+    for (;;) {
+      const { reader } = state;
+      try {
+        const { episodes } = await api(path, { signal: AbortSignal.timeout(4000) });
+        if (reader === state.reader && !state.sharing && !state.resetting && Array.isArray(episodes)) {
+          // Fixture samples can rewind the story clock, so use episode identity to spot new orders.
+          const order = initialized ? episodes.find(({ episode_id }) => !seen.has(episode_id))
+            : state.episodeId ? null : episodes.find(({ status }) => status !== "closed");
+          initialized = true;
+          for (const { episode_id } of episodes) seen.add(episode_id);
+          if (order && order.episode_id !== state.episodeId) {
+            followOrder(order.episode_id, { data: { episode_id: order.episode_id, status: order.status },
+              at: ui.recording.stamp(Date.parse(order.shared_at)), demoPath: state.draftPath });
+          }
+        }
+      } catch (error) {
+        if ([404, 405, 501].includes(error.status)) return;
+      }
+      await sleep(1000);
     }
   }
 
@@ -213,6 +237,6 @@ export function createEpisodeReader(context, ui) {
   }
 
   return {
-    readEpisode, refreshCards, readTags, refreshMemory,
+    readEpisode, followOrder, watchOrders, refreshCards, readTags, refreshMemory,
   };
 }

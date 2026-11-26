@@ -25,9 +25,9 @@ function scheduleEnd({ cards, intents, evidence }, guestWindows) {
 }
 
 export function buildPresenterCues({ path, chain, timeline = [], published = [], guestWindows = {}, clock }) {
-  const cues = [{ id: "share", label: "공유" }, { id: "card", label: "준비 카드" }];
+  const cues = [{ id: "share", label: "공유" }];
   if (path !== "house") return cues;
-  cues.push({ id: "house", label: "우리 집" });
+  cues.push({ id: "house", label: "집으로" });
   const moments = [];
   const eventTime = (type) => published.map(({ at, event }) => event === type ? Date.parse(at) : NaN)
     .find(Number.isFinite);
@@ -71,6 +71,6 @@ export function buildPresenterCues({ path, chain, timeline = [], published = [],
       label: clock && endTarget !== undefined ? `${clockLabel(endTarget)} 일정 끝내기` : "일정 끝내기" });
   }
   cues.push(...moments.sort((a, b) => a.at - b.at));
-  if (cues.some(({ id }) => id === "event_end")) cues.push({ id: "record", label: "캘린더" });
+  if (cues.some(({ id }) => id === "event_end")) cues.push({ id: "record", label: "기록" });
   return cues;
 }

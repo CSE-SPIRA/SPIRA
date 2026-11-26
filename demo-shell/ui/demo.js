@@ -6,7 +6,8 @@ import { JUDGMENT_STAGES } from "./judgment.js";
 import { replayFrames } from "./run.js";
 import { worldFacts } from "./scene-rules.js";
 import { createReasoning } from "./reasoning.js";
-import { createPhone } from "./phone.js";
+import { createOrderShare } from "./order-share.js";
+import { createHouseRecord } from "./house-record.js";
 import { createEpisodeReader } from "./episode.js";
 import { createHouseTimeline } from "./house-timeline.js";
 import { createPresenter } from "./presenter.js";
@@ -21,7 +22,7 @@ const query = new URLSearchParams(location.search);
 const RECORDING = query.get("recording");
 const REPLAY = Boolean(RECORDING) || query.get("replay") === "1";
 const QUIET_END = { event: "judgment.quiet_end" };
-const OWNERS = { share: "앱 · 공유", card: "앱 · 카드", calendar: "앱 · 캘린더", server: "서버 창" };
+const OWNERS = { server: "서버 창" };
 
 const defaultPath = (episode) => episode === "ep_9031" ? "house" : "plan";
 
@@ -29,9 +30,8 @@ const state = {
   config: null, scenes: null, flow: null, house: null, scale: 1, page: "reason",
   order: "birthday", draft: false, step: 0, sharing: false,
   runPath: null, draftPath: null, tags: [],
-  episodeId: null, episode: null, rationale: null, rationaleMissing: false, judgment: [], cards: [], capture: null, reader: null,
-  cardOpen: false, notifications: new Set(), dismissed: new Set(), started: new Set(),
-  reactionPending: null, controlError: "", sharedEpisode: null, recordOpen: false, recordRequested: false, recordVisible: false,
+  episodeId: null, episode: null, rationale: null, rationaleMissing: false, judgment: [], cards: [], reader: null,
+  sharedEpisode: null, recordRequested: false, recordVisible: false,
   quietEnd: null, quietRamped: new Set(), clockMissing: false, clockMoments: false,
   readProblems: {}, cardsRead: false,
   auto: null, shownAt: null, homeId: "plan", followGuest: false, homeBusy: false, hub: null, snapshot: null, houseMarkup: "", chain: buildChain(),
@@ -55,7 +55,7 @@ async function observe(kind, path, options, { text = false, transform = (value) 
     }
     return data;
   } catch (error) {
-    if (["episode", "rationale", "cards", "memory", "hub"].includes(kind)) retryNotice(error, reader);
+    if (["episode", "rationale", "cards", "hub"].includes(kind)) retryNotice(error, reader);
     throw error;
   }
 }
@@ -95,8 +95,6 @@ async function exchange(path, options) {
 
 const AUTO_PLAY = !RECORDING && query.get("auto") === "1";
 
-const PHONE_CLOCK = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
-
 function decorateHouseLabel(marker, { focused, moment }) {
   const label = marker.firstElementChild;
   const resting = !focused && !marker.hasAttribute("data-changed");
@@ -126,7 +124,7 @@ async function refreshSnapshot() {
   if (state.page === "house") {
     ui.house.renderTimeline();
     void loadHouse();
-  } else ui.phone.renderPhone();
+  }
   revealHouseState();
 }
 
@@ -260,6 +258,20 @@ async function loadHouse() {
   revealHouseState();
 }
 
+function embedApp(address) {
+  if (!address) return;
+  let url;
+  try {
+    url = new URL(address);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return;
+  } catch {
+    return;
+  }
+  $("app-preview").src = url.href;
+  $("app-preview").hidden = false;
+  $("app-placeholder").hidden = true;
+}
+
 async function boot() {
   const [source, sceneData, itemTypes] = await Promise.all([
     api(RECORDING ? `/demo/api/recordings/${encodeURIComponent(RECORDING)}` : "/demo/api/config", {
@@ -271,6 +283,7 @@ async function boot() {
   state.scenes = sceneData;
   state.itemTypes = itemTypes;
   state.config = RECORDING ? { household_id: source.household_id, story_timing: source.story_timing } : source;
+  embedApp(state.config.app_url);
   const stages = state.scenes.reason;
   state.scenes.reason = stages.flatMap((scene) => {
     const beats = JUDGMENT_STAGES[scene.id] ?? [];
@@ -304,8 +317,8 @@ async function boot() {
   const inHouse = id && (query.get("page") === "house" || requested === 6 || requested === 7);
   const step = ui.reasoning.reasonStep(inHouse ? "plan" : stage.id);
   state.houseLink = inHouse ? { record: requested === 7 } : null;
-  state.cardOpen = Boolean(id && (inHouse || step >= ui.reasoning.reasonStep("plan")));
   if (id) ui.episode.readEpisode(id);
+  else if (state.config.server && !REPLAY) void ui.episode.watchOrders();
   ui.reasoning.setStep(step);
   if (id && !inHouse && (REPLAY || !query.has("step"))) ui.reasoning.autoAdvance();
   if (!state.config.server) notice("서버 연결 없음");
@@ -314,7 +327,7 @@ async function boot() {
 }
 
 const context = {
-  OWNERS, state, $, AUTO_PLAY, sleep, REPLAY, RECORDING, PHONE_CLOCK, notice, exchange,
+  OWNERS, state, $, AUTO_PLAY, sleep, REPLAY, RECORDING, notice, exchange,
   defaultPath, api, QUIET_END, observe,
 };
 // Each viewer run owns its state and timers. Controllers call through this table after setup.
@@ -322,9 +335,13 @@ const ui = {
   surface: { revealHouseState, refreshSnapshot, refreshHouseMarkers, loadHouse, applyHouseMarkers, checkHouseBeforeShare },
 };
 ui.reasoning = createReasoning(context, ui);
-ui.phone = createPhone(context, ui);
+ui.order = createOrderShare(context, ui);
+ui.record = createHouseRecord(context, ui);
 ui.episode = createEpisodeReader(context, ui);
-ui.house = createHouseTimeline(context, ui);
+// Keep the house timeline's existing render hook while the house renderer is updated separately.
+ui.house = createHouseTimeline(context, Object.assign(Object.create(ui), {
+  phone: { renderEnding: ui.record.render, renderPhone() {} },
+}));
 ui.presenter = createPresenter(context, ui);
 ui.recording = createRecordingPlayback(context, ui);
 
