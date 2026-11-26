@@ -1,0 +1,21 @@
+{
+  "generic": {"icon": "generic", "storage": "미확인"},
+  "딸기": {"icon": "strawberry", "storage": "냉장", "props": [{"slot": "strawberry", "anchor": "kitchen", "placement": "counter"}]},
+  "컵케이크 믹스": {"icon": "cake_mix", "storage": "실온"},
+  "휘핑크림": {"icon": "cream", "storage": "냉장", "props": [{"slot": "cream", "anchor": "kitchen", "placement": "counter"}]},
+  "세탁 세제": {"icon": "detergent", "storage": "실온"},
+  "로션": {"icon": "lotion", "storage": "실온"},
+  "풍선": {"icon": "balloon", "storage": "실온", "props": [
+    {"slot": "balloon", "anchor": "living_room", "placement": "bunch", "countPerUnit": 7},
+    {"slot": "balloon", "anchor": "living_room", "placement": "floor", "countPerUnit": 3}
+  ]},
+  "케이크 토퍼": {"icon": "cake_topper", "storage": "실온", "props": [{"slot": "cake_topper", "anchor": "kitchen"}]},
+  "고깔모자": {"icon": "party_hat", "storage": "실온", "props": [{"slot": "party_hat", "anchor": "kitchen"}]},
+  "아이싱 펜": {"icon": "icing_pen", "storage": "실온"},
+  "우유": {"icon": "milk", "storage": "냉장"},
+  "계란": {"icon": "egg", "storage": "냉장"},
+  "과일": {"icon": "fruit", "storage": "냉장"},
+  "채소": {"icon": "vegetable", "storage": "냉장"},
+  "바지락": {"icon": "fish", "storage": "냉장"},
+  "주방 세제": {"icon": "detergent", "storage": "실온"}
+}

@@ -1,0 +1,122 @@
+import { esc, rows } from "./markup.js";
+import { findTag, highlightsMarkup, itemIcon } from "./tags.js";
+
+export function quantityCards(items, itemTypes) {
+  return `<div class="item-grid">${rows(items, (item) => `<div class="item-tile" data-item="${esc(item.sourceId)}" data-type="${esc(item.id)}">
+    ${itemIcon(itemTypes, item.id)}
+    <div><strong>${esc(item.id)}</strong><small>${esc(item.name)}</small><small class="item-why" hidden></small></div>
+    <span class="count">${item.qty == null ? "수량 미확인" : esc(item.qty) + "개"}</span>
+  </div>`)}</div>`;
+}
+
+const COMPARISON = {
+  off: "이 집의 평소 주문 비교가 꺼져 있어요.",
+  insufficient: "평소 주문이 적어 비교할 수 없어요.",
+  all_usual: "모두 평소에 사는 물건이에요.",
+};
+
+export function comparisonText(comparison) {
+  return COMPARISON[comparison?.status ?? "off"] ?? "평소와 다른 물건";
+}
+
+export function itemComparison(comparison, type) {
+  const unusual = comparison?.items?.find(({ item }) => item === type);
+  if (unusual) return { kind: "unusual", label: reasonLabel(unusual.why) };
+  if (comparison?.status === "all_usual" || comparison?.usual?.includes(type)) {
+    return { kind: "usual", label: "평소 사던 것" };
+  }
+  return { kind: "", label: "" };
+}
+
+function reasonLabel(reason) {
+  if (reason === "이 집이 산 적 없는 종류") return "평소 안 사던 품목";
+  if (/^\d+일에 \d+번 산 드문 물건$/.test(reason)) return "드물게 사던 품목";
+  const quantities = /^(?:평소) (\d+(?:\.\d+)?)개 → 이번 (\d+)개$/.exec(reason);
+  if (quantities && Number(quantities[2]) > Number(quantities[1])) return "평소보다 많음";
+  return reason;
+}
+
+function eventLabel({ day, tags }) {
+  return [day, ...tags].join(" ");
+}
+
+export function calendarTimes({ day, start, end, days_after }) {
+  const relative = days_after === 0 ? "당일" : `${Math.abs(days_after)}일 ${days_after > 0 ? "뒤" : "전"}`;
+  return `${day} ${start}–${end} · ${relative}`;
+}
+
+function chip(label, kind = "") {
+  return `<span class="clue${kind ? ` ${kind}` : ""}">${esc(label)}</span>`;
+}
+
+export function calendarMarkup(candidates, calendarUse, items = []) {
+  return `<h2>가까운 일정</h2>${candidates.length ? rows(candidates, (event) => {
+    const used = calendarUse?.find((entry) => entry.event.id === event.id);
+    return `<div class="calendar-row"${used ? ' data-used' : ""}>
+      <div>${event.tags.length ? `<b>${esc(event.tags.join(" · "))}</b>` : ""}
+        ${used ? '<small class="calendar-status">판단에 사용</small>' : ""}</div>
+      <time>${esc(calendarTimes(event))}</time>
+      ${used?.items.length ? `<div class="calendar-links">${rows(used.items, (item) => basisChip(item, items, candidates))}</div>` : ""}
+    </div>`;
+  }) : '<p class="subtext">가까운 일정 후보가 없어요.</p>'}`;
+}
+
+export function similarMarkup({ counts, examples, note }) {
+  return `<h2>비슷한 다른 집 주문</h2>
+    ${counts?.length ? `<p class="retrieval-key">${rows(counts, ({ name, n }) =>
+      `<span>${esc(name)} <b>${esc(n)}건</b></span>`)}</p>` : ""}
+    ${rows(examples, ({ intent_text, intent_id, items, overlap }) => `<div class="example">
+      <strong>${esc(intent_text || counts?.find((count) => count.intent_id === intent_id)?.name || "비슷한 주문")}</strong>
+      <span class="pill">${esc(overlap.n)}개 중 ${esc(overlap.k)}개 같음</span>
+      <p>${rows(items, (item) => overlap.items.includes(item) ? `<mark>${esc(item)}</mark>` : `<span>${esc(item)}</span>`)}</p>
+    </div>`)}
+    ${note ? `<p class="subtext">${esc(note)}</p>` : ""}
+    ${!counts?.length && !examples.length && !note ? '<p class="subtext">표시할 비슷한 사례가 없어요.</p>' : ""}`;
+}
+
+function basisChip(id, items, calendar, theme = false) {
+  const event = calendar.find((entry) => entry.id === id);
+  const item = items.find((entry) => [entry.id, entry.sourceId, entry.name].includes(id));
+  const label = event ? eventLabel(event) : (theme ? item?.name : item?.id) ?? id;
+  return chip(label, event ? "calendar-clue" : id === "가구 유형" ? "household-clue" : "");
+}
+
+export function slotsMarkup(groups, items, calendar, tags = []) {
+  return `<h2>근거에서 읽은 상황</h2>${rows(groups, (slots) => `<div class="proof-rows">
+    ${rows(slots, ({ key, label, value, basis }, index) => `<div class="proof-row" style="--wait:${index * 100}ms">
+      <div class="proof-source">${rows(basis, (id) =>
+        `<div class="proof-link">${basisChip(id, items, calendar, key === "theme")}<i class="thread" aria-hidden="true"></i></div>`)}</div>
+      <div class="situation${key === "theme" && value ? " theme" : ""}"><small>${label}</small>${highlightsMarkup(value || "—", findTag(tags, "slot", key, value))}</div>
+    </div>`)}
+  </div>`)}`;
+}
+
+export function paintTheme(text, theme) {
+  const index = theme ? text.indexOf(theme) : -1;
+  if (index < 0) return esc(text);
+  return esc(text.slice(0, index)) + `<span class="theme-text">${esc(theme)}</span>` + esc(text.slice(index + theme.length));
+}
+
+export function intentMarkup({ intents, reason, unbundled }, items, calendar, tags = []) {
+  const verdicts = intents.length ? rows(intents, (intent) => `<div class="verdict">
+    <small>주문의 의도</small><h2>${highlightsMarkup(intent.intent_text, findTag(tags, "intent", intent.intent_id, intent.intent_text))}</h2>
+    ${intent.basis.intent.length ? `<div class="intent-basis">${rows(intent.basis.intent, (id) => basisChip(id, items, calendar))}</div>` : ""}
+  </div>`) : `<div class="verdict"><h2>의도 없음</h2><p>${esc(reason)}</p></div>`;
+  return verdicts + (unbundled.length ? `<div class="basis-note"><b>준비와 따로 본 물건</b>
+    <span>${rows(unbundled, (item) => chip(item))}</span></div>` : "");
+}
+
+export function judgmentBeatLine(beat) {
+  switch (beat?.id) {
+    case "items": return `물건 ${beat.items.length}종 읽음`;
+    case "unusual": return beat.comparison?.status === "list"
+      ? `평소와 다른 물건 ${beat.comparison.items?.length ?? 0}종` : comparisonText(beat.comparison);
+    case "calendar": return `가까운 일정 후보 ${beat.candidates.length}건`;
+    case "similar": return beat.counts?.length
+      ? `비슷한 다른 집 주문 ${beat.counts.reduce((total, { n }) => total + n, 0)}건` : "";
+    case "slots": return `상황 단서 ${beat.groups.flat().filter(({ value }) => value).length}개`;
+    case "intent": return beat.intents.length ? `의도 ${beat.intents.length}개` : "의도 없음";
+    case "tasks": return [`할 일 ${beat.count}개`, beat.itemTaskCount && `냉장고 안내 ${beat.itemTaskCount}개`].filter(Boolean).join(" · ");
+    default: return "";
+  }
+}
