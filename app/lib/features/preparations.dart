@@ -8,6 +8,7 @@ import '../contracts.dart' as wire;
 import '../design_tokens.g.dart';
 import '../korean_text.dart';
 import '../theme.dart';
+import 'calendar.dart';
 import 'labels.dart';
 import 'order_extraction.dart';
 import 'memory_sheet.dart';
@@ -83,6 +84,7 @@ class Preparations extends StatelessWidget {
                   cardIds: app.mainMemoryCardIds,
                   onAcknowledge: app.acknowledgeMemory,
                 ),
+              if (orderId == null && memory == null) _RecentMemories(app: app),
               for (final (index, card) in cards.indexed)
                 if (app.isMemory(card))
                   MemorySheet(
@@ -153,7 +155,9 @@ class _OrderPanelState extends State<_OrderPanel> {
         if (!widget.collapsible || _expanded) ...[
           if (!widget.collapsible)
             KoreanText('주문', style: theme.textTheme.headlineMedium),
-          if (app.pickImages != null)
+          if (app.pickImages != null && orderId == null)
+            _UploadBox(app: app)
+          else if (app.pickImages != null)
             Align(
               alignment: Alignment.centerLeft,
               child: _galleryButton(app, secondary: widget.collapsible),
@@ -190,6 +194,8 @@ class _OrderPanelState extends State<_OrderPanel> {
                   app.accepted.contains(orderId) ||
                   app.orderImages(orderId).isNotEmpty,
             )
+          else if (app.pickImages != null)
+            const SizedBox.shrink()
           else if (app.platform != null) ...[
             const KoreanText('쇼핑 앱에서 주문 화면을 공유하면, 그 주문에 맞춰 집을 준비해요.'),
             const KoreanText('주문 화면을 캡처하고 공유 메뉴에서 SPIRA를 선택해 주세요.'),
@@ -209,6 +215,153 @@ class _OrderPanelState extends State<_OrderPanel> {
     return secondary
         ? OutlinedButton.icon(onPressed: select, icon: icon, label: label)
         : FilledButton.icon(onPressed: select, icon: icon, label: label);
+  }
+}
+
+// Before an order: a large box to send the order screenshots (gallery on Android, file picker on the web).
+class _UploadBox extends StatelessWidget {
+  const _UploadBox({required this.app});
+
+  final AppController app;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final select = app.pickingImages || app.hasPendingSelection
+        ? null
+        : app.chooseOrderImages;
+    return Semantics(
+      button: true,
+      label: '주문 분석하기',
+      child: Material(
+        key: const ValueKey('upload-box'),
+        color: colors.surfaceContainerLow,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(DesignTokens.radius8 * 2),
+          side: BorderSide(color: colors.primary, width: 1.5),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: select,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              vertical: DesignTokens.space32,
+              horizontal: DesignTokens.space20,
+            ),
+            child: Column(
+              spacing: DesignTokens.space12,
+              children: [
+                CircleAvatar(
+                  radius: 32,
+                  backgroundColor: colors.primary,
+                  foregroundColor: colors.onPrimary,
+                  child: app.pickingImages
+                      ? const SizedBox.square(
+                          dimension: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.add, size: 36),
+                ),
+                KoreanText('주문 분석하기', style: theme.textTheme.titleLarge),
+                KoreanText(
+                  '온라인 주문 화면 캡처를 올려 주세요 (1~3장)',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colors.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Below the upload box: this home's recent memories as cards. Preparation memories (closed orders with cards,
+// as on Calendar) first, then recent orders without cards, five at most.
+class _RecentMemories extends StatelessWidget {
+  const _RecentMemories({required this.app});
+
+  final AppController app;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final prepared = app.memoryDates.toList()
+      ..sort((a, b) => b.startsAt.compareTo(a.startsAt));
+    final shown = prepared.take(5).toList();
+    final memoryIds = {for (final m in prepared) m.episodeId};
+    final orders = app.recentHistory
+        .where((row) => !memoryIds.contains(row.episodeId))
+        .take(5 - shown.length)
+        .toList();
+    String day(String raw) {
+      final d = seoulDay(raw);
+      return '${d.month}월 ${d.day}일';
+    }
+
+    Widget tile({
+      required Key key,
+      required IconData icon,
+      required String title,
+      required String subtitle,
+      VoidCallback? onTap,
+    }) => Card(
+      key: key,
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      color: colors.surfaceContainerLow,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(DesignTokens.radius8 * 1.5),
+        side: BorderSide(color: colors.outlineVariant),
+      ),
+      child: ListTile(
+        leading: Icon(icon, color: colors.primary),
+        title: KoreanText(title),
+        subtitle: KoreanText(subtitle),
+        trailing: onTap == null ? null : const Icon(Icons.chevron_right),
+        onTap: onTap,
+      ),
+    );
+
+    return Column(
+      key: const ValueKey('recent-memories'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: DesignTokens.space8,
+      children: [
+        KoreanText('최근 이 집의 기억', style: theme.textTheme.titleMedium),
+        if (shown.isEmpty && orders.isEmpty)
+          const KoreanText('아직 쌓인 기억이 없어요.'),
+        for (final memory in shown)
+          tile(
+            key: ValueKey('recent-memory-${memory.episodeId}'),
+            icon: Icons.event_available_outlined,
+            title: '${day(memory.startsAt)} · 준비 기억',
+            subtitle: '그날의 준비와 집의 반응',
+            onTap: () => showModalBottomSheet<void>(
+              context: context,
+              isScrollControlled: true,
+              useSafeArea: true,
+              showDragHandle: true,
+              builder: (context) => MemoryDetailSheet(app, memory),
+            ),
+          ),
+        for (final row in orders)
+          tile(
+            key: ValueKey('recent-order-${row.episodeId}'),
+            icon: Icons.shopping_bag_outlined,
+            title: '${day(row.sharedAt)} · 주문',
+            subtitle: switch (app.episodes[row.episodeId]) {
+              final episode? when episode.items.isNotEmpty =>
+                episode.items.map((item) => item.type).take(4).join(', '),
+              _ => '품목 ${row.itemCount}개',
+            },
+          ),
+      ],
+    );
   }
 }
 

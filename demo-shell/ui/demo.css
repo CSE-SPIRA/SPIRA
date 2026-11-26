@@ -401,3 +401,37 @@ h1{font-size:var(--size-60);line-height:1.11;letter-spacing:-.065em;font-weight:
 /* The App's web build in the phone */
 #phone-app{position:absolute;inset:0;width:100%;height:100%;border:0;background:var(--surface)}
 .app-phone .phone-screen > :not(#phone-app){display:none}
+/* Server log fills the right area (11-27); no sideways scroll */
+#stage-copy:has(.server-log){height:100%;display:flex;flex-direction:column;padding-bottom:14px;box-sizing:border-box}
+.server-log{flex:1;min-height:0;max-height:none}
+.log-body{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden}
+.log-line{grid-template-columns:96px 250px minmax(0,1fr);font-size:16px}
+.log-line > span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.log-row > div{min-width:0;overflow-wrap:anywhere}
+.log-task{grid-template-columns:130px minmax(0,1fr) auto}
+.log-task > span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Look A: console tint, finished stages as grey bands, current stage as a white card */
+.look-a .server-log{background:#e9ede8;border-color:#cdd5cf}
+.look-a .log-body{gap:6px}
+.look-a .log-line{background:#f6f7f3;border:1px solid #dde3de;border-radius:6px;padding:8px 12px}
+.look-a .log-next{background:transparent;border-style:dashed}
+.look-a .log-current{background:#fff;box-shadow:0 2px 10px #1f3d3314;border-color:#c5d3ca}
+
+/* Look A head: a dark server-window title bar with a status dot (green live, blue replay) */
+.look-a .log-head{background:#1a211e;border-bottom:0;color:#a9b4ae;padding:11px 18px}
+.look-a .log-head b{color:#eef3f0;display:inline-flex;align-items:center;gap:9px}
+.look-a .log-head b::before{content:"";width:9px;height:9px;border-radius:50%;background:#4fd18b;box-shadow:0 0 0 3px #4fd18b33;animation:log-pulse 1.6s ease-in-out infinite}
+.look-a .is-replay .log-head b::before{background:#7fa6ff;box-shadow:0 0 0 3px #7fa6ff33;animation:none}
+.look-a .log-badge{background:#c2412d}
+.look-a .log-badge.replay{background:#33415f;color:#cfdcff}
+.look-a .log-keep{background:transparent;color:#4fd18b;border-color:#4fd18b}
+.look-a .log-kept{color:#4fd18b}
+@keyframes log-pulse{50%{opacity:.35}}
+.look-a .log-head{font-size:15px}
+.look-a .log-head b{font-size:16px}
+#stage-steps li.done{cursor:pointer}
+/* Idle console (before an order) */
+.log-badge.idle{background:#3c4a43;color:#d8e4dd}
+.log-idle header b{font-size:19px}
+.look-a .is-idle .log-head b::before{background:#e7c35a;box-shadow:0 0 0 3px #e7c35a33}

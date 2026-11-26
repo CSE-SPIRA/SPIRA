@@ -54,7 +54,22 @@ export function createAppPhone(context, ui) {
     ui.reasoning.autoAdvance();
   }
 
+  // The idle console's "what the Server knows" (refreshed while no order is shown).
+  let statusReadAt = 0;
+  async function readStatus() {
+    if (state.episodeId || Date.now() - statusReadAt < 10000) return;
+    statusReadAt = Date.now();
+    try {
+      state.homeStatus = await api(
+        `/demo/api/server/v1/demo/households/${encodeURIComponent(state.config.household_id)}/status`);
+      if (!state.episodeId) ui.reasoning.renderReason();
+    } catch {
+      // Shown as "서버 연결 확인" until a read works.
+    }
+  }
+
   async function poll() {
+    void readStatus();
     try {
       const path = `/demo/api/server/v1/households/${encodeURIComponent(state.config.household_id)}/episodes?limit=5`;
       const { episodes = [] } = await api(path);

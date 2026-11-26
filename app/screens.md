@@ -33,6 +33,8 @@ Source: [main.dart](lib/main.dart), [app_controller.dart](lib/app_controller.dar
 
 A household configured at build time (`SPIRA_HOUSEHOLD_ID`, for example the household made by the Server's demo home script) opens directly on Main; setup is skipped. `SPIRA_FIRST_RUN=1` forces setup.
 
+The order on Main is the one this phone shared, else the newest order that is not `closed` (in progress or with open cards, also when shared from another phone or the presenter). Closed orders (for example the demo home's past orders) are not shown as the current order; they appear under 최근 이 집의 기억.
+
 The bottom navigation has three tabs: `메인`, `캘린더`, `우리 집`.
 
 ## Setup (first run)
@@ -67,9 +69,12 @@ Source: [preparations.dart](lib/features/preparations.dart), [order_extraction.d
 +----------------------------------+
 | SPIRA                            |
 | 주문                              |
-| [ 주문 분석하기 ]                   |
-| Order area (empty / wait /       |
-|   items / collapsed row)         |
+| No order: large upload box (+)   |
+|   주문 분석하기                     |
+|   + 최근 이 집의 기억 (cards)        |
+| After a share: [ 주문 분석하기 ]     |
+| Order area (wait / items /       |
+|   collapsed row)                 |
 | Card (title, date, lines)        |
 | or memory sheet                  |
 +----------------------------------+
@@ -83,6 +88,7 @@ Source: [preparations.dart](lib/features/preparations.dart), [order_extraction.d
 | --- | --- | --- | --- |
 | No order yet (Android) | — | `쇼핑 앱에서 주문 화면을 공유하면, 그 주문에 맞춰 집을 준비해요.` / `주문 화면을 캡처하고 공유 메뉴에서 SPIRA를 선택해 주세요.` | `주문 분석하기` (gallery, 1–3 images). Preview: `예시 주문으로 공유` (`주문을 보내는 중…` while sending). |
 | No order yet (other) | — | `주문 화면을 보내면 필요한 준비를 찾아드려요.` | `주문 분석하기`. |
+| No order yet, images can be picked (Android gallery, web file picker) | — | A large bordered box with a `+` circle, `주문 분석하기` and `온라인 주문 화면 캡처를 올려 주세요 (1~3장)` instead of the button and the lines above; below it **최근 이 집의 기억**: up to five cards, preparation memories first (closed orders with cards, as on Calendar; tap opens the memory sheet), then recent orders without cards (`M월 D일 · 주문`, item types when the order was read, else `품목 N개`); `아직 쌓인 기억이 없어요.` when none. | Tap the box. |
 | Sending | Upload in flight | `공유한 주문을 보내는 중이에요…` | None. |
 | Offline share | Upload queued | `연결되면 공유한 주문을 보낼게요.` | Sent automatically on reconnect. |
 | Share rejected | 4xx from `POST /v1/orders` or image checks | One of `주문 화면을 한 번에 1~3장 공유해 주세요.`, `이미지 한 장은 5MB 이하여야 해요.`, `JPG 또는 PNG 주문 화면을 공유해 주세요.`, `서버가 이미지를 읽을 수 없어요. 새 캡처를 공유해 주세요.`, `공유한 이미지를 열 수 없어요. 주문 화면을 다시 공유해 주세요.`; gallery: `사진을 1~3장 골라 주세요.`, `선택한 사진을 열 수 없어요. 다시 골라 주세요.`; generic `주문을 보내지 못했어요. 다시 시도해 주세요.` | `다시 시도`, `다시 보내기`, `선택 취소`. |

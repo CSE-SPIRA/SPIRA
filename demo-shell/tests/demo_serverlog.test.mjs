@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { serverLog, stageFinished } from "../ui/serverlog.js";
+import { idleLog, serverLog, stageFinished } from "../ui/serverlog.js";
 import { clearAppStore, newestNew } from "../ui/app-phone.js";
 import { replayAt, replayFromQuery, replayHref, replayMenu } from "../ui/replays.js";
 
@@ -28,13 +28,13 @@ const trace = {
 
 test("finished stages fold to one line, the shown stage expands, the next shows its real state", () => {
   const html = serverLog(trace, "s2", 40);
-  assert.match(html, /S1 화면 읽기[\s\S]*물건 1종 · 가린 물건 1 · LLM 1회 13.9s · 5,210 tok/);
+  assert.match(html, /S1 주문 추출[\s\S]*물건 1종 · 가린 물건 1 · LLM 1회 13.9s · 5,210 tok/);
   assert.match(html, /class="log-current" data-trace="s2"/);
   assert.match(html, /유사도 0.7 초과 126/);
   assert.match(html, /아이 생일 파티<\/span><span class="log-mono">38건/);
   assert.doesNotMatch(html, /없는 의도/);                    // n = 0 rows are left out
   assert.match(html, /의도 추론 중 … 23s/);                  // 40 s now − 16.1 s S2 end
-  assert.doesNotMatch(html, /S4 할 일/);
+  assert.doesNotMatch(html, /S4 할 일 생성/);
   assert.match(html, /LIVE/);
 });
 
@@ -51,7 +51,7 @@ test("before S1 is shown the log waits on S1; a replay is labelled", () => {
 test("a folded stage opens again in place when asked, and S5 says why tasks were left out", () => {
   const html = serverLog(trace, "s2", 40, { open: "s1" });
   assert.match(html, /class="log-current log-opened" data-trace="s1"[\s\S]*설향 딸기 500g/);
-  assert.match(html, /data-log-stage="s2"[^>]*aria-expanded="false"[\s\S]*S2 맥락 · RAG[\s\S]*현재/);   // shown stage folds
+  assert.match(html, /data-log-stage="s2"[^>]*aria-expanded="false"[\s\S]*S2 맥락 검색[\s\S]*현재/);   // shown stage folds
   assert.equal((html.match(/class="log-current/g) ?? []).length, 1);                                       // one at a time
   const done = { ...trace, stages: trace.stages.map((s) => ({ ...s, state: "done", done_s: s.done_s ?? 50 }))
     .map((s) => s.name === "s5" ? { ...s, result: { cards: [], plan_version: 1, dropped: [
@@ -111,4 +111,20 @@ test("app phone: only orders after the first list are followed, and only the App
     removeItem: (key) => data.delete(key) };
   assert.equal(clearAppStore(storage), 2);
   assert.deepEqual([...data.keys()], ["demo.keep"]);
+});
+
+test("the idle console shows what the Server knows before an order", () => {
+  const html = idleLog({ household_id: "h_demo", household_types: ["3~4인", "맞벌이"], now: "2026-11-27T02:50:00+09:00",
+    devices: { count: 9, rooms: { 거실: 4, 주방: 3 } },
+    orders: { count: 12, latest: { episode_id: "ep_9", shared_at: "2026-11-22T10:00:00+09:00", status: "closed",
+      items: ["우유", "세탁 세제", "로션", "딸기", "휴지"] } },
+    calendar: [{ id: "c1", start: "2026-11-27T03:10:00+09:00", end: "2026-11-27T04:10:00+09:00", tags: ["birthday"], tagged: true }] });
+  assert.match(html, /대기/);
+  assert.match(html, /서버 준비/);
+  assert.match(html, /3~4인, 맞벌이/);
+  assert.match(html, /9대[\s\S]*거실 4 · 주방 3/);
+  assert.match(html, /12건[\s\S]*우유, 세탁 세제, 로션, 딸기 …/);
+  assert.match(html, /c1 생일/);
+  assert.match(html, /주문 대기/);
+  assert.match(idleLog(null, { household: "h_demo" }), /서버 연결 확인/);
 });

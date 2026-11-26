@@ -6,7 +6,7 @@ import { SLOT_LABELS } from "./judgment.js";
 import { esc, rows } from "./markup.js";
 
 export const TRACE_OF = { extract: "s1", context: "s2", intent: "s3", tasks: "s4", plan: "s5" };
-const TITLES = { s1: "S1 화면 읽기", s2: "S2 맥락 · RAG", s3: "S3 의도", s4: "S4 할 일", s5: "S5 계획 · 카드" };
+const TITLES = { s1: "S1 주문 추출", s2: "S2 맥락 검색", s3: "S3 의도 추론", s4: "S4 할 일 생성", s5: "S5 계획 확정" };
 const RUNNING = { s1: "주문 화면 읽는 중", s2: "맥락·KB 검색 중", s3: "의도 추론 중", s4: "할 일 생성 중", s5: "계획 확정 중" };
 const ORDER = ["s1", "s2", "s3", "s4", "s5"];
 // Why S4/S5 left a task out (server/spec.md 10.1, 11.2): the stored code, then plain words.
@@ -244,7 +244,48 @@ export function serverLog(trace, shown, now, { replay = null, open = null, kept 
   const keep = replay || end?.state !== "done" ? ""
     : kept ? '<span class="log-kept">✓ 재현용 보관됨</span>'
     : `<button type="button" class="log-keep" data-keep${keeping ? " disabled" : ""}>재현용 보관</button>`;
-  return `<div class="server-log"><div class="log-head"><b>SPIRA server</b><span>${esc(trace.episode_id)}</span>
+  return `<div class="server-log${replay ? " is-replay" : ""}"><div class="log-head"><b>SPIRA server</b><span>${esc(trace.episode_id)}</span>
     <span class="log-badge${replay ? " replay" : ""}">${esc(badge)}</span><span>경과 ${clock(elapsed)}</span>${keep}</div>
     <div class="log-body">${lines.join("")}</div></div>`;
+}
+
+// Before an order (server mode): the console waits and shows what the Server already knows about the home
+// (GET /v1/demo/households/{id}/status), so S2 has its ground on screen before it runs.
+const TAG_WORDS = { birthday: "생일", party: "파티", guests: "손님", family: "가족", dinner: "저녁", health: "병원·접종" };
+
+function shortTime(iso, nowIso) {
+  const at = new Date(iso);
+  const now = nowIso ? new Date(nowIso) : new Date();
+  if (Number.isNaN(at.getTime())) return "";
+  const two = (n) => String(n).padStart(2, "0");
+  const clockText = `${two(at.getHours())}:${two(at.getMinutes())}`;
+  const sameDay = at.toDateString() === now.toDateString();
+  return sameDay ? `오늘 ${clockText}` : `${at.getMonth() + 1}/${at.getDate()} ${clockText}`;
+}
+
+export function idleLog(status, { household = "" } = {}) {
+  const head = `<div class="log-head"><b>SPIRA server</b><span>${esc(status?.household_id ?? household)}</span>
+    <span class="log-badge idle">대기</span></div>`;
+  if (!status) {
+    return `<div class="server-log is-idle">${head}<div class="log-body"><div class="log-line log-next">
+      <span class="log-time">--:--.-</span><b>서버 연결 확인</b><span>이 집 정보를 읽는 중 … <span class="log-cursor"></span></span></div></div></div>`;
+  }
+  const rooms = Object.entries(status.devices?.rooms ?? {}).map(([room, n]) => `${room} ${n}`).join(" · ");
+  const latest = status.orders?.latest;
+  const latestText = latest ? ` · 최근 ${shortTime(latest.shared_at, status.now)}${latest.items?.length
+    ? ` (${latest.items.slice(0, 4).join(", ")}${latest.items.length > 4 ? " …" : ""})` : ""}` : "";
+  const events = (status.calendar ?? []).slice(0, 3).map(({ id, start, tags }) =>
+    `${esc(id)}${tags?.length ? ` ${esc(tags.map((tag) => TAG_WORDS[tag] ?? tag).join("·"))}` : ""} ${esc(shortTime(start, status.now))}`);
+  const row = (key, value) => `<div class="log-row"><span class="log-key">${esc(key)}</span><div>${value}</div></div>`;
+  return `<div class="server-log is-idle">${head}<div class="log-body">
+    <section class="log-current log-idle"><header><span class="log-time">00:00.0</span><b>서버 준비</b>
+      <span class="log-muted">데모 집 ${esc(status.household_id)} · 이 집에 대해 이미 아는 것</span></header>
+      ${row("가구 유형", esc((status.household_types ?? []).join(", ") || "없음"))}
+      ${row("집 기기", `${status.devices?.count ?? 0}대${rooms ? ` <span class="log-muted">(${esc(rooms)})</span>` : ""}`)}
+      ${row("지난 주문", `${status.orders?.count ?? 0}건${esc(latestText)}`)}
+      ${row("일정", events.length ? events.join(" <span class=\"log-muted\">·</span> ") : "다가오는 일정 없음")}
+    </section>
+    <div class="log-line log-next"><span class="log-time"></span><b>주문 대기</b>
+      <span>왼쪽 앱에서 주문 화면을 올리면 여기서 시작해요 <span class="log-cursor"></span></span></div>
+  </div></div>`;
 }

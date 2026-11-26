@@ -180,7 +180,17 @@ class AppController extends ChangeNotifier {
   String? get currentOrderId =>
       _lastIntake ??
       accepted.lastOrNull ??
-      orderedEpisodes.firstOrNull?.episodeId;
+      orderedEpisodes
+          .where((e) => e.status != wire.EpisodeStatus.CLOSED)
+          .firstOrNull
+          ?.episodeId;
+
+  // The household's order history, newest first (for Main's recent memories).
+  List<wire.EpisodeListEpisode> get recentHistory =>
+      _episodeHistory.values.toList()..sort(
+        (a, b) =>
+            DateTime.parse(b.sharedAt).compareTo(DateTime.parse(a.sharedAt)),
+      );
 
   wire.Episode? get mainMemory => episodes[_mainMemoryId];
   List<String> get mainMemoryCardIds =>
