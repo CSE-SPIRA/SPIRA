@@ -1037,6 +1037,16 @@ Also 422 when a value is not one of the 20 types or a "pick one" axis (size, lif
 3. Else set every such live task of that episode to `{event: package.brought_in, released: true, at: event.at}`; increment `care_notices_shown` for released fridge notices; publish a version; `plans_changed: true` — all in the event's transaction.
 4. Several packages of one order group: everything is released at the first one (known limit).
 
+### 12.5 Demo trace (`contracts/openapi/demo.yaml`, `DEMO_MODE=1` only)
+
+`GET /v1/demo/episodes/{id}/trace[?at=seconds]`, app bearer token; with `DEMO_MODE=0` it answers 404 like an unknown path. For the presenter screen (demo-shell): which of S1–S5 are done and when, read from `episodes.stage_times` (§2.4) and `llm_calls`; the stage results themselves stay in `GET /v1/episodes/{id}` and `…/rationale`. No LLM, nothing written.
+
+- `started_at` = `stage_times.received`; `done_s` = seconds from it to the stage's time. `elapsed_s` = now − `started_at` (wall), or `at`.
+- Per stage, in order: after a failed stage → `skipped`; time present (and ≤ `at` in a replay) → `done`, or `failed` for the stage the episode stopped at (`read_failed` → s1, `error.stage = s2` → s2; every item masked → s1 done, later skipped); else the first unfinished stage is `running` (s1 only once `s1_start` is reached; live only while `episodes.stage ≠ done`), the rest `pending`.
+- `llm` (done s1/s3/s4 only) = sums of that episode's `llm_calls` rows of the stage: `calls`, `ms`, tokens.
+- Episodes stored before stage times (no `received`): states from `episodes.stage`, every time null.
+- `finished` = no stage `pending`/`running`. A replay asks with `at` growing by the playback speed each second; the shell gates what it shows from `…/rationale` by these states.
+
 ---
 
 ## 13. S7 Observation and this-home memory
