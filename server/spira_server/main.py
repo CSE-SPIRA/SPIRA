@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from . import scheduler
-from .api import app_routes, demo_routes, errors, hub_routes
+from .api import app_routes, demo_clock_routes, demo_routes, errors, hub_routes
 from .db.engine import db_ready
 from .kb import embedding
 from .settings import get_settings
@@ -34,6 +34,10 @@ def create_app(*, start_background: bool = True) -> FastAPI:
             from .pipeline.runner import resume
             from .pipeline.s1_extract import recover
 
+            if get_settings().demo_mode:
+                from . import demo_clock
+
+                demo_clock.install()                        # the server clock follows the story clock (§12.6)
             scheduler.start()
             recover()
             threading.Thread(target=resume, name="resume-episodes", daemon=True).start()
@@ -50,6 +54,7 @@ def create_app(*, start_background: bool = True) -> FastAPI:
     app.include_router(app_routes.router)
     app.include_router(hub_routes.router)
     app.include_router(demo_routes.router)
+    app.include_router(demo_clock_routes.router)
 
     @app.get("/health")
     def health() -> JSONResponse:

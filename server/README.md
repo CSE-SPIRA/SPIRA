@@ -79,6 +79,22 @@ With `--kb on`, `checks.txt` has "S2 KB searched" (fails when the KB search fail
 `orders/`, `out/` and `dev/home.yaml` are git-ignored. The household in `home.yaml` is deleted and written again on
 every run.
 
+## Demo with the hub and the Simulator (S6–S7)
+
+With `DEMO_MODE=1` the server runs a story clock (`spec.md` §12.6) that the hub follows, and the demo shell's
+house view moves it. After `scripts/demo_home.py` (keys in `out/demo.env`), one terminal from the repository root:
+
+```bash
+server/scripts/demo_live.sh            # add --fresh for a house that starts from the beginning
+```
+
+It writes the hub installation and the Simulator profile from the demo home (`scripts/demo_peers.py`, into
+`out/peers/`), then starts MQTT (unless one is already on 1883), the server, the Simulator, the hub and the demo
+shell, each log line prefixed (`[server]`, `[hub]`, …) and kept in `out/live/`. Ctrl+C stops all of them. The first
+run makes `simulator/.venv` (Simulator, hub and demo shell) and `out/operator.token`. Ports: `SERVER_PORT` 8000,
+`SIM_PORT` 8730, `HUB_PORT` 8088, `SHELL_PORT` 8733. The Simulator keeps device states and the hub its plans in
+`/private/tmp/spira-{household}…`; `--fresh` deletes both.
+
 ## Migrations
 
 The same migrations create the `cases` table in two databases.

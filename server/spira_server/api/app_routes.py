@@ -1,5 +1,5 @@
 """App routes (contracts/openapi/app.yaml): households, profile, calendar, cards, reactions, orders, the episode list,
-one episode and its rationale. Pause, order edit and memory come with the rest of S6."""
+one episode and its rationale, this home's memory. Pause and order edit come with the rest of S6."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import re
 from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Path, Query, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from spira_contracts.calendar import Calendar
 from spira_contracts.household_create import HouseholdCreate
 from spira_contracts.profile import Profile
@@ -19,12 +19,12 @@ from ..config import get_config
 from ..db.engine import lock_household, next_id, session_scope
 from ..db.models import Card, Episode, Household, OrderItem
 from ..kb.household import check_types
-from ..pipeline import s1_extract, s2_calendar, s5_reactions
+from ..pipeline import s1_extract, s2_calendar, s5_reactions, s7_observe
 from ..pipeline.s5_cards import card_body
 from ..store.images import image_kind
 from .auth import new_hub_key, require_app
-from .episode_views import episode_body, rationale_body
 from .bodies import body
+from .episode_views import episode_body, rationale_body
 from .errors import ApiError
 
 router = APIRouter(dependencies=[Depends(require_app)])
@@ -194,3 +194,19 @@ def get_episodes(household_id: str = Path(pattern=HOUSEHOLD), limit: int = Query
         return {"episodes": [{"episode_id": e.id, "shared_at": clock.iso(e.shared_at), "status": e.status,
                               "item_count": counts.get(e.id, 0), "card_ids": cards.get(e.id, [])[:2]} for e in page],
                 "next_before": clock.iso(page[-1].shared_at) if len(rows) > limit else None}
+
+
+@router.get("/v1/households/{household_id}/memory")
+def get_memory(household_id: str = Path(pattern=HOUSEHOLD)) -> dict:
+    with session_scope() as s:
+        if s.get(Household, household_id) is None:
+            raise ApiError("not_found", "Unknown household.")
+    return s7_observe.memory_body(household_id)
+
+
+@router.delete("/v1/households/{household_id}/memory/{case_id}", status_code=204)
+def delete_memory(household_id: str = Path(pattern=HOUSEHOLD),
+                  case_id: str = Path(pattern=r"^home_[0-9A-Za-z_]+$")) -> Response:
+    if not s7_observe.delete_memory(household_id, case_id):
+        raise ApiError("not_found", "Unknown memory row.")
+    return Response(status_code=204)

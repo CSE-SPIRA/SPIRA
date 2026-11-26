@@ -217,3 +217,27 @@ def test_kept_episode_survives_reset_in_the_replay_archive(env, app_headers, tmp
     with session_scope() as s:
         assert s.get(Episode, kept) is not None                              # the archive is never reset
     assert client.post(f"/v1/demo/episodes/{kept}/keep", headers=app_headers, json={"keep": False}).json()["kept"] is False
+
+
+def test_household_status_for_the_idle_console(env, app_headers, tmp_path):
+    from spira_server.db.models import CalendarEvent, DeviceList
+    household()
+    ep = episode()
+    with session_scope() as s:
+        s.add(DeviceList(household_id="h_042", revision=1, body={"devices": [
+            {"id": "a", "room": "거실"}, {"id": "b", "room": "거실"}, {"id": "c", "room": "주방"}]}))
+        now = clock.now()
+        s.add(CalendarEvent(household_id="h_042", id="c1", start=now + timedelta(minutes=20),
+                            end=now + timedelta(minutes=80), tags=["birthday"], tagged=True, fingerprint="x"))
+        s.add(CalendarEvent(household_id="h_042", id="c0", start=now - timedelta(days=2),
+                            end=now - timedelta(days=2, hours=-1), tags=[], tagged=False, fingerprint="y"))
+    env(DEMO_MODE="1")
+    client = TestClient(create_app(start_background=False))
+    body = client.get("/v1/demo/households/h_042/status", headers=app_headers).json()
+    assert body["devices"] == {"count": 3, "rooms": {"거실": 2, "주방": 1}}
+    assert body["orders"]["count"] == 1 and body["orders"]["latest"]["episode_id"] == ep
+    assert [(e["id"], e["tags"]) for e in body["calendar"]] == [("c1", ["birthday"])]      # ended events left out
+    assert client.get("/v1/demo/households/h_999/status", headers=app_headers).status_code == 404
+    env(DEMO_MODE="0")
+    assert TestClient(create_app(start_background=False)).get(
+        "/v1/demo/households/h_042/status", headers=app_headers).status_code == 404

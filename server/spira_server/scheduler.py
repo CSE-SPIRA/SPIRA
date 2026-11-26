@@ -1,4 +1,5 @@
-"""In-process jobs (spec §2.3, APScheduler). This PR has `quiet_timer`; the other jobs come with S5–S7.
+"""In-process jobs (spec §2.3, APScheduler): `quiet_timer` per episode, and `end_tasks`, `close_windows`,
+`close_episodes` together every 10 min (every 2 s with DEMO_MODE=1, so a story-clock ramp is followed at once).
 
 When the scheduler is not running (tests, dry runs) jobs are only remembered in `pending`, and the caller runs them
 itself (`s1_extract.on_quiet`).
@@ -24,6 +25,12 @@ def start() -> None:
     if _scheduler is None:
         _scheduler = BackgroundScheduler(timezone=KST, job_defaults={"misfire_grace_time": None, "coalesce": True})
         _scheduler.start()
+        from .pipeline.s7_observe import run_jobs
+        from .settings import get_settings
+
+        every = 2 if get_settings().demo_mode else 600
+        _scheduler.add_job(run_jobs, "interval", seconds=every, id="clock_jobs", replace_existing=True,
+                           max_instances=1)
         for job_id, at in list(pending.items()):
             _add(job_id, at)
         pending.clear()
