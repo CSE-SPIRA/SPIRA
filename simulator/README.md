@@ -23,7 +23,10 @@ Set `WORLD_OPERATOR_TOKEN` in your local environment to enable the operator. Its
 
 Open `/sim/viewer` on the household's port for the Korean test home. The 3D household shows the profile's rooms, observed device values, entrance events, and the Seoul wall clock. Shared house modules, design tokens, and IBM Plex Sans KR fonts are available at `/sim/assets/house/`. Set `WORLD_PEER_VIEWERS` to show links to the other homes. In the local environment for `h_042`, set it to `부모님 댁=http://127.0.0.1:8731/sim/viewer`. On `h_051`, point a `지아네` link to port 8730. Separate multiple label and URL pairs with commas. Use addresses reachable by the presenting device.
 
-The room links in `/sim/viewer` frame the selected room and jump to its observations.
+The viewer opens on the whole house. Changed devices get markers together.
+Select a marker or its device for a close-up and a short explanation. Select
+it again or press Escape to return to the overview. The room links frame the
+selected room and jump to its observations.
 
 Open `/sim/library` for the active v0 look sample. It applies the birthday goods, garland, balloons, and castle artwork through the scene input, with separate sample readings and a sample guest arrival. The shelf shows isolated slot samples. The preview starts with the sample living-room light off. **무드등 빛 퍼짐** turns the sample light pink and plays the floor effect. **조명 끄기** turns the sample light off again. The preview is local to the browser.
 
@@ -36,6 +39,10 @@ Open `/sim/library` for the active v0 look sample. It applies the birthday goods
 Open `/operator` for **집에서 일어나는 일**. Use **택배 들이기**, **손님 도착**, and **파티 끝** to act out the household events. Each control shows the latest observed event and its Seoul time. The profile can set the button names in `home_action_labels`.
 
 The named panel buttons are under **Person actions**. The `demo_people` profile field supplies the names and roles. The generic controls below still take an optional display name and a **Device panel** or **Other app** path. Class A panel changes report a local operation under PQ-01. The truth journal records the name and path, and the operator snapshot keeps the latest operator action per device. These fields are available under `/operator/truth` and `/operator/snapshot`.
+
+Use the named controls to turn off the cleaner during a run, change music on
+the display, or change the light colour. Each updates World and is observable
+by the Hub through the device interface.
 
 Open `/app` for the phone-sized Korean appliance app. Use the operator login and select who is acting. It defaults to 아빠 on `h_042` and the first configured person on `h_051`. Appliance changes use `other_app` with `local_operation: false`. To run it on a second phone, bind Uvicorn to a reachable interface with `--host 0.0.0.0` and use the simulator host's LAN address and port on a trusted demo network.
 
@@ -50,7 +57,8 @@ to start the replay. Press Ctrl-C to stop the stack.
 
 The standalone house draws device displays from World observations. The
 [demo shell](../demo-shell/README.md) can supply optional illustrations through
-the scene input.
+the scene input. It keeps the card visible on the left and returns the house
+to the overview when the presenter advances.
 
 ## Tests
 
