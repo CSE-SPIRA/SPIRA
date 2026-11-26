@@ -109,7 +109,7 @@ def run(args):
                     task.cancel()
 
     try:
-        uvicorn.run(create_app(runtime, lifespan=lifespan, hub_key=hub_key, home_name=args.home_name),
+        uvicorn.run(create_app(runtime, lifespan=lifespan, home_name=args.home_name),
                     host="127.0.0.1", port=args.port, access_log=False)
     finally:
         store.db.close()

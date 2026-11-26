@@ -2,7 +2,10 @@
 
 Owner: Yejoon Kim
 
-Pulls the plan from the SPIRA Server, waits for triggers, checks current device state, executes, reads results back, and restores what it changed.
+The Home Hub is the adapter that executes SPIRA Server plans in the home.
+It waits for triggers, checks current device state and delegation, reads back
+effects, and reports observations and results to the Server. It preserves
+changes made by people. The Hub has no direct App connection.
 Folder layout inside is decided by the owner. See [`spec.md`](spec.md).
 
 ## Run locally
@@ -76,8 +79,10 @@ Server above in one terminal. Start the local MQTT broker in another.
 
 Export the variables in [`.env.example`](.env.example) from a local secret
 source. Set `SPIRA_SERVER_URL` to the fixture listener and `SPIRA_HOUSEHOLD` to
-its household. Set `SPIRA_HUB_KEY` to the key returned by fixture onboarding
-and use the same MQTT prefix as the device peer. MQTT defaults to loopback,
+its household. Enter the household connection code locally as `SPIRA_HUB_KEY`.
+The code is the key returned by `POST /v1/households` and displayed by the App.
+The demo launcher sets `SPIRA_HUB_KEY` when it starts the Hub. Use the same
+MQTT prefix as the device peer. MQTT defaults to loopback,
 port 1883, and prefix `spira/g0`. Set `SPIRA_MQTT_PREFIX` to override the
 prefix. Start the Hub in a third terminal.
 
@@ -87,7 +92,8 @@ PYTHONPATH=contracts/generated/python uv run --no-project --python 3.12 \
   --installation hub/installation.example.json --db hub/hub.sqlite3
 ```
 
-The dashboard listens on loopback at port 8088. Use `--home-name` to name the
+The engineering dashboard is served at `/` on loopback port 8088. Its health
+and state routes support local diagnostics. Use `--home-name` to name the
 household on the ledger. It defaults to **우리 집**. The ledger groups activity by
 preparation and shows the installed device list alongside it on desktop.
 Open **자세한 기록** for waiting work, command receipts and read-backs, C-3 delivery,
@@ -109,8 +115,11 @@ PYTHONPATH=contracts/generated/python uv run --no-project --python 3.12 \
 ```
 
 Tests use the committed fixture Server, targeted HTTP fault stubs, and a fake
-device implementing the MQTT protocol. The real-broker transport test runs when
-Mosquitto is installed. The Class A cases are provisional pending O-01/PQ-01.
+device implementing the MQTT protocol. The Simulator light test uses the
+Simulator's device protocol to check that the Server receives a person-made
+change and the Hub preserves it at restoration. The real-broker transport test
+runs when Mosquitto is installed. The Class A cases are provisional pending
+O-01/PQ-01.
 
 ### Contract fixture Server tests
 
@@ -134,17 +143,18 @@ PYTHONPATH=contracts/generated/python uv run --no-project --python 3.12 \
 
 ### Installation and lifecycle
 
-- `devices` contains the C-2 devices admitted and delegated by the installation
-  owner. Discovery only reports capabilities. For each logical ID, `bindings`
-  names the native `target` and maps delegated commands to desired properties.
+- `devices` contains the device types and rooms registered as C-2. Set the
+  user's delegation in `commands` and `never` until the Server provides a path
+  for these settings. Discovery only reports capabilities. For each logical ID,
+  `bindings` names the native `target` and maps delegated commands to desired properties.
   A mapping can name a single property for the complete command value, rename
   every parameter with `{"properties": {...}}`, or supply `{"fixed": {...}}`
   for a command that takes no C-1 value.
 - An optional `native_identity` distinguishes a replacement behind a reused
   target. Change it before assigning the reused target to the replacement.
-  Editing the installation changes live delegation. Save the JSON atomically
-  so a reader sees a complete snapshot. C-2 revision increases on projection
-  changes and the receiver's current revision is reconciled on startup.
+  Save installation edits atomically so the Hub sees a complete snapshot when
+  it rechecks delegation just before dispatch. C-2 revision increases on
+  projection changes and the receiver's current revision is reconciled on startup.
 - `home_signals` binds a home fact to exact native targets and event types.
   The example maps `camera.package_removed` from `mqtt:sim_camera` to
   `package.brought_in` using `removed_count`. It maps the ordered sequence
@@ -167,8 +177,8 @@ PYTHONPATH=contracts/generated/python uv run --no-project --python 3.12 \
 
 See the [Hub specification](spec.md#1-purpose-and-boundaries) for the Server
 boundary, [delegation and capabilities](spec.md#h2-delegation-and-capabilities)
-for the App's read-only inventory, and the
-[Simulator device protocol](../simulator/protocol.md) for the device boundary.
+for C-2 registration, and the [Simulator device protocol](../simulator/protocol.md)
+for the device boundary.
 
 ### Open questions
 

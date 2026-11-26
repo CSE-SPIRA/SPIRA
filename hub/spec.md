@@ -10,22 +10,30 @@ protocol and does not redefine it. Non-normative implementation guidance is in
 
 ## 1. Purpose and boundaries
 
-The Hub turns the Server's versioned plans into effects at the specified home
-and time, observes what actually happened, preserves person-made changes, and
-reports evidence that the Server can use for household memory. It runs
-independently of the App and Simulator process, so closing the App does not stop
-waiting work. (PC-4, PC-5, PC-6)
+The Hub is an adapter that carries out the Server's judgments in the home
+without making its own. It executes versioned plans at the specified time,
+preserves person-made changes, and reports observations and execution results
+to the Server. It retains waiting work independently of the App and Simulator
+processes. (PC-4, PC-5, PC-6)
 
 The Hub does not infer purchase intent, create preparation work, choose a
 different target or value, judge household preference, or implement Server
 plan-time policy such as quiet hours or room suitability. The Server owns those
-judgments and S7 memory. The Hub communicates with the Server only by the pull,
-acknowledgement, event, and result routes in `contracts/openapi/hub.yaml`; the
-Server never calls the Hub or Simulator. (PC-1, PC-2, PC-4, PC-6)
+judgments and S7 memory. The Hub MUST initiate communication with the Server
+through the device registration, plan pull and acknowledgement, event, and
+execution routes in `contracts/openapi/hub.yaml`. The Server never calls the
+Hub or Simulator. The Hub MUST NOT communicate directly with the App. The
+local dashboard serves engineering diagnostics. (PC-1, PC-2, PC-4, PC-6)
 
 ## 2. Requirements
 
 ### H1. Installation identity
+
+**HUB-14.** The Server creates the Hub API key in response to
+`POST /v1/households`. The App displays it as a connection code. A person
+MUST enter the key in the Hub's local setup. The demo launcher provides it
+through `SPIRA_HUB_KEY`. The App MUST NOT send the key to the Hub over the
+network.
 
 **H1-R3.** A replacement native device MUST NOT inherit an earlier device's
 temporary-property ownership or restoration authority merely because it has the
@@ -33,18 +41,20 @@ same logical device ID, room, or label. (PC-5)
 
 ### H2. Delegation and capabilities
 
-**H2-R1.** The Hub MUST publish only admitted devices and explicitly delegated
-commands/value schemas in C-2, including `never` prohibitions and the current
-devices revision. It MUST NOT execute a command that is no longer delegated.
-(PC-3, PC-5)
+**H2-R1.** The Hub MUST publish admitted devices in C-2 with the installed
+device type and room, the user's delegated `commands` and their value schemas,
+any `never` prohibitions, and the current devices revision. It MUST NOT execute
+a command that is no longer delegated. (PC-3, PC-5)
 
 **H2-R2.** Discovery or order sharing MUST NOT grant delegation. A valid,
 previously unseen device type MUST remain usable as data when its declared
 capabilities satisfy the contract; virtual success MUST NOT be presented as
 physical-device qualification. (PC-3, PC-4)
 
-**H2-R3.** `GET /home/onboarding/devices` MUST require the household Hub key
-in `X-API-Key` and return the full installed device list as a C-2 `Devices` body.
+**H2-R3.** Delegation MUST come from the user. Until the Server provides a path
+for the user's delegation settings, the Hub MUST read `commands` and `never`
+from the installation file. The installation records device types and rooms as
+facts about the home.
 
 ### H3. Plans, admission, and versions
 
@@ -99,9 +109,11 @@ clock. (PC-4)
 
 **H5-R1.** Immediately before a new effect, after awaited device reads, the Hub
 MUST pull the current Server snapshot and recheck the current plan, line,
-card-Stop cancellation, household pause, and delegation. If that pull fails, it
-MUST start no new effect and report `blocked: plan_unconfirmed`; lifecycle and
-restoration of effects already started continue. (PC-4, PC-5)
+card-Stop cancellation, household pause, and the latest user delegation,
+regardless of its source. While delegation comes from the installation, the
+Hub MUST reload that file for this check. If the pull fails, it MUST start no
+new effect and report `blocked: plan_unconfirmed`; lifecycle and restoration
+of effects already started continue. (PC-4, PC-5)
 
 **H5-R2.** At execution time the Hub MUST check the active target binding,
 delegated capability and value schema, fresh availability, and
@@ -229,6 +241,11 @@ internals is not acceptance evidence.
 
 | ID | Initial state and input | Required external observation | PCs | Requirements |
 | --- | --- | --- | --- | --- |
+| HB-AT-1 | The Hub discovers ten Simulator devices | The Server receives a C-2 registration for all ten devices. No plan targets a device while it has no delegation | PC-3 | H2-R1, H2-R2 |
+| HB-AT-2 | The user changes delegation in the App after a Server path is available | The Hub learns the change only through the Server. The App sends zero requests to the Hub | PC-3, PC-5 | H2-R3, H5-R1 |
+| HB-AT-3 | A delegated task reaches its scheduled time | The Hub runs it and reports completion only for effects confirmed by read-back | PC-4, PC-5 | H5-R1, H6-R1 |
+| HB-AT-4 | A person changes a light in the Simulator | The Hub posts `light.changed` with `by: user` and leaves that property at the person's value when restoring the task | PC-5, PC-6 | H4-R1, H4-R2, H7-R1, H8-R1 |
+| HB-AT-5 | The user turns off a running line in the App | The Hub receives a newer Server plan version and restores only eligible effects it still owns | PC-4, PC-5 | H3-R3, H3-R4, H7-R1, H7-R2 |
 | HUB-AT01 | A plan is accepted; the same version with identical or changed content and then a lower version are pulled | No additional device command or work appears; the held version never regresses; a later higher version is the only replacement | PC-4 | H3-R3, H5-R3 |
 | HUB-AT02 | One plan contains a valid delegated line, a malformed/unsupported sibling, an offline valid line, and a valid previously unseen device type | Ack admits valid lines and rejects only the malformed sibling with a contract reason; admission performs no device effect; offline is decided only at execution | PC-3, PC-4, PC-5 | H2-R1, H2-R2, H3-R1, H3-R2 |
 | HUB-AT03 | A temporary effect exists on a native device; the logical device is rebound before end | No restore command is sent to the replacement; the old effect/uncertainty remains attributed to the old binding | PC-5 | H1-R3, H7-R3 |
@@ -267,6 +284,6 @@ internals is not acceptance evidence.
 - **Agreed Server rule:** shared-display text (fridge, TV) carries item guidance
   only, never intent, event names, guests or themes. The Hub displays
   Server-supplied values and does not judge text content.
-- **SP-14 — Server:** the real Server at gate G0 exposes only `/health`; core
-  schema and App/Hub contract routes remain Server work. Passing H10-R1 is not
-  real-Server interoperability evidence.
+- **SP-14 — Server:** the Server exposes device registration, plan pull, and
+  plan acknowledgement. C-3 event and C-4 execution receipt routes remain
+  Server work. H10-R1 verifies delivery against the fixture Server.
