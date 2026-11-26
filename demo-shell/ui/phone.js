@@ -5,7 +5,7 @@ import { esc, rows, setMarkup } from "./markup.js";
 import { itemIcon } from "./tags.js";
 
 export function createPhone(context, ui) {
-  const { state, REPLAY, $, PHONE_CLOCK, OWNERS, MANUAL, notice, exchange, defaultPath } = context;
+  const { state, REPLAY, $, PHONE_CLOCK, OWNERS, AUTO_PLAY, notice, exchange, defaultPath } = context;
 
   const SAMPLE_EPISODES = { birthday: "ep_9031", groceries: "ep_9150" };
 
@@ -244,9 +244,11 @@ export function createPhone(context, ui) {
     state.cardOpen = true;
     $("phone-content").scrollTop = 0;
     if (state.page === "reason" && !wasOpen) {
-      if (state.step === ui.reasoning.reasonStep("tasks") && ui.reasoning.reasonReady(state.step) &&
-          (MANUAL || performance.now() >= state.shownAt + ui.reasoning.stageDwell())) ui.reasoning.setStep(ui.reasoning.reasonStep("plan"));
-      else {
+      const plan = ui.reasoning.reasonStep("plan");
+      if (ui.reasoning.nextReasonStep() === plan && ui.reasoning.canMoveReasonForward() &&
+          (!AUTO_PLAY || performance.now() >= state.shownAt + ui.reasoning.stageDwell())) {
+        ui.reasoning.setStep(plan);
+      } else {
         ui.reasoning.renderReason();
         ui.reasoning.autoAdvance();
       }

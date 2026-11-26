@@ -1,8 +1,9 @@
 import { rehearsalControls } from "./wire.js";
 import { buildPresenterCues, canObserveLine } from "./presenter-cues.js";
+import { stageLabel } from "./flow.js";
 
 export function createPresenter(context, ui) {
-  const { state, observe, RECORDING, QUIET_END, notice, exchange, sleep, $, REPLAY, MANUAL, PHONE_CLOCK } = context;
+  const { state, observe, RECORDING, QUIET_END, notice, exchange, sleep, $, REPLAY, AUTO_PLAY, PHONE_CLOCK } = context;
 
   // The Hub and Simulator follow the Server's story clock independently.
   const FIXTURE_LEAD_MS = 5000;
@@ -231,7 +232,7 @@ export function createPresenter(context, ui) {
     if (RECORDING) {
       ui.recording.playReplayVisit();
       showPage("house");
-      if (!MANUAL) void ui.recording.playRecordedHouse();
+      if (AUTO_PLAY) void ui.recording.playRecordedHouse();
       return;
     }
     ui.recording.log("house", { moment: ui.recording.recordedMoment(ui.house.currentMoment()) });
@@ -307,14 +308,18 @@ export function createPresenter(context, ui) {
     if (state.sharing) return { wait: "주문 접수" };
     if (!state.episodeId || state.draft) return state.config.server ? named("share") : { wait: "서버 연결" };
     if (state.page === "reason") {
-      if (state.step >= ui.reasoning.reasonStep("plan") && (state.cardOpen || !state.cards.length)) {
+      const plan = ui.reasoning.reasonStep("plan");
+      if (state.step >= plan) {
+        if (state.cards.length && !state.cardOpen) return named("card");
         if (named("house")) return canUsePhoneMap() ? named("house") : { wait: "집의 계획 수신" };
         return state.chain.cardReady || state.readProblems.cards ? {} : { wait: "준비 카드" };
       }
-      if (state.cardOpen) return { wait: "준비 계획" };
-      if ((state.cards.length && ui.reasoning.canPresentCard()) ||
-          (MANUAL && !state.auto && ui.reasoning.canMoveReasonForward())) return named("card");
-      return { wait: "준비 카드와 판단 장면" };
+      const next = ui.reasoning.nextReasonStep();
+      if (next === plan && !state.cardOpen && state.cards.length && ui.reasoning.canPresentCard() &&
+          ui.reasoning.reasonReady(next)) return named("card");
+      const label = stageLabel(state.scenes.reason[next].id);
+      if ((AUTO_PLAY && state.auto) || !ui.reasoning.canMoveReasonForward()) return { wait: label };
+      return { id: "reason", label };
     }
     if (state.recordRequested) return state.recordVisible ? {} : { wait: "관찰 결과와 이 집의 기억" };
     if (!state.snapshot || !state.houseMarkup) return { wait: "집 상태" };
@@ -372,14 +377,10 @@ export function createPresenter(context, ui) {
     const cue = nextCue(moments, moments.indexOf(ui.house.currentMoment(moments)));
     if (cue.id === "share") {
       if (!state.config.fixture) return $("files")?.click();
-      if (await ui.phone.shareSample()) ui.reasoning.autoAdvance({ cue: true });
-      return;
+      return ui.phone.shareSample();
     }
-    if (cue.id === "card") {
-      ui.phone.openCard();
-      ui.reasoning.autoAdvance({ cue: true });
-      return;
-    }
+    if (cue.id === "card") return ui.phone.openCard();
+    if (cue.id === "reason") return move(1);
     if (cue.id === "house") return $("phone-map").onclick();
     if (cue.id === "record") return ui.house.openRecord();
     if (!cue.kind) return;

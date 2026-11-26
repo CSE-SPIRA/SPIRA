@@ -10,7 +10,7 @@ import { esc, rows, setMarkup } from "./markup.js";
 import { findTag, lineWithTag } from "./tags.js";
 
 export function createReasoning(context, ui) {
-  const { OWNERS, state, $, MANUAL, motion, sleep, REPLAY, RECORDING, DWELL_MS } = context;
+  const { OWNERS, state, $, AUTO_PLAY, motion, sleep, REPLAY, RECORDING, DWELL_MS } = context;
 
   const ownerTag = (owner) => `<span class="owner-tag">${OWNERS[owner]}</span>`;
 
@@ -75,7 +75,7 @@ export function createReasoning(context, ui) {
     if (scene.id === "plan") return stageNotice("plan", state.readProblems) ? null : !state.chain.cardReady ? "plan"
       : state.runPath === "house" && !state.chain.ready.hub ? "hub" : null;
     if (state.shownAt === null) return scene.id === "share" ? "extract" : scene.id;
-    if (!MANUAL && performance.now() < state.shownAt + stageDwell()) return null;
+    if (AUTO_PLAY && performance.now() < state.shownAt + stageDwell()) return null;
     const next = nextReasonStep();
     return reasonReady(next) ? null : state.scenes.reason[next].id;
   }
@@ -280,7 +280,7 @@ export function createReasoning(context, ui) {
 
   function renderReason() {
     let scene = state.scenes.reason[state.step];
-    if (scene.beat === "slots" && omittedSlots()) {
+    if ((AUTO_PLAY || RECORDING) && scene.beat === "slots" && omittedSlots()) {
       scene = state.scenes.reason[++state.step];
       state.shownAt = null;
     }
@@ -372,8 +372,8 @@ export function createReasoning(context, ui) {
     return DWELL_MS ?? 3000;
   }
 
-  async function autoAdvance({ cue = false } = {}) {
-    if ((MANUAL && !cue) || state.auto || state.draft) return;
+  async function autoAdvance() {
+    if (!AUTO_PLAY || state.auto || state.draft) return;
     const run = {};
     state.auto = run;
     while (state.auto === run && state.page === "reason" && (RECORDING || state.step < reasonStep("plan"))) {

@@ -47,11 +47,8 @@ clock and moments when available. Without a rehearsal clock, the cue skips
 clock advances and shows a notice. Text tags and illustrated device displays are
 disabled for these runs. The run logs include the selected Server URL.
 
-The judgment scene advances as its data arrives. The strip names the pending
-result and shows elapsed seconds. Timeouts and temporary errors are retried
-and shown briefly in the strip. The items hold for 2.2 seconds and the evidence
-and intent beats hold for 1.6 seconds each by default. A complete rationale
-received in one response plays in the same order.
+In a live run, press 다음 once per judgment beat. The cue names the next stage and waits for its data.
+Add `?auto=1` to play the live judgment automatically with the 2.2-second item hold and 1.6-second evidence and intent holds.
 
 The launcher starts with an empty fixture and fresh Hub and World databases.
 To start a fresh take, choose **새로 시작** in **진행자 조작** or in the notice

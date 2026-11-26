@@ -4,14 +4,15 @@ const STAGES = [
 ];
 
 export const STAGE_NAMES = Object.fromEntries(STAGES);
+export const stageLabel = (id) => `${STAGES.findIndex(([stage]) => stage === id) + 1} ${STAGE_NAMES[id]}`;
 
 export function createFlow(root, beatLine) {
-  const steps = STAGES.map(([id, title], index) => {
+  const steps = STAGES.map(([id], index) => {
     const node = root.ownerDocument.createElement("li");
     const status = root.ownerDocument.createElement("span");
     status.className = "stage-status";
     node.dataset.stage = id;
-    node.textContent = `${index + 1} ${title}`;
+    node.textContent = stageLabel(id);
     node.append(status);
     return { id, index, node, status };
   });

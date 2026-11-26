@@ -244,6 +244,18 @@ async function openShell(t, query, reply, withHouse = false) {
       timer.callback();
       await settle();
     },
+    async advanceTime(ms) {
+      const end = now + ms;
+      for (;;) {
+        const next = timers.filter(({ at }) => at <= end).sort((a, b) => a.at - b.at)[0];
+        if (!next) break;
+        timers.splice(timers.indexOf(next), 1);
+        now = Math.max(now, next.at);
+        next.callback();
+        await settle();
+      }
+      now = end;
+    },
   };
 }
 
@@ -585,14 +597,14 @@ test("a real Server run shows missing stages and uses its own card and Hub recei
   assert.match(shell.byId("stage-copy").innerHTML, /서버가 아직 이 단계를 내보내지 않아요/);
 });
 
-test("live judgment dwells on each ready stage and waits for a notification tap", async (t) => {
+test("opt-in live playback dwells on each ready stage and waits for a notification tap", async (t) => {
   const { episode, rationale, card } = birthday();
   episode.status = "notified";
   const { episode_id: id } = episode;
   const plan = { kind: "plan", plan_id: id, plan_version: 1, previous_version: null, at: card.updated_at,
     reports: [{ kind: "ack", delivered: true }], ack: { status: "admitted", rejected_tasks: [] } };
   let upload;
-  const shell = await openShell(t, "", (path, options) => {
+  const shell = await openShell(t, "?auto=1", (path, options) => {
     if (path === "/demo/api/config") return Response.json({ server: true, hub: true, household_id: "h_042" });
     if (path === "/demo/api/order") {
       upload = options.body;
@@ -666,7 +678,7 @@ test("live judgment dwells on each ready stage and waits for a notification tap"
   assert.match(shell.byId("phone-content").innerHTML, /우리 집/);
 });
 
-test("the live scene holds on evidence until the fixture publishes intent and tasks", async (t) => {
+test("the live cue waits for intent and tasks without queuing presses", async (t) => {
   const { episode, rationale } = birthday();
   const id = episode.episode_id;
   const reading = { ...episode, status: "reading", card_ids: [], item_tasks: [] };
@@ -680,33 +692,41 @@ test("the live scene holds on evidence until the fixture publishes intent and ta
     if (path.endsWith(id)) return Response.json(detail);
     return new Response(null, { status: 404 });
   });
-  const next = shell.byId("next");
-  next.onclick();
+  const next = shell.byId("next-cue");
+  shell.pressKey("ArrowRight");
+  assert.equal(next.textContent, "대기 · 2 맥락");
   assert.equal(next.disabled, true);
   assert.equal(shell.byId("judgment-calendar").hidden, true);
   payload = evidence;
   await shell.runTimer(1000);
-  next.onclick();
-  next.onclick();
-  next.onclick();
+  assert.equal(shell.byId("reason-layout").dataset.stage, "extract");
+  shell.pressKey("ArrowRight");
+  shell.pressKey(" ");
+  await next.onclick();
+  assert.equal(next.textContent, "대기 · 3 의도");
   assert.equal(next.disabled, true);
   assert.match(shell.byId("stage-beat").textContent, /비슷한 다른 집 주문 12건/);
   assert.doesNotMatch(shell.byId("judgment-calendar").innerHTML, /판단에 사용/);
   assert.equal(shell.byId("judgment-slots").hidden, true);
 
+  shell.pressKey(" ");
   payload = { ...rationale, tasks: [], item_tasks: [] };
   await shell.runTimer(1000);
-  next.onclick();
+  assert.equal(shell.byId("reason-layout").dataset.stage, "context");
+  await next.onclick();
   assert.match(shell.byId("judgment-calendar").innerHTML, /판단에 사용/);
   assert.equal(shell.byId("judgment-intent").hidden, true);
-  next.onclick();
+  await next.onclick();
+  assert.equal(next.textContent, "대기 · 4 할 일");
   assert.equal(next.disabled, true);
   assert.equal(shell.byId("judgment-intent").hidden, false);
 
+  shell.pressKey("ArrowRight");
   payload = rationale;
   detail = { ...episode, status: "judged" };
   await shell.runTimer(1000);
-  next.onclick();
+  assert.equal(shell.byId("reason-layout").dataset.stage, "intent");
+  await next.onclick();
   assert.equal(shell.byId("reason-layout").dataset.stage, "tasks");
   assert.match(shell.byId("stage-beat").textContent, /할 일 4/);
 });
@@ -715,7 +735,7 @@ test("an out-of-order burst waits for extraction and then preserves every live b
   const { episode, rationale, card } = birthday();
   const id = episode.episode_id;
   const detail = Promise.withResolvers();
-  const shell = await openShell(t, `?episode=${id}`, (path) => {
+  const shell = await openShell(t, `?episode=${id}&auto=1`, (path) => {
     if (path === "/demo/api/config") return Response.json({ server: true, household_id: "h_042" });
     if (path.endsWith("/rationale")) return Response.json(rationale);
     if (path.includes("/cards")) return Response.json({ cards: [card] });
@@ -784,7 +804,7 @@ test("the h_051 held recording reaches its card with no rationale available", as
   const plan = fixture(id, "plan.v1");
   const episode = { episode_id: id, household_id: "h_051", shared_at: plan.sent_at, status: "held",
     items: [], item_count: 0, masked_count: 0, item_tasks: [], card_ids: [card.card_id] };
-  const shell = await openShell(t, `?episode=${id}&replay=1`, (path) => {
+  const shell = await openShell(t, `?episode=${id}&replay=1&auto=1`, (path) => {
     if (path === "/demo/api/config") return Response.json({ server: true, fixture: true, household_id: "h_051" });
     if (path.includes("/households/h_051/cards")) return Response.json({ cards: [card] });
     if (path.endsWith(id)) return Response.json(episode);
@@ -1151,7 +1171,7 @@ test("the next cue shares once, opens the card and enters the observed house", a
   const { episode, rationale, card, hub, viewer, devices } = birthdayCues();
   const share = Promise.withResolvers();
   let shares = 0;
-  const shell = await openShell(t, "?auto=0", (path) => {
+  const shell = await openShell(t, "", (path) => {
     if (path === "/demo/api/config") return Response.json({ server: true, hub: true, fixture: true, household_id: "h_042" });
     if (path === "/demo/api/order") {
       shares++;
@@ -1174,11 +1194,37 @@ test("the next cue shares once, opens the card and enters the observed house", a
   await started;
   await settle();
   assert.equal(shares, 1);
-  assert.equal(cue.disabled, true);
-  for (const dwell of [3000, 2200, 1600, 1600, 1600, 1600, 1600]) await shell.runTimer(dwell);
+  const stage = () => shell.byId("reason-layout").dataset.stage;
+  assert.equal(cue.disabled, false);
+  assert.equal(cue.textContent, "다음: 1 추출");
+  await shell.advanceTime(15000);
+  assert.equal(stage(), "share");
+  assert.equal(cue.textContent, "다음: 1 추출");
+
+  const progression = [
+    ["1 추출", "extract", /물건 9종 읽음/],
+    ["2 맥락", "context", /평소와 다른 물건/],
+    ["2 맥락", "context", /일정/],
+    ["2 맥락", "context", /비슷한 다른 집 주문/],
+    ["3 의도", "intent", /상황/],
+    ["3 의도", "intent", /의도/],
+    ["4 할 일", "tasks", /할 일 4개/],
+  ];
+  for (const [i, [label, step, beat]] of progression.entries()) {
+    assert.equal(cue.textContent, `다음: ${label}`);
+    if (i % 3 === 0) shell.pressKey("ArrowRight");
+    else if (i % 3 === 1) shell.pressKey(" ");
+    else await cue.onclick();
+    assert.equal(stage(), step);
+    assert.match(shell.byId("stage-beat").textContent, beat);
+  }
   assert.equal(cue.textContent, "다음: 준비 카드");
   await cue.onclick();
-  await shell.runTimer(800);
+  assert.equal(stage(), "plan");
+  assert.match(shell.byId("phone-content").innerHTML, /손님 오기 전 거실 청소/);
+  await shell.advanceTime(5000);
+  assert.equal(stage(), "plan");
+  assert.equal(shell.byId("home").hidden, true);
   assert.equal(cue.textContent, "다음: 우리 집");
   shell.pressKey("ArrowRight");
   await settle();
@@ -1191,7 +1237,7 @@ test("read-only rehearsal crosses the observed house moments without posting act
   const { episode, rationale, card, hub, viewer } = sceneFixture();
   const { episode_id: id } = episode;
   const writes = [];
-  const shell = await openShell(t, `?episode=${id}&replay=1`, (path, options) => {
+  const shell = await openShell(t, `?episode=${id}&replay=1&auto=1`, (path, options) => {
     if (options?.method === "POST") writes.push(path);
     if (path === "/demo/api/config") return Response.json({ server: true, hub: true, household_id: "h_042" });
     if (path === "/demo/api/hub") return Response.json(hub);

@@ -85,7 +85,8 @@ async function exchange(path, options) {
 const dwellParam = query.get("dwell");
 const requestedDwell = dwellParam === null ? NaN : Number(dwellParam) * 1000;
 const DWELL_MS = Number.isFinite(requestedDwell) ? Math.max(0, requestedDwell) : null;
-const MANUAL = query.get("auto") === "0";
+const auto = query.get("auto");
+const AUTO_PLAY = RECORDING ? auto !== "0" : auto === "1";
 
 const PHONE_CLOCK = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 
@@ -305,7 +306,7 @@ async function boot() {
 }
 
 const context = {
-  OWNERS, state, $, MANUAL, motion, sleep, REPLAY, RECORDING, DWELL_MS, PHONE_CLOCK, notice, exchange,
+  OWNERS, state, $, AUTO_PLAY, motion, sleep, REPLAY, RECORDING, DWELL_MS, PHONE_CLOCK, notice, exchange,
   defaultPath, api, QUIET_END, observe,
 };
 // Each viewer run owns its state and timers. Controllers call through this table after setup.
