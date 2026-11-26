@@ -7,9 +7,21 @@ export function createPresenter(context, ui) {
   // The Hub and Simulator follow the Server's story clock independently.
   const FIXTURE_LEAD_MS = 5000;
   const RAMP_SECONDS = 4;
+  const RESET_CONFIRM_MS = 5000;
+  // A house change that follows an event (the party mood, the restore) may lag it; never wait longer than this.
+  const FOLLOW_UP_MS = 30000;
   let clockRead;
   let momentRead;
   let pendingCue;
+  let resetArmedUntil = 0;
+  const eventSeen = new Map();
+
+  function disarmReset() {
+    if (!resetArmedUntil) return;
+    resetArmedUntil = 0;
+    for (const id of ["reset-drawer", "reset-notice"]) $(id).textContent = "새로 시작";
+    if (!state.resetting) $("reset-status").textContent = "";
+  }
 
   const missingRoute = (status) => [404, 405, 501].includes(status);
 
@@ -260,11 +272,25 @@ export function createPresenter(context, ui) {
         : moments.findLastIndex((moment) => moment.ready && inTimeCue(cue, moment));
     }
     const index = moments.findLastIndex(({ event, ready }) => ready && event === cue.event);
-    if (index < 0 || cue.event !== "guest_arrived") return index;
+    if (index < 0 || !["guest_arrived", "event_end"].includes(cue.event)) return index;
+    const key = moments[index].id;
+    if (!eventSeen.has(key)) eventSeen.set(key, Date.now());
+    const overdue = Date.now() - eventSeen.get(key) > FOLLOW_UP_MS;
+    if (cue.event === "event_end") return overdue || !partyStillShowing(moments) ? index : -1;
     const device = moments.findIndex(({ follows, ready }) => ready && follows === moments[index].id);
-    const waiting = moments.some(({ event, follows, ready, lines }) => !ready &&
-      (event === cue.event || follows === moments[index].id) && lines.some(canObserveLine));
-    return device >= 0 ? device : waiting ? -1 : index;
+    // Lines the Hub has not yet matched to this arrival sit in the event's waiting moment.
+    const waiting = moments.some(({ id, event, follows, ready, lines }) => !ready &&
+      (event === cue.event || id === `waiting:${cue.event}` || follows === moments[index].id) &&
+      lines.some(canObserveLine));
+    return device >= 0 ? device : waiting && !overdue ? -1 : index;
+  }
+
+  // The party's device changes (TV scene, mood light) are still what the World reads.
+  function partyStillShowing(moments) {
+    const readings = new Map((state.snapshot?.devices ?? []).map((device) => [device.logical_id, device.values ?? {}]));
+    return moments.some(({ follows, ready, lines }) => ready && follows && lines.some(({ observed }) =>
+      observed.some(({ device, cmd, values }) => readings.has(device) && values && Object.hasOwn(values, cmd) &&
+        JSON.stringify(readings.get(device)[cmd]) === JSON.stringify(values[cmd]))));
   }
 
   function nextCue(moments, current) {
@@ -432,7 +458,15 @@ export function createPresenter(context, ui) {
     const message = state.config.fixture
       ? "집과 판단 기록을 처음 상태로 돌려요. 녹화는 남아요."
       : "이 컴퓨터의 Hub와 집 상태를 처음으로 돌려요. 서버의 주문과 판단 기록, 녹화는 남아요.";
-    if (!window.confirm(message)) return;
+    // Ask on the page itself: a browser dialog would cover the stage.
+    if (!(resetArmedUntil > Date.now())) {
+      resetArmedUntil = Date.now() + RESET_CONFIRM_MS;
+      $("reset-status").textContent = `${message} 한 번 더 누르면 시작해요.`;
+      for (const id of ["reset-drawer", "reset-notice"]) $(id).textContent = "한 번 더 눌러 새로 시작";
+      setTimeout(() => { if (resetArmedUntil <= Date.now()) disarmReset(); }, RESET_CONFIRM_MS + 50);
+      return;
+    }
+    disarmReset();
     state.resetting = true;
     $("phone-dock").inert = $("right-area").inert = true;
     $("reset-status").textContent = "처음 상태로 돌리는 중이에요…";

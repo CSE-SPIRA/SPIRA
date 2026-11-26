@@ -335,13 +335,18 @@ for (const control of ["reset-drawer", "reset-notice"]) {
     await shell.byId("next-cue").onclick();
     assert.equal(shell.byId("stale-house").hidden, false);
     assert.equal(shell.byId(control).hidden, false);
+    await shell.byId(control).onclick();
+    assert.equal(shell.byId("reset-status").textContent, "집과 판단 기록을 처음 상태로 돌려요. 녹화는 남아요. 한 번 더 누르면 시작해요.");
+    assert.equal(shell.byId(control).textContent, "한 번 더 눌러 새로 시작");
+    assert.deepEqual(requests, []);
+    assert.deepEqual(shell.confirmations, []);
     const pending = shell.byId(control).onclick();
     await settle();
     assert.match(shell.byId("reset-status").textContent, /돌리는 중/);
+    assert.equal(shell.byId(control).textContent, "새로 시작");
     assert.equal(shell.byId("reset-drawer").disabled, true);
     assert.equal(shell.byId("reset-notice").disabled, true);
     await shell.byId(control).onclick();
-    assert.deepEqual(shell.confirmations, ["집과 판단 기록을 처음 상태로 돌려요. 녹화는 남아요."]);
     assert.deepEqual(requests, ["POST"]);
     assert.deepEqual(shell.navigations, []);
     reset.resolve(new Response(null, { status: 204 }));
@@ -363,7 +368,9 @@ test("a failed reset shows the local scope and leaves the current page available
   assert.equal(shell.byId("reset-scope").hidden, false);
   assert.match(shellHtml, /이 컴퓨터의 Hub와 집 상태만 초기화해요\./);
   await shell.byId("reset-drawer").onclick();
-  assert.match(shell.confirmations[0], /서버의 주문과 판단 기록, 녹화는 남아요/);
+  assert.match(shell.byId("reset-status").textContent, /서버의 주문과 판단 기록, 녹화는 남아요\. 한 번 더 누르면 시작해요\./);
+  assert.deepEqual(requests, []);
+  await shell.byId("reset-drawer").onclick();
   assert.deepEqual(requests, ["POST"]);
   assert.match(shell.byId("reset-status").textContent, /새로 시작하지 못했어요/);
   assert.deepEqual(shell.navigations, []);
@@ -1115,7 +1122,14 @@ test("cue keys send once, wait for observations and reach the scheduled time bef
   relations["t_mood#3"].observed = observations["t_mood#3"];
   await shell.runTimer(800);
   await timedLine("14:00", "t_oven#4");
+  // The party scene is still on the TV, so the end waits for the restore.
+  const tv = observations["t_mood#3"].find(({ cmd }) => cmd === "play_mood");
+  const display = devices.find(({ logical_id }) => logical_id === tv.device);
+  display.values = { ...tv.values };
   await cueAt("17:50 일정 끝내기", end.at);
+  assert.equal(cue.textContent, "대기 · 17:50 일정 끝내기 결과");
+  display.values = { play_mood: null };
+  await shell.runTimer(800);
   assert.deepEqual(commands, [
     "delivery", ...["t_clean#1", "t_safe#2"].map((id) => new Date(relations[id].trigger.time).toISOString()),
     new Date(guests.at).toISOString(), "guests_arrive", new Date(relations["t_oven#4"].trigger.time).toISOString(),
