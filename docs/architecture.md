@@ -17,10 +17,11 @@ flowchart LR
   end
   subgraph Home
     HUB[Home Hub]
-    SIM[Simulator<br/>MQTT devices + 2D viewer]
+    SIM[Simulator<br/>MQTT devices + 3D viewer]
   end
   KB[SPIRA_KB repo<br/>synthetic cases + embedding] -. builds .-> KDB
   APP -- "orders · calendar · reactions<br/>openapi/app.yaml" --> SRV
+  APP -- "read-only inventory<br/>GET /home/onboarding/devices" --> HUB
   SRV -- "cards (app polls 30 s)" --> APP
   HUB -- "pull plans (15 s) · ack · events · executions<br/>openapi/hub.yaml" --> SRV
   HUB <-- "commands · state (MQTT)" --> SIM
@@ -30,6 +31,7 @@ flowchart LR
 ```
 
 - The **server never calls the hub or the app.** Both poll; the server only answers.
+- The App uses the home key to read the Hub's `GET /home/onboarding/devices` inventory for 우리 집.
 - The **LLM never runs a device and never makes a time.** It reads screenshots and judges intent; code builds the plan (`server/spec.md` §0).
 - The home moves at two moments only: when the order arrives home (`package.brought_in`) and around a calendar event.
 
@@ -40,12 +42,15 @@ flowchart LR
 | [`app/`](../app) | Share order screenshots, show the preparation card, stop / switch off lines | Yejoon |
 | [`server/`](../server) | S1–S7 pipeline, App and Hub APIs | Seojin |
 | [`hub/`](../hub) | Pull plan, wait for triggers, check state, execute, read back, restore | Yejoon |
-| [`simulator/`](../simulator) | Virtual household devices (MQTT) and a 2D viewer; emits home events | Yejoon |
+| [`simulator/`](../simulator) | Virtual household devices (MQTT) and a 3D viewer; emits home events | Yejoon |
 | [`contracts/`](../contracts) | Everything parts must agree on: API, schemas, enums, fixtures, generated models | Shared |
+| [`design/`](../design) | Shared design tokens, vocabulary, writing rules and fonts | Shared |
 | [`docs/`](.) | This page · [`paper/`](paper) (Jeewon) | Shared |
 | [SPIRA_KB](https://github.com/CSE-SPIRA/SPIRA_KB) | Synthetic purchase-intent cases, lists, embedding function (separate repo) | Uijin |
 
 Each part folder has `README.md` (how to run) and `spec.md` (what it does). Inside a part folder, the owner decides the layout.
+
+The [default Simulator household](../simulator/protocol.md#11-default-h_042-profile) has nine devices, including an air purifier and a styler.
 
 ## 3. One order, end to end
 

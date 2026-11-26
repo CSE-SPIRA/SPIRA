@@ -1,0 +1,9 @@
+{
+  "version": 4,
+  "icon": ["strawberry", "cream", "cake_mix", "cake", "cake_topper", "candle", "balloon", "party_hat", "icing_pen", "gift_bag", "detergent", "lotion", "milk", "egg", "meat", "fish", "vegetable", "fruit", "bread", "snack", "drink", "frozen", "tent", "grill", "flower", "toy", "book", "generic"],
+  "storage": ["fridge", "freezer", "room"],
+  "action": ["clean", "safety_lock", "mood_light", "tv_scene", "preheat", "cool", "air", "notice", "other"],
+  "motion": ["cleaner_sweep", "light_spread"],
+  "palette": ["princess_pink", "ocean_blue", "forest_green", "sunny_yellow", "festive_red", "calm_neutral"],
+  "motif": ["castle", "crown", "balloons", "cake", "stars", "hearts", "confetti", "flowers", "moon", "waves", "film", "candles", "popcorn"]
+}

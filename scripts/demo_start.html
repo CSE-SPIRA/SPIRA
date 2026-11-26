@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SPIRA 시연</title>
+  <link rel="stylesheet" href="/tokens.css">
+  <link rel="stylesheet" href="/fonts.css">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font: var(--size-16)/1.6 var(--sans);
+      word-break: keep-all;
+    }
+    main { width: min(100%, 46rem); margin: auto; padding: var(--space-32) var(--space-16); }
+    h1 { margin: 0; font-size: clamp(var(--size-34), 8vw, var(--size-54)); line-height: 1.15; }
+    h2 { margin: 0 0 var(--space-8); font-size: var(--size-22); }
+    p { margin: var(--space-12) 0 0; }
+    header p, span, footer p { color: var(--muted); }
+    nav, section, footer { margin-top: var(--space-24); }
+    .screens { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-12); }
+    .screens > * {
+      display: block;
+      padding: var(--space-16);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-16);
+      background: var(--surface);
+    }
+    a { color: var(--green-deep); text-underline-offset: .18em; }
+    .screens a { text-decoration: none; }
+    .screens a strong { text-decoration: underline; }
+    .screens a:hover { background: var(--green-soft); }
+    a:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+    .screens span { display: block; font-size: var(--size-15); }
+    .shell { margin-top: var(--space-12); }
+    .steps {
+      padding: var(--space-16);
+      background: var(--green-soft);
+      border-radius: var(--radius-16);
+    }
+    ol { margin: 0; padding-left: var(--space-24); }
+    li + li { margin-top: var(--space-4); }
+    .window { color: var(--green-deep); font-weight: 600; }
+    @media (max-width: 32rem) {
+      .screens { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>SPIRA 시연</h1>
+      <p>예시 주문 하나를 공유하면, 서버가 이 집 상황을 판단해 준비를 정하고, 집이 그대로 움직입니다. (서버 판단은 녹화된 예시)</p>
+    </header>
+    <nav aria-label="시연 화면">
+      <div class="screens">
+        $app
+        $viewer
+        $operator
+        $hub
+      </div>
+      $shell
+    </nav>
+    <section class="steps" aria-labelledby="steps-title">
+      <h2 id="steps-title">해 보기</h2>
+      <ol>
+        <li>앱에서 <strong>예시 주문으로 공유</strong>를 눌러요.</li>
+        <li>카드를 눌러 이야기를 봐요.</li>
+        <li><strong>집에서 일어나는 일</strong>에서 <strong>택배 들이기</strong>를 눌러요.</li>
+        <li>손님 맞이 창이 열리면 <strong>손님 도착</strong>을 눌러요.</li>
+        <li>(선택) 사람 행동(Person actions)에서 <strong>조명 2700K로 변경</strong>을 눌러요.</li>
+        <li><strong>파티 끝</strong>을 누르고 앱 이야기 화면으로 돌아가요.</li>
+        $reset
+      </ol>
+      <p class="window">손님 맞이 창 · <output id="guest-window" aria-live="polite">아직</output></p>
+    </section>
+    <footer>
+      <h2>처음부터 다시</h2>
+      <p>터미널에서 Ctrl-C로 멈추고 <code>scripts/demo-up</code>을 다시 실행하면 새 상태로 시작해요.</p>
+    </footer>
+  </main>
+  <script>
+    const guestWindow = document.getElementById('guest-window');
+    async function refreshWindow() {
+      try {
+        const response = await fetch('/guest-window');
+        if (response.ok) {
+          const {status, minutes} = await response.json();
+          const label = status === 'open' ? '열림 · ' + minutes + '분 남음' :
+            status === 'passed' ? '지남' : '아직';
+          if (guestWindow.textContent !== label) guestWindow.textContent = label;
+        }
+      } finally {
+        setTimeout(refreshWindow, 3000);
+      }
+    }
+    refreshWindow();
+  </script>
+</body>
+</html>
