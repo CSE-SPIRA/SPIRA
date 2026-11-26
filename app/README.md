@@ -4,11 +4,12 @@ Status: ACTIVE. This is the entry point for running and testing SPIRA's Android
 App. [App behavior and acceptance](spec.md) and
 [shared payloads](../contracts/README.md) have their own specifications.
 
-Main expands the order until a preparation card arrives, then puts the card
-first and keeps the final memory until acknowledgment or a new order. Calendar
-shows a month of events and memory markers. Our Home shows the sample device
-inventory and the controls for matching preparation lines, along with
-household types and Google connection.
+Main shows the full order until its preparation card arrives. Tap the order
+summary to see items and guidance. The final memory stays on Main until
+**확인** or a new accepted order. Its Calendar marker remains available.
+Calendar shows a month of events and memory markers. Select a day to see its
+agenda and open a memory. Our Home shows devices by room, controls for
+matching preparation lines, household types, and Google connection.
 
 ## Run locally
 
@@ -46,8 +47,19 @@ From the repository root, use `app/scripts/browser-demo` for the fixture
 preview. It requires Flutter, Python, `uv`, and `mosquitto`. The launcher
 starts or reuses the demo stack and connects the App preview to the fixture
 Server. Use **예시 주문으로 공유** or **주문 분석하기** to send an order.
-Use `--build-serve` to serve a built preview. Android share and Google sign-in
-require Android.
+Use `--build-serve` to serve a built preview. Add `--first-run` to start
+onboarding from an empty App, including when the fixture already has a
+household. The first-run build skips Google, collects household types, shows
+the connection code, and lets the user review the sample devices before
+saving.
+
+```sh
+app/scripts/browser-demo --build-serve --first-run
+```
+
+With sample schedules, Calendar opens to the fixture's birthday month.
+**오늘** jumps to the current month. Android share and Google sign-in require
+Android.
 
 ## Tests
 
@@ -65,8 +77,11 @@ TalkBack require an Android runtime.
 
 - Android share redelivery is identified by its ordered content URIs and
   bytes. Gallery selection uses a distinct source identity per selection.
-- There is no App device route. Our Home and the onboarding device step
-  show the fixed installation as **예시 집** with delegation disabled.
+- Our Home and onboarding show the fixed installation as **예시 집** with
+  delegation disabled. The inventory test compares the bundled device IDs,
+  types, rooms, and names with the Hub example installation.
+- **끄기** on a device sends the matching card's line reaction to the Server.
+  The App shows the pending request until a card refresh confirms it.
 - Episode history omits card start and end timestamps. Calendar can locate
   a closed preparation by a start supplied by the card poll, or by the share
   day when the App never saw the card.
