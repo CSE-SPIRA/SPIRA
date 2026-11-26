@@ -13,6 +13,7 @@ import 'contracts.dart' as wire;
 import 'platform/android_bridge.dart';
 import 'platform/google_calendar.dart';
 import 'platform/gallery.dart';
+import 'sample_calendar.dart';
 
 abstract interface class AppStore {
   Future<String?> read(String key);
@@ -122,7 +123,10 @@ class AppController extends ChangeNotifier {
   bool get hasPendingSelection => _gallery != null;
 
   wire.Calendar _googleCalendar = wire.Calendar(events: []);
-  wire.Calendar get googleCalendar => _googleCalendar;
+  bool get showsSampleCalendar =>
+      (fixture || browserPreview) && !_calendarConnected;
+  wire.Calendar get displayCalendar =>
+      showsSampleCalendar ? sampleCalendar : _googleCalendar;
   bool get calendarConnected => _calendarConnected;
   String? calendarError;
 
@@ -492,7 +496,13 @@ class AppController extends ChangeNotifier {
     return _calendarQueue = _calendarQueue.then((_) async {
       if (_disposed) return;
       try {
-        if (_calendarClearPending) {
+        if (showsSampleCalendar) {
+          await _sendCalendar(id, sampleCalendar, sample: true);
+          if (_calendarClearPending) {
+            _calendarClearPending = false;
+            await _saveSetup();
+          }
+        } else if (_calendarClearPending) {
           await _sendCalendar(id, wire.Calendar(events: []));
           _calendarClearPending = false;
           await _saveSetup();
@@ -503,14 +513,21 @@ class AppController extends ChangeNotifier {
           await _sendCalendar(id, calendar);
         }
         calendarError = null;
-      } catch (_) {
-        calendarError = 'Google 캘린더를 새로 불러오지 못했어요.';
+      } catch (error) {
+        calendarError = _error(
+          error,
+          showsSampleCalendar ? '예시 일정을 보내지 못했어요.' : '캘린더를 동기화하지 못했어요.',
+        );
       }
       _change();
     });
   }
 
-  Future<void> _sendCalendar(String id, wire.Calendar calendar) async {
+  Future<void> _sendCalendar(
+    String id,
+    wire.Calendar calendar, {
+    bool sample = false,
+  }) async {
     // The peer replaces the list, so event order alone is immaterial.
     final events =
         calendar.events.map((event) => jsonEncode(event.toJson())).toList()
@@ -519,13 +536,15 @@ class AppController extends ChangeNotifier {
         .convert(utf8.encode(jsonEncode(events)))
         .toString();
     final key = _calendarKey;
-    final previous = _calendarFingerprint ??= await store.read(key);
+    // A local preview peer may have restarted with the same address.
+    final firstSampleSync = sample && _calendarFingerprint == null;
+    final previous = _calendarFingerprint ?? await store.read(key);
     if (_disposed) return;
-    if (previous != fingerprint) {
+    if (firstSampleSync || previous != fingerprint) {
       await api.calendar(id, calendar);
-      _calendarFingerprint = fingerprint;
       _calendarFingerprintDirty = true;
     }
+    _calendarFingerprint = fingerprint;
     if (_calendarFingerprintDirty) {
       await store.write(key, fingerprint);
       _calendarFingerprintDirty = false;
@@ -569,6 +588,7 @@ class AppController extends ChangeNotifier {
     needsToken = false;
     _change();
     unawaited(sync());
+    unawaited(resendCalendar());
     if (!browserPreview) await store.write(_serverTokenKey, token);
   }
 

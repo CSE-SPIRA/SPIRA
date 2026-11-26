@@ -13,6 +13,7 @@ import 'package:spira_app/app_controller.dart';
 import 'package:spira_app/contracts.dart' as wire;
 import 'package:spira_app/design_tokens.g.dart';
 import 'package:spira_app/main.dart';
+import 'package:spira_app/features/labels.dart';
 import 'package:spira_app/platform/android_bridge.dart';
 import 'package:spira_app/platform/google_calendar.dart';
 import 'package:spira_app/platform/gallery.dart';
@@ -516,7 +517,7 @@ void main() {
     },
   );
 
-  testWidgets('APP-03 skipped calendar stays disconnected after restart', (
+  testWidgets('APP-03 skipped fixture calendar resends samples after restart', (
     tester,
   ) async {
     final peer = Peer();
@@ -545,7 +546,9 @@ void main() {
     await tapTab(tester, '우리 집');
 
     expect(reads, 0);
-    expect(peer.calendars, isEmpty);
+    expect(peer.calendars, hasLength(2));
+    expect(peer.calendars.first.toJson(), peer.calendars.last.toJson());
+    expect(peer.calendars.last.events.first.title, '생일 파티');
     expect(find.text('연결 안 됨'), findsOneWidget);
   });
 
@@ -1907,7 +1910,13 @@ void main() {
       final dot = find.byKey(const ValueKey('memory-dot-ep_9031'));
       final date = find.byKey(const ValueKey('2026-10-17'));
       expect(find.descendant(of: date, matching: dot), findsOneWidget);
-      expect(find.byKey(const ValueKey('2026-10-15')), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('2026-10-15')),
+          matching: dot,
+        ),
+        findsNothing,
+      );
       expect(find.byKey(ValueKey('memory-dot-$heldId')), findsNothing);
       expect(
         find.text(rationale['none_reason'] as String? ?? '근거'),
@@ -1922,8 +1931,12 @@ void main() {
         isTrue,
       );
 
+      await tester.tap(date);
+      await tester.pumpAndSettle();
       final requestCount = peer.requests.length;
-      await tester.tap(dot);
+      final memoryEntry = find.byKey(const ValueKey('calendar-memory-ep_9031'));
+      await tester.ensureVisible(memoryEntry);
+      await tester.tap(memoryEntry);
       await tester.pumpAndSettle();
       expect(peer.requests.skip(requestCount).map((r) => r.url.path).toSet(), {
         '/v1/episodes/ep_9031',
@@ -1961,9 +1974,10 @@ void main() {
   }
 
   testWidgets(
-    'Calendar shows only upcoming Google events and Our Home disconnects',
+    'AP-AT-11 Google events replace the synced samples until disconnect',
     (tester) async {
-      final nextDay = DateTime.now().toUtc().add(const Duration(days: 1));
+      final today = seoulDay(DateTime.now().toIso8601String());
+      final eventTime = today.add(const Duration(hours: 10));
       final peer = Peer()
         ..episodes['ep_9031'] = (fixture('episode.json')
           ..['status'] = 'notified')
@@ -1971,8 +1985,8 @@ void main() {
       final event = wire.EventElement(
         id: 'upcoming',
         title: 'Google 일정 제목',
-        start: nextDay.toIso8601String(),
-        end: nextDay.add(const Duration(hours: 1)).toIso8601String(),
+        start: eventTime.toIso8601String(),
+        end: eventTime.add(const Duration(hours: 1)).toIso8601String(),
       );
       var disconnected = false;
       final app = controller(
@@ -1991,10 +2005,14 @@ void main() {
         'household_types': ['2인'],
       });
       expect(find.text('집을 연결하면 기기가 보여요'), findsOneWidget);
+      final samples = peer.calendars.single;
+      expect(samples.events.first.title, '생일 파티');
       await tapText(tester, 'Google 연결');
-      expect(peer.calendars.single.events.single.title, event.title);
+      expect(peer.calendars, hasLength(2));
+      expect(peer.calendars.last.events.single.title, event.title);
       await tapTab(tester, '캘린더');
       final bar = find.byKey(const ValueKey('event-upcoming'));
+      expect(find.text('예시 일정'), findsNothing);
       expect(
         find.descendant(of: bar, matching: find.textContaining(event.title)),
         findsOneWidget,
@@ -2005,9 +2023,61 @@ void main() {
       await tapTab(tester, '우리 집');
       await tapText(tester, 'Google 연결 해제');
       expect(disconnected, isTrue);
-      expect(peer.calendars.last.events, isEmpty);
+      expect(peer.calendars, hasLength(3));
+      expect(peer.calendars.last.toJson(), samples.toJson());
       await tapTab(tester, '캘린더');
+      expect(find.text('예시 일정'), findsOneWidget);
       expect(bar, findsNothing);
     },
   );
+  testWidgets('AP-AT-10 navigates the month grid and selects an event day', (
+    tester,
+  ) async {
+    final peer = Peer();
+    await openApp(tester, controller(peer), size: const Size(390, 844));
+    await tapTab(tester, '캘린더');
+    final birthday = find.byKey(const ValueKey('2026-10-17'));
+    final bar = find.byKey(const ValueKey('event-c1'));
+    const label = '생일 파티 14:00–18:00';
+    expect(find.descendant(of: birthday, matching: bar), findsOneWidget);
+    expect(
+      find.descendant(of: bar, matching: find.text('생일 파티')),
+      findsOneWidget,
+    );
+    expect(find.byTooltip(label), findsOneWidget);
+    expect(peer.calendars.single.events.first.title, '생일 파티');
+    expect(peer.calendars.single.events.first.end, '2026-10-17T18:00:00+09:00');
+
+    await tester.tap(find.byTooltip('다음 달'));
+    await tester.pumpAndSettle();
+    expect(find.text('2026년 11월'), findsOneWidget);
+    expect(bar, findsNothing);
+    await tester.tap(find.byTooltip('이전 달'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('2026-10-20')));
+    await tester.pumpAndSettle();
+    expect(find.text('10월 20일'), findsOneWidget);
+    expect(find.text('예방접종 09:30–10:00'), findsOneWidget);
+    await tapText(tester, '오늘');
+    final date = seoulDay(DateTime.now().toIso8601String());
+    expect(
+      find.descendant(
+        of: find.byKey(ValueKey(date.toIso8601String().substring(0, 10))),
+        matching: find.byKey(const ValueKey('calendar-today')),
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('AP-AT-11 disconnected production sends no sample calendar', (
+    tester,
+  ) async {
+    final peer = Peer();
+    await openApp(tester, controller(peer, fixture: false));
+    await tapTab(tester, '캘린더');
+    expect(find.text('예시 일정'), findsNothing);
+    expect(peer.calendars, isEmpty);
+  });
+
 }
