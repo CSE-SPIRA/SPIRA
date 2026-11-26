@@ -4,11 +4,13 @@ Status: ACTIVE. This is the entry point for running and testing SPIRA's Android
 App. [App behavior and acceptance](spec.md) and
 [shared payloads](../contracts/README.md) have their own specifications.
 
-Main shows the full order until its preparation card arrives. Tap the order
+Main shows the Server's progress and the full order until its preparation card
+arrives. Cards and known episode history stay available when the Server has no
+episode list. Tap the order
 summary to see items and guidance. The final memory stays on Main until
 **확인** or a new accepted order. Its Calendar marker remains available.
 Calendar shows a month of events and memory markers. Select a day to see its
-agenda and open a memory. Our Home shows devices by room, controls for
+agenda and open a memory. Our Home shows occupied rooms, controls for
 matching preparation lines, household types, and Google connection.
 
 ## Run locally
@@ -25,8 +27,10 @@ flutter run -d <android-device-id> --dart-define-from-file=.env
 ```
 
 If the peer requires authentication, enter the App bearer token via the
-toolbar key. `SPIRA_HOUSEHOLD_ID` opens an existing household. Omit it for
-first-run setup, or set `SPIRA_FIRST_RUN=1` in a fixture or preview build.
+toolbar key. Set `SPIRA_HOUSEHOLD_ID` to open the household created by
+`server/scripts/demo_home.py` directly. The App needs the Server URL and App
+credentials to open that household. Set `SPIRA_FIRST_RUN=1` to run onboarding
+even with a configured household.
 Share one to three JPG or PNG screenshots from Android or
 choose them from **주문 분석하기** on Main. During onboarding, copy the
 connection code and enter it on the home Hub.
@@ -35,10 +39,9 @@ To enable Google Calendar, register `org.cse_spira.spira_app` and the signing
 SHA-1 as an Android OAuth client, enable Calendar API, and set the Web client
 ID in `SPIRA_GOOGLE_CLIENT_ID`. Connected events are read from the primary
 calendar for 14 days and synced to the Server. Disconnect Google from **우리 집**
-to replace the synchronized list with sample events in fixture and preview
-builds, or clear it in production. When Google is disconnected, fixture and
-preview builds display the bundled events as **예시 일정** and sync them to the
-Server.
+to replace the synchronized list with **예시 일정**. Fixture and preview use
+the replay dates. With `SPIRA_PEER=server`, the same sample calendar is
+anchored to the time returned by the Server's cards endpoint.
 [Flutter Android sign-in setup](https://pub.dev/packages/google_sign_in_android)
 
 ## Local preview
