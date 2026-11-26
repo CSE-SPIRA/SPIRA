@@ -19,6 +19,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import clock
+from . import stage_times
 from ..config import Config, get_config
 from ..db.engine import lock_household, next_id, session_scope
 from ..db.models import (
@@ -211,6 +212,7 @@ def finalize(episode_id: str, s4: S4Result, *, now: datetime | None = None) -> O
                 out.dropped[d.task_id] = "paused"
             _store(s, ep, drafts, {}, out, now)
             ep.status, ep.judged, ep.stage = "judged", True, "done"
+            stage_times.mark(ep, "s5")
             out.status = ep.status
             return out
 
@@ -246,6 +248,7 @@ def finalize(episode_id: str, s4: S4Result, *, now: datetime | None = None) -> O
         else:
             ep.status = "judged"
         ep.judged, ep.stage = True, "done"
+        stage_times.mark(ep, "s5")
         intent = dict(ep.intent or {})
         intent["s4"] = {"dropped": s4.dropped, "skipped_bundles": {str(k): v for k, v in s4.skipped_bundles.items()}}
         ep.intent = intent

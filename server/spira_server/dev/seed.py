@@ -1,4 +1,4 @@
-"""Fake home for dry runs (`server/dev/home.example.yaml`). Not used by the running server.
+"""Fake home for dry runs and the demo (`server/dev/home.example.yaml`). Not used by the running server.
 
 Writes the household, device list, calendar (tagged by the server LLM like a real PUT) and past orders straight into
 the server DB with the same functions the S6 routes will use. Every run starts the household from scratch.
@@ -79,12 +79,13 @@ def reset(household_id: str) -> None:
         s.execute(delete(Household).where(Household.id == household_id))       # cascades to episodes, plans, ...
 
 
-def seed(home: Home, now: datetime) -> dict:
-    """Returns what was written (for the run log)."""
+def seed(home: Home, now: datetime, hub_key_hash: str | None = None) -> dict:
+    """Returns what was written (for the run log). `hub_key_hash`: keep a key the caller made (the demo hub uses
+    it); default a random key nobody knows (dry runs have no hub)."""
     reset(home.household_id)
     with session_scope() as s:
         s.add(Household(id=home.household_id, household_types=home.household_types, paused=False,
-                        hub_key_hash=new_hub_key()[1]))
+                        hub_key_hash=hub_key_hash or new_hub_key()[1]))
         s.flush()
         s.add(DeviceList(household_id=home.household_id, revision=home.devices["revision"], body=home.devices))
         for n, order in enumerate(home.past_orders):

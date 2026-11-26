@@ -1,4 +1,4 @@
-"""ORM models of the server DB (spec §5.1). The tables are created by migrations 0001 and 0002; keep both in step."""
+"""ORM models of the server DB (spec §5.1). The tables are created by migrations 0001-0003; keep them in step."""
 
 from __future__ import annotations
 
@@ -76,6 +76,8 @@ class Episode(Base):
     next_task_n: Mapped[int] = mapped_column(Integer, default=1)
     next_card_ordinal: Mapped[int] = mapped_column(Integer, default=1)
     rerun_pending: Mapped[bool] = mapped_column(Boolean, default=False)
+    stage_times: Mapped[dict] = mapped_column(JSONB, default=dict)          # 0003: wall time each stage ended
+    s4: Mapped[dict | None] = mapped_column(JSONB)                          # 0003: S4 result when S4 ended
 
 
 class EpisodeSource(Base):

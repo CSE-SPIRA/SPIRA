@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from . import scheduler
-from .api import app_routes, errors, hub_routes
+from .api import app_routes, demo_routes, errors, hub_routes
 from .db.engine import db_ready
 from .kb import embedding
 from .settings import get_settings
@@ -49,6 +49,7 @@ def create_app(*, start_background: bool = True) -> FastAPI:
     errors.install(app)
     app.include_router(app_routes.router)
     app.include_router(hub_routes.router)
+    app.include_router(demo_routes.router)
 
     @app.get("/health")
     def health() -> JSONResponse:

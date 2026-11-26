@@ -1,5 +1,5 @@
-"""App routes (contracts/openapi/app.yaml). This batch: households, profile, calendar, cards and orders.
-Pause, episodes, rationale, order edit, reactions and memory come with the rest of S6."""
+"""App routes (contracts/openapi/app.yaml). This batch: households, profile, calendar, cards, orders, one episode and
+its rationale. Pause, the episode list, order edit, reactions and memory come with the rest of S6."""
 
 from __future__ import annotations
 
@@ -22,12 +22,14 @@ from ..pipeline import s1_extract, s2_calendar
 from ..pipeline.s5_cards import card_body
 from ..store.images import image_kind
 from .auth import new_hub_key, require_app
+from .episode_views import episode_body, rationale_body
 from .bodies import body
 from .errors import ApiError
 
 router = APIRouter(dependencies=[Depends(require_app)])
 
 HOUSEHOLD = r"^h_[0-9a-z]+$"
+EPISODE = r"^ep_[0-9A-Za-z_]+$"
 
 
 def _types(types: list[str]) -> None:
@@ -136,3 +138,26 @@ async def post_orders(
         raise ApiError("not_found", "Unknown household.") from None
     out = {"episode_id": accepted.episode_id, "status": accepted.status}
     return JSONResponse(out, status_code=200 if accepted.duplicate else 202)
+
+
+# -------------------------------------------------------------------------------------------------- episodes
+
+@router.get("/v1/episodes/{episode_id}")
+def get_episode(episode_id: str = Path(pattern=EPISODE)) -> dict:
+    with session_scope() as s:
+        ep = s.get(Episode, episode_id)
+        if ep is None:
+            raise ApiError("not_found", "Unknown episode.")
+        return episode_body(s, ep)
+
+
+@router.get("/v1/episodes/{episode_id}/rationale")
+def get_rationale(episode_id: str = Path(pattern=EPISODE)) -> dict:
+    with session_scope() as s:
+        ep = s.get(Episode, episode_id)
+        if ep is None:
+            raise ApiError("not_found", "Unknown episode.")
+        body = rationale_body(s, ep)
+        if body is None:
+            raise ApiError("not_found", "No rationale yet: S2 has not stored its context.")
+        return body

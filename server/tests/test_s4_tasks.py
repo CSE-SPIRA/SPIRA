@@ -80,6 +80,7 @@ def test_t18_second_birthday_uses_memory(mock_llm):
     slugs = [d.task_id for d in r.drafts]
     assert slugs == ["t_safe#1", "t_mood#2", "t_oven#3", "t_fridge#4", "t_fridge#5"]   # cleaning switched off
     assert {"slug": "clean", "reason": "switched_off"} in r.dropped
+    assert r.dropped_detail["clean"]["line"] == "손님 오기 전 거실 청소" and r.dropped_detail["clean"]["actions"] == ["cleaner_01.clean"]
     mood = r.drafts[1]
     assert {"device": "light_01", "cmd": "color_temp", "value": {"kelvin": 2700}} in mood.actions
 
@@ -126,6 +127,7 @@ def test_t21_value_out_of_range_after_retry_drops_that_task(mock_llm):
     r = _gen(ep)
     assert [d.task_id for d in r.drafts] == ["t_clean#1", "t_safe#2", "t_oven#3", "t_fridge#4", "t_fridge#5"]
     assert {"slug": "mood", "reason": "schema"} in r.dropped
+    assert r.dropped_detail["mood"]["line"]                     # what the dropped task said, for display
 
 
 def test_format_rules_after_retry(mock_llm):
@@ -137,6 +139,7 @@ def test_format_rules_after_retry(mock_llm):
     r = _gen(ep)
     assert "t_oven" not in " ".join(d.task_id for d in r.drafts)
     assert {"slug": "oven", "reason": "format"} in r.dropped
+    assert r.dropped_detail["oven"]["way"] == "standby" and r.dropped_detail["oven"]["need"]
 
 
 def test_t66_shared_screen_notice_rule(mock_llm):
