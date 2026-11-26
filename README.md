@@ -18,7 +18,7 @@ SPIRA reads an order screenshot, finds similar cases in a synthetic purchase-int
 | [`design/`](design) | Shared design tokens, vocabulary, writing rules and fonts | Shared |
 | [`demo-shell/`](demo-shell) | Guided presentation and recording playback | |
 | [`scripts/demo-up`](scripts/demo-up) | Local demo launcher | |
-| [`docs/`](docs) | [Architecture](docs/architecture.md) · [Paper (LaTeX)](docs/paper) | Shared · Jeewon Lee |
+| [`docs/`](docs) | [Architecture](docs/architecture.md) · [Demo design](docs/demo-design.md) · [Paper (LaTeX)](docs/paper) | Shared · Jeewon Lee |
 | [SPIRA_KB](https://github.com/CSE-SPIRA/SPIRA_KB) | Synthetic purchase-intent knowledge base (separate repository) | Uijin Lee |
 
 ## Where to start
