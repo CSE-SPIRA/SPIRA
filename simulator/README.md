@@ -10,7 +10,8 @@ From `simulator/`, use Python 3.12 or newer. Substitute your Python executable i
 
 ```bash
 python3.12 -m venv .venv
-.venv/bin/pip install -e ../contracts/generated/python -e '.[dev]' -r ../design/requirements.txt
+.venv/bin/pip install -e ../contracts/generated/python -e '.[dev]' -r ../design/requirements.txt \
+  -r ../hub/requirements.txt
 ```
 
 Set `WORLD_OPERATOR_TOKEN` in your local environment to enable the operator. Its HTTP Basic username is `operator` and its password is the configured token. A viewer-only run can omit both operator settings. The process commands use loopback defaults.
@@ -29,6 +30,7 @@ it again or press Escape to return to the overview. The room links frame the
 selected room and jump to its observations.
 
 Open `/sim/library` for the active v0 look sample. It applies the birthday goods, garland, balloons, and castle artwork through the scene input, with separate sample readings and a sample guest arrival. The shelf shows isolated slot samples. The preview starts with the sample living-room light off. **무드등 빛 퍼짐** turns the sample light pink and plays the floor effect. **조명 끄기** turns the sample light off again. The preview is local to the browser.
+Select the light marker after either action to inspect the change.
 
 ### Scene input and people
 
@@ -60,10 +62,17 @@ The standalone house draws device displays from World observations. The
 the scene input. It keeps the card visible on the left and returns the house
 to the overview when the presenter advances.
 
+At guest arrival, wait for the Hub read-backs to see the TV and light markers
+together. Select either marker to inspect its observed value, or advance
+directly from the overview. An offline recording needs the current house
+assets to offer marker controls.
+
 ## Tests
 
+From the repository root:
+
 ```bash
-PYTHONDONTWRITEBYTECODE=1 .venv/bin/pytest
+PYTHONPATH=simulator PYTHONDONTWRITEBYTECODE=1 simulator/.venv/bin/python -m pytest -rx simulator/tests
 ```
 
 Tests use in-process protocol fakes, HTTP stubs for both evidence sources, and a fixture Server receipt captured from the live birthday scene. The Mosquitto test uses a separate local broker when available. Tests marked `provisional` include Class A evidence pending PQ-01.
@@ -77,6 +86,9 @@ Tests use in-process protocol fakes, HTTP stubs for both evidence sources, and a
 | SIM-AT-19 | Both profiles render their rooms, device values, entrance, wall clock, and configured links in HTTP tests. |
 | SIM-AT-20 | HTTP tests check World change labels, guest windows and action-only overlays. Order details, intents, rationale, card text, Hub attribution and judge output stay out of the viewer. |
 | SIM-AT-21 | HTTP tests submit the named panel and appliance-app forms and check the emitted signals and truth journal. The Class A panel signal is provisional pending PQ-01. |
+| SM-AT-1, SM-AT-2 | Node tests cover grouped markers, the overview, close-up selection, Escape, and advancing. |
+| SM-AT-3 | The live fixture receives `cleaner.stopped` with `by: user` after a panel stop. The card assertion is an expected failure until the fixture projects an interrupted run as `user_changed`. |
+| SM-AT-4 | The viewer and World snapshot assertions check that Server judgment stays private. |
 
 ## Where to change what
 
