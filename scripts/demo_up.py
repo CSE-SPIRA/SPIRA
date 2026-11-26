@@ -44,10 +44,11 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ROOT / "contracts/generated/python"
 HOUSEHOLD = "h_042"
 PROFILES = {"ep_9031": "ep_9031.json"}
-KEY_GUIDE = """서버 접속에 SPIRA_HUB_KEY와 SPIRA_APP_TOKEN 환경 변수가 필요해요.
-서버의 APP_DEMO_TOKEN을 SPIRA_APP_TOKEN으로 설정하세요.
-이 토큰을 Bearer로 보내 POST /v1/households에 {"household_types": []}를 등록하세요.
-응답의 hub_api_key를 SPIRA_HUB_KEY로 설정하고 household_id를 --household에 넣으세요."""
+SERVER_ENV = ("SPIRA_HOUSEHOLD_ID", "SPIRA_HUB_KEY", "SPIRA_APP_TOKEN")
+KEY_GUIDE = (
+    f"Server mode requires {', '.join(SERVER_ENV)}.\n"
+    "Run server/scripts/demo_home.py, then run `source server/out/demo.env`."
+)
 
 
 def write_demo_installation(path, household):
@@ -124,17 +125,6 @@ def check_server(server):
         raise RuntimeError(f"Cannot reach Server at {server}/health") from None
 
 
-def server_clock(server):
-    url = f"{server}/v1/demo/clock"
-    try:
-        response = httpx.get(url, timeout=3, trust_env=False)
-        response.raise_for_status()
-        datetime.fromisoformat(response.json()["now"])
-    except (httpx.HTTPError, ValueError, KeyError, TypeError):
-        return None
-    return url
-
-
 def cached_app(defines, build):
     # The App builder also hashes its working Flutter inputs, including uncommitted source changes.
     try:
@@ -176,7 +166,7 @@ def export_app(destination, defines):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server", type=server_url, metavar="URL", help="Use an existing Server")
-    parser.add_argument("--household", default=HOUSEHOLD, help=f"Household ID (default {HOUSEHOLD})")
+    parser.add_argument("--household", help=f"Household ID (fixture default {HOUSEHOLD})")
     parser.add_argument("--port", type=int, default=8730, help="Simulator port (default 8730)")
     parser.add_argument("--sim-lan-ip", type=IPv4Address, metavar="IP",
                         help="Expose the Simulator on the demo LAN and print its operator URL at IP")
@@ -209,10 +199,6 @@ def main():
         parser.error("--shell-port requires the demo shell")
     if args.no_shell and args.tagger:
         parser.error("--tagger requires the demo shell")
-    if not re.fullmatch(r"h_[a-z0-9]+", args.household):
-        parser.error("--household requires a household ID such as h_042")
-    if not args.server and args.household != HOUSEHOLD:
-        parser.error("the built-in fixture uses h_042; use --server for another household")
     if args.server and args.realistic is not None:
         parser.error("--realistic requires the built-in fixture")
     if args.server and args.export_app is not None:
@@ -222,24 +208,27 @@ def main():
         if not (args.app_web / "index.html").is_file():
             parser.error("--app-web DIR must contain index.html")
 
-    clock_url = None
     if args.server:
-        hub_key = os.getenv("SPIRA_HUB_KEY", "").strip()
-        app_token = os.getenv("SPIRA_APP_TOKEN", "").strip()
-        if not hub_key or not app_token:
+        household, hub_key, app_token = (os.getenv(name, "").strip() for name in SERVER_ENV)
+        args.household = args.household or household
+        if not args.household or not hub_key or not app_token:
             print(KEY_GUIDE, file=sys.stderr)
             return 1
+        if not re.fullmatch(r"h_[a-z0-9]+", args.household):
+            parser.error("SPIRA_HOUSEHOLD_ID or --household must be a household ID such as h_042")
         try:
             check_server(args.server)
         except RuntimeError as error:
             print(f"demo-up: {error}", file=sys.stderr)
             return 1
-        clock_url = server_clock(args.server)
         defines = {
             "SPIRA_BASE_URL": origin(args.proxy_port),
             "SPIRA_HOUSEHOLD_ID": args.household, "SPIRA_PEER": "server",
         }
     else:
+        args.household = args.household or HOUSEHOLD
+        if args.household != HOUSEHOLD:
+            parser.error("the built-in fixture uses h_042; use --server for another household")
         onboarding = ROOT / "contracts/fixtures/ep_9031/household.created.json"
         hub_key = HouseholdCreated.model_validate_json(onboarding.read_text(encoding="utf-8")).hub_api_key
         app_token = APP_TOKEN
@@ -270,10 +259,10 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             parser.error("this checkout already has a demo running on the requested port")
-        return run(args, mosquitto, directory, requests, hub_key, app_token, defines, clock_url)
+        return run(args, mosquitto, directory, requests, hub_key, app_token, defines)
 
 
-def run(args, mosquitto, directory, requests, hub_key, app_token, defines, clock_url):
+def run(args, mosquitto, directory, requests, hub_key, app_token, defines):
     latest = directory / "latest"
     if args.keep and latest.exists():
         logs = directory / latest.read_text(encoding="utf-8").strip()
@@ -466,8 +455,7 @@ def run(args, mosquitto, directory, requests, hub_key, app_token, defines, clock
             raise RuntimeError(f"could not reserve its ports: {error}") from error
         urls = {name: origin(port) for name, port in ports.items() if name != "mqtt"}
         server = args.server or urls["fixture"]
-        if not args.server:
-            clock_url = f"{server}/v1/demo/clock"
+        clock_url = None if args.server else f"{server}/v1/demo/clock"
         start_peers(args.keep)
         if web:
             if args.server:
@@ -534,6 +522,8 @@ def run(args, mosquitto, directory, requests, hub_key, app_token, defines, clock
         if "shell" in links:
             print(f"Demo:      {links['shell']}")
         print(service_urls, end="")
+        if args.server:
+            print("The birthday runs in real minutes on the Server's clock under DEMO_MODE.")
         credentials = f"  (operator / {operator_token})" if args.sim_lan_ip else ""
         print(f"집에서 일어나는 일: {operator_url}{credentials}")
         if not args.server:
