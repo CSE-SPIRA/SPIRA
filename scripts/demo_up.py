@@ -83,8 +83,14 @@ def reachable(url):
         return response.status == 200
 
 
+def state_root():
+    path = Path(os.environ.get("DEMO_STATE_ROOT", temporary_root()))
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return path
+
+
 def run_directory(port, episode, server=None, household=HOUSEHOLD):
-    temp = temporary_root()
+    temp = state_root()
     base = f"{ROOT}:{port}:{episode}"
     if server:
         base += f":{server}:{household}"
@@ -129,10 +135,37 @@ def server_clock(server):
     return url
 
 
+def cached_app(defines, build):
+    # The App builder also hashes its working Flutter inputs, including uncommitted source changes.
+    try:
+        tree = subprocess.check_output(
+            ["git", "rev-parse", "HEAD:app"], cwd=ROOT, text=True, stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        tree = "working-tree"
+
+    cache = state_root() / f"spira-app-cache-{os.getuid()}"
+    cache.mkdir(mode=0o700, exist_ok=True)
+    info = cache.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise RuntimeError(f"App cache directory must be private and owned by the current user: {cache}")
+
+    # Use the App builder's cache-location entry point for this call.
+    previous_cache = os.environ.get("XDG_CACHE_HOME")
+    os.environ["XDG_CACHE_HOME"] = str(cache / tree)
+    try:
+        return cached_web(defines, build)
+    finally:
+        if previous_cache is None:
+            os.environ.pop("XDG_CACHE_HOME", None)
+        else:
+            os.environ["XDG_CACHE_HOME"] = previous_cache
+
+
 def export_app(destination, defines):
     if destination.exists() and (not destination.is_dir() or any(destination.iterdir())):
         raise RuntimeError("--export-app requires a new or empty directory")
-    web, hit = cached_web(defines, lambda command, cwd: subprocess.call(command, cwd=cwd))
+    web, hit = cached_app(defines, lambda command, cwd: subprocess.call(command, cwd=cwd))
     if web is None:
         raise RuntimeError(FLUTTER_REQUIRED)
     shutil.copytree(web, destination, dirs_exist_ok=True)
@@ -182,8 +215,8 @@ def main():
         parser.error("the built-in fixture uses h_042; use --server for another household")
     if args.server and args.realistic is not None:
         parser.error("--realistic requires the built-in fixture")
-    if args.server and (args.app_web is not None or args.export_app is not None):
-        parser.error("--server builds the App preview for this run; use --no-app to skip it")
+    if args.server and args.export_app is not None:
+        parser.error("--export-app requires the built-in fixture")
     if args.app_web is not None:
         args.app_web = args.app_web.resolve()
         if not (args.app_web / "index.html").is_file():
@@ -203,7 +236,7 @@ def main():
             return 1
         clock_url = server_clock(args.server)
         defines = {
-            "SPIRA_BASE_URL": origin(args.proxy_port), "SPIRA_HUB_URL": origin(args.proxy_port),
+            "SPIRA_BASE_URL": origin(args.proxy_port),
             "SPIRA_HOUSEHOLD_ID": args.household, "SPIRA_PEER": "server",
         }
     else:
@@ -315,7 +348,7 @@ def run(args, mosquitto, directory, requests, hub_key, app_token, defines, clock
         return build_process(command, cwd)
 
     def build_process(command, cwd):
-        proc = launch("app-build", command, cwd, TMPDIR=str(temporary_root()))
+        proc = launch("app-build", command, cwd, TMPDIR=str(state_root()))
         while not stopping:
             if (status := proc.poll()) is not None:
                 processes.remove(("app-build", proc))
@@ -416,7 +449,7 @@ def run(args, mosquitto, directory, requests, hub_key, app_token, defines, clock
         web = args.app_web
         app_message = None
         if web is None and not args.no_app:
-            web, hit = cached_web(defines, build)
+            web, hit = cached_app(defines, build)
             if web is None:
                 if args.server:
                     raise RuntimeError("앱 미리보기에 Flutter가 필요해요. 앱을 생략하려면 --no-app을 쓰세요.")
@@ -434,6 +467,19 @@ def run(args, mosquitto, directory, requests, hub_key, app_token, defines, clock
         if not args.server:
             clock_url = f"{server}/v1/demo/clock"
         start_peers(args.keep)
+        if web:
+            if args.server:
+                launch("app-proxy", [sys.executable, "-m", "uvicorn", "scripts.demo_app_proxy:create_app", "--factory",
+                                     "--host", "127.0.0.1", "--port", str(ports["proxy"]), "--no-access-log"],
+                       ROOT, SPIRA_SERVER_URL=server, SPIRA_HOUSEHOLD=args.household,
+                       SPIRA_APP_TOKEN=app_token, SPIRA_WEB_ORIGIN=urls["app"])
+            else:
+                launch("app-proxy", proxy_command(server, urls["hub"], ports["proxy"], ports["app"]), ROOT)
+            proxy_health = urllib.request.Request(urls["proxy"] + "/health", headers={"Origin": urls["app"]})
+            wait("App proxy", lambda: reachable(proxy_health))
+            launch("app-web", web_command(web, ports["app"]), ROOT)
+            wait("App preview", lambda: reachable(urls["app"] + "/"))
+
         if not args.no_shell:
             shell_env = ({"DEMO_RECORDINGS_DIR": str(logs / "recordings")} if args.server
                          else {"DEMO_FIXTURE_EPISODE": args.episode,
@@ -443,21 +489,9 @@ def run(args, mosquitto, directory, requests, hub_key, app_token, defines, clock
                    DEMO_SIMULATOR_URL=urls["sim"], DEMO_OPERATOR_TOKEN=operator_token,
                    DEMO_SERVER_URL=server, DEMO_APP_TOKEN=app_token, DEMO_HOUSEHOLD=args.household,
                    DEMO_RESET_URL=urls["start"] + "/reset", DEMO_RESET_TOKEN=reset_token,
-                   DEMO_HUB_URL=urls["hub"], **shell_env,
+                   DEMO_HUB_URL=urls["hub"], DEMO_APP_URL=urls.get("app", ""), **shell_env,
                    DEMO_TAGGER="off" if args.server else os.getenv("DEMO_TAGGER", "codex" if args.tagger else "off"))
             wait("Demo shell", lambda: reachable(urls["shell"] + "/demo"))
-        if web:
-            if args.server:
-                launch("app-proxy", [sys.executable, "-m", "uvicorn", "scripts.demo_app_proxy:create_app", "--factory",
-                                     "--host", "127.0.0.1", "--port", str(ports["proxy"]), "--no-access-log"],
-                       ROOT, SPIRA_SERVER_URL=server, SPIRA_HUB_URL=urls["hub"], SPIRA_HOUSEHOLD=args.household,
-                       SPIRA_HUB_KEY=hub_key, SPIRA_APP_TOKEN=app_token, SPIRA_WEB_ORIGIN=urls["app"])
-            else:
-                launch("app-proxy", proxy_command(server, urls["hub"], ports["proxy"], ports["app"]), ROOT)
-            proxy_health = urllib.request.Request(urls["proxy"] + "/health", headers={"Origin": urls["app"]})
-            wait("App proxy", lambda: reachable(proxy_health))
-            launch("app-web", web_command(web, ports["app"]), ROOT)
-            wait("App preview", lambda: reachable(urls["app"] + "/"))
 
         viewer_url = urls["sim"] + "/sim/viewer"
         hub_url = urls["hub"] + "/"
