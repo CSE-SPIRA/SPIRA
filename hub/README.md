@@ -7,6 +7,7 @@ It waits for triggers, checks current device state and delegation, reads back
 effects, and reports observations and results to the Server. It preserves
 changes made by people. The Hub has no direct App connection.
 Folder layout inside is decided by the owner. See [`spec.md`](spec.md).
+[Screen reference](screens.md)
 
 ## Run locally
 

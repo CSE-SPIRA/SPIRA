@@ -7,6 +7,7 @@ polling, version handling, and state meanings remain authoritative in
 [`simulator/protocol.md`](../simulator/protocol.md); this document consumes that
 protocol and does not redefine it. Non-normative implementation guidance is in
 [`design-notes.md`](design-notes.md).
+The [screen reference](screens.md) describes the ledger and its engineering detail.
 
 ## 1. Purpose and boundaries
 
@@ -24,6 +25,32 @@ through the device registration, plan pull and acknowledgement, event, and
 execution routes in `contracts/openapi/hub.yaml`. The Server never calls the
 Hub or Simulator. The Hub MUST NOT communicate directly with the App. The
 local dashboard serves engineering diagnostics. (PC-1, PC-2, PC-4, PC-6)
+
+### Server routes this part relies on
+
+Current availability follows the [Hub OpenAPI file](../contracts/openapi/hub.yaml),
+the real Server's [Hub router](../server/spira_server/api/hub_routes.py), and its
+[readiness route](../server/spira_server/main.py). The Hub behavior below comes
+from [the HTTP client](spira_hub/contracts.py) and
+[`Runtime.refresh`, `Runtime.register`, and `Runtime.flush`](spira_hub/runtime.py).
+
+| Server route | Served by the real Server on this branch | Hub behavior if absent |
+| --- | --- | --- |
+| `GET /health` | Yes | The Hub runtime does not call Server readiness. Its own `/health` reflects successful plan reconciliation and MQTT availability. |
+| `PUT /v1/hub/households/{household_id}/devices` | Yes | Registration stays unconfirmed and is retried on later refreshes. A successful plan pull can still reconcile. |
+| `GET /v1/hub/plans?household={household_id}` | Yes | The Hub records a pull error, retains the saved snapshot, and retries. Before any new effect, a failed recheck blocks execution as `plan_unconfirmed`. |
+| `POST /v1/hub/plans/{plan_id}/ack` | Yes, returns 204 | A 404 leaves the acknowledgement queued with `HTTP 404`. Later flushes retry the stored packet. |
+| `POST /v1/hub/events` | No | A 404 leaves the C-3 packet pending with `HTTP 404`. Later flushes retry the same packet, and a failed delivery yields no `plans_changed` response. Normal plan polling continues. |
+| `POST /v1/hub/executions` | No | A 404 leaves the C-4 run or restore packet pending with `HTTP 404`. Later flushes retry the same packet. The dashboard still shows the local outcome and its outstanding delivery. |
+
+For replay, the Hub optionally reads the demo clock from
+`SPIRA_DEMO_CLOCK_URL`. It uses wall time until the first valid clock response
+and retains the last valid clock anchors through read failures. The Hub
+publishes configured demo-clock state to the Simulator on MQTT `P/clock`.
+The real Server has no demo-clock route on this branch. With the variable unset,
+the Hub uses wall time. See [Hub startup](spira_hub/__main__.py),
+[MQTT clock publication](spira_hub/device.py), and the
+[real Server demo routes](../server/spira_server/api/demo_routes.py).
 
 ## 2. Requirements
 
