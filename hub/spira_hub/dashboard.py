@@ -5,16 +5,13 @@ from collections import defaultdict
 from hashlib import blake2s
 from html import escape
 from pathlib import Path
-from secrets import compare_digest
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from spira_contracts.devices import Devices
-from spira_contracts.error import Error
 
-from .contracts import offset_time, wire
+from .contracts import offset_time
 from .dashboard_state import state_view
 from .dashboard_words import device_words, task_count_words
 from .design_vocabulary import ROOM_NAMES
@@ -24,13 +21,10 @@ HOUSEHOLD_TIME = ZoneInfo("Asia/Seoul")
 SOURCE_LABELS = {"command": "SPIRA가 시킴", "report": "기기가 알림", "restore": "집이 되돌림"}
 
 
-def create_app(runtime, *, lifespan=None, hub_key=None, home_name="우리 집"):
+def create_app(runtime, *, lifespan=None, home_name="우리 집"):
     app = FastAPI(title="SPIRA Home Hub", lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
     app.mount("/assets", StaticFiles(directory=Path(__file__).with_name("dashboard_assets")), name="dashboard-assets")
-
-    def installed_devices() -> Devices | None:
-        return None if runtime.config_error else runtime.installation.devices
 
     @app.get("/health")
     async def health():
@@ -42,22 +36,10 @@ def create_app(runtime, *, lifespan=None, hub_key=None, home_name="우리 집"):
     async def state():
         return state_view(runtime)
 
-    @app.get("/home/onboarding/devices", response_model=Devices, response_model_exclude_unset=True)
-    async def home_devices(request: Request, response: Response):
-        supplied = request.headers.get("X-API-Key", "")
-        if not hub_key or not compare_digest(supplied.encode(), hub_key.encode()):
-            error = Error(code="unauthorized", message="Household Hub key required")
-            return JSONResponse(wire(error), status_code=401)
-        devices = installed_devices()
-        if devices is None:
-            error = Error(code="internal", message="Hub installation is unavailable")
-            return JSONResponse(wire(error), status_code=503)
-        response.headers["Cache-Control"] = "no-store"
-        return devices
-
     @app.get("/", response_class=HTMLResponse)
     async def dashboard():
-        return render(state_view(runtime, dashboard=True), home_name=home_name, devices=installed_devices())
+        devices = None if runtime.config_error else runtime.installation.devices
+        return render(state_view(runtime, dashboard=True), home_name=home_name, devices=devices)
 
     return app
 
