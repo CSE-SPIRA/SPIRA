@@ -531,3 +531,24 @@ def test_tagger_calls_once_on_complete_rationale_and_saves_tags_after_recording_
         assert replay.get(read_path, headers={"X-SPIRA-Demo-Replay": "1"}).status_code == 200
         assert replay.get(f"/demo/tags?episode={episode}").json() == unavailable
         assert len(calls) == 1
+
+
+def test_tagger_codex_home_keeps_only_the_sign_in(monkeypatch, tmp_path):
+    user_home = tmp_path / "user-codex"
+    user_home.mkdir()
+    (user_home / "auth.json").write_text("{}", encoding="utf-8")
+    (user_home / "config.toml").write_text("[mcp_servers.x]\n", encoding="utf-8")
+    monkeypatch.setenv("CODEX_HOME", str(user_home))
+    run = tmp_path / "run"
+    run.mkdir()
+
+    env = tagger.codex_home_env(run)
+
+    home = Path(env["CODEX_HOME"])
+    assert sorted(path.name for path in home.iterdir()) == ["auth.json"]
+    assert (home / "auth.json").resolve() == (user_home / "auth.json").resolve()
+
+
+def test_tagger_codex_home_falls_back_without_a_sign_in_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "empty"))
+    assert tagger.codex_home_env(tmp_path) == {}

@@ -82,7 +82,7 @@ assets.
 
 ## Tests
 
-From the repository root:
+From the repository root. The design asset check also needs `design/requirements.txt` in the same environment:
 
 ```bash
 PYTHONPATH=simulator PYTHONDONTWRITEBYTECODE=1 simulator/.venv/bin/python -m pytest -rx simulator/tests

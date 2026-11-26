@@ -157,6 +157,19 @@ def validate_tags(sources, output):
     return valid, dropped
 
 
+def codex_home_env(directory):
+    """Run Codex with its sign-in only, so a user's MCP servers, hooks and instructions stay out of the call."""
+    source = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+    auth = source / "auth.json"
+    if not auth.is_file():
+        # Credentials kept outside the file store (for example a keyring) need the user's own home.
+        return {}
+    home = directory / "codex-home"
+    home.mkdir(mode=0o700)
+    (home / "auth.json").symlink_to(auth.resolve())
+    return {"CODEX_HOME": str(home)}
+
+
 async def codex_request(schema, prompt):
     # Isolate the CLI from the repo and keep its temporary files out of the worktree.
     scratch = "/private/tmp" if Path("/private/tmp").is_dir() else None
@@ -164,6 +177,7 @@ async def codex_request(schema, prompt):
         schema_path = Path(directory) / "schema.json"
         schema_path.write_text(json.dumps(schema), encoding="utf-8")
         env = {key: value for key, value in os.environ.items() if not key.startswith(("DEMO_", "WORLD_", "MQTT_", "SPIRA_"))}
+        env.update(codex_home_env(Path(directory)))
         process = await asyncio.create_subprocess_exec(
             "codex", "exec", "-m", "gpt-6.2-sol", "--ephemeral", "--skip-git-repo-check",
             "--output-schema", str(schema_path), "-c", 'model_reasoning_effort="low"',
