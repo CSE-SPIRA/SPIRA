@@ -1,9 +1,8 @@
 # App design notes
 
-> **Non-normative.** This file preserves useful implementation choices from the
-> pre-G0 App specification. Agents may use it as guidance, but nothing here is a
-> Gate G0 product requirement or acceptance exit. [`spec.md`](spec.md) and
-> [`contracts/`](../contracts/README.md) remain authoritative.
+> **Status: HISTORICAL.** This file records implementation guidance from the
+> pre-G0 App. [App behavior](spec.md) and the
+> [shared contracts](../contracts/README.md) are the current references.
 
 The product is intentionally thin, so implementation machinery should remain
 behind the App's small user surface. These notes do not authorize extra product
