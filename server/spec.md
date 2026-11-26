@@ -107,10 +107,11 @@ LLM output is read by a program. A question, request for confirmation, refusal, 
 | --- | --- |
 | `spira_server/main.py` | App factory: settings, DB, routers, scheduler start/stop, `/health` |
 | `spira_server/settings.py` | Environment variables (§3.1), typed (`pydantic-settings`) |
-| `spira_server/clock.py` | `now()` (Asia/Seoul aware). Tests replace it |
+| `spira_server/clock.py` | `now()` (Asia/Seoul aware). Tests replace it; with `DEMO_MODE=1` it follows the story clock |
+| `spira_server/demo_clock.py` | Demo story clock (§12.6) |
 | `spira_server/config.py` | Loads `server/config/*.yaml` and applies `DEMO_MODE` overrides |
 | `spira_server/db/` | SQLAlchemy engine/session for the server DB, read-only engine for the KB DB, ORM models (§5) |
-| `spira_server/api/` | `app_routes.py`, `hub_routes.py`, `auth.py`, `errors.py` (error body, §12.1) |
+| `spira_server/api/` | `app_routes.py`, `hub_routes.py`, `demo_routes.py` (§12.5), `demo_clock_routes.py` (§12.6), `auth.py`, `errors.py` (error body, §12.1) |
 | `spira_server/pipeline/s1_extract.py` | Receive captures, group, quiet timer, LLM read, label/mask/merge |
 | `spira_server/pipeline/s2_context.py` | `build_context`, unusual items, KB search, representative cases |
 | `spira_server/pipeline/s2_calendar.py` | Calendar intake and tagging |
@@ -120,9 +121,8 @@ LLM output is read by a program. A question, request for confirmation, refusal, 
 | `spira_server/pipeline/s5_plan.py` | Safety net, merge, fridge notices, confirm, publish, held expiry |
 | `spira_server/pipeline/s5_reactions.py` | Card reactions stop / line_off / line_on (§11.7) |
 | `spira_server/pipeline/s5_cards.py` | Card creation, text templates, line states (C-7) |
-| `spira_server/pipeline/s6_release.py` | Package-arrival linking |
-| `spira_server/pipeline/s7_observe.py` | Windows, signals, verdict, task feedback |
-| `spira_server/pipeline/s7_memory.py` | `case_row`, memory API data |
+| `spira_server/pipeline/s6_hub.py` | Hub events (package-arrival linking, end events) and execution results; card line recompute (§11.5, §12.2, §12.4) |
+| `spira_server/pipeline/s7_observe.py` | Windows, signals, verdict, task feedback, `case_row`, memory API data; the `end_tasks` / `close_windows` / `close_episodes` jobs (§11.8, §13) |
 | `spira_server/llm/` | `client.py` (one interface, providers, mock), `prompts.py` (load files), `calls.py` (call log) |
 | `spira_server/kb/` | `lists.py` (`contracts/kb/*.json`), `embedding.py` (wraps `spira.embedding`), `search.py`, `household.py` (combination rules) |
 | `spira_server/scheduler.py` | APScheduler jobs (§2.3) |
@@ -156,7 +156,7 @@ Pipeline steps run in background tasks (FastAPI `BackgroundTasks` or the schedul
 | `purge` | daily 04:00 | Delete device-state events older than 14 days, temp images older than 1 day |
 | `close_episodes` | every 10 min | Close finished episodes (§11.8) |
 
-Every job takes the locks of §2.4 and is safe to run twice. On start: re-schedule `quiet_timer` for every episode with unread images (any status) at `max(quiet_due, now)`; resume every episode whose `stage` is not `done` from its last committed stage (§2.4).
+`end_tasks`, `close_windows` and `close_episodes` run together, in that order, every 10 min, or every 2 s with `DEMO_MODE=1` so a story-clock ramp (§12.6) is followed at once. Every job takes the locks of §2.4 and is safe to run twice. On start: re-schedule `quiet_timer` for every episode with unread images (any status) at `max(quiet_due, now)`; resume every episode whose `stage` is not `done` from its last committed stage (§2.4).
 
 ### 2.4 Transactions and locks
 
@@ -1004,7 +1004,7 @@ The API surface, paths, bodies and status codes are in `contracts/openapi/app.ya
 | `PUT /v1/hub/households/{hid}/devices` | The same device `id` twice in one list → 422 `validation_error` (`details.path` = the second one). Revision lower than stored → 409 `stale_revision`; equal → 200 no change; higher → store. Plans already published keep their `devices_revision` (the hub checks delegation at run time) |
 | `GET /v1/hub/plans?household=` | Latest version of every episode that §11.3 says is still pulled + `paused` + `devices_revision` |
 | `POST /v1/hub/plans/{plan_id}/ack` | Every accepted ack answers `204` (`hub.yaml`). Same `plan_version` already acked with the same body → 204, nothing else; with a different body → 204, ignored (the first ack stands). Unknown `plan_version` → 404. `plan_version` older than the latest → stored on that version only; never changes tasks of a newer version. Unknown task ids in `rejected_tasks` → 422. `status: rejected` (whole plan unreadable) → every task of that version that is new in it fails; otherwise only the listed tasks fail. A failed task → `dropped` (`rejected`), line `failed` with `rejected_note`, never re-planned. An ack arriving after `ack_timeout_min` for the latest version: lines failed only by the timeout and whose trigger is still ahead go back to `live` |
-| `POST /v1/hub/events` | The outer body is validated as an object with an `events` array (else 422). **Each element is validated on its own** with `event.json` + `validate` (no whole-body model): invalid (schema, unknown device, other household) → `rejected` with code (an element without a usable `event_id` is reported by its array index); valid → one transaction per event (§2.4): duplicate → accepted, skip; else store, then `package.brought_in` → §12.4, others → S7 (§13). `plans_changed` = a new version was published while handling the batch |
+| `POST /v1/hub/events` | The body is the contract's event batch, a non-empty array (`event_batch.json`, else 422). **Each element is validated on its own** with `event.json` + `validate` (no whole-body model): invalid (schema, unknown device, other household) → `rejected` with code (an element without a usable `event_id` is reported by its array index); valid → one transaction per event (§2.4): duplicate → accepted, skip; else store, then `package.brought_in` → §12.4, others → S7 (§13). `plans_changed` = a new version was published while handling the batch |
 | `POST /v1/hub/executions` | Duplicate `result_id` → `{duplicate: true}`. Else, in one transaction: store; `task_id` must be a task of that `plan_version` and `device`/`cmd` one of its actions, else 422; set `started_at` / `start_uncertain` (§5.2); late start of a cancelled task → restore true and a new version (§11.3); recompute the line (§11.5); pass to S7. A result for an older `plan_version` updates its task's state and observation the same way (results are per task, not per version); it never re-lives a cancelled task |
 
 ### 12.3 Household type check
@@ -1052,6 +1052,20 @@ Also 422 when a value is not one of the 20 types or a "pick one" axis (size, lif
 `POST /v1/demo/households/{id}/reset` (same rules: `DEMO_MODE=1`, app token): write the demo home again from `DEMO_HOME` (default `dev/home.yaml`, relative to `server/`) with `dev/seed.py` — the household is deleted (episodes, items, tasks, cards, plans, windows, memory rows) and written again with its household types, devices, the calendar re-based to now (tagged again by the LLM) and the past orders. The household's hub key hash is kept, so a running hub keeps pulling. 404 for an unknown household. Rehearsals start from the same home every time; the judgment logic is untouched (same order twice without a reset still shows the S5 merge, `overlap`). `scripts/demo_home.py` does the same from a terminal (keeps the key unless `--new-key`).
 
 Replay (same rules). `POST /v1/demo/episodes/{id}/keep` (`{"keep": false}` undoes; judged episodes only) sets `episodes.replay_kept` (migration 0004). On a reset (route or script) kept episodes are first moved to the household's replay archive `{household_id}replay` (a paused household with a random hub key, never reset, never pulled): their `live`/`held` tasks become `cancelled` and their capture-dedupe rows go, everything else (items, context, intent, `s4`, cards, plans, stage times, LLM calls) stays. So the live demo home never sees them again (history in S2, the S5 merge, hub plans, card polls), and `…/trace?at=` replays them by episode id. `GET /v1/demo/households/{id}/replays` lists kept episodes of the household and its archive, newest first: `episode_id, started_at, duration_s` (received → S5), `intents`, `items` count, `parked`.
+
+Idle console (same rules). `GET /v1/demo/households/{id}/status` returns what the Server already knows before an order, for the presenter page while it waits: `household_types`, `devices` (`count`, per-room counts from the stored device list), `orders` (`count` of the household's episodes, `latest` = newest by `shared_at` with its unmasked item types), `calendar` (events not ended yet by start: `id`, `start`, `end`, `tags`, `tagged`; titles are never stored, §8.5), `now`. Read only.
+
+### 12.6 Demo story clock (`contracts/openapi/demo.yaml`, `DEMO_MODE=1` only)
+
+One story clock per server process (`demo_clock.py`), so the presenter can jump to the next moment of a preparation and the hub, the Simulator and the server all see the same time. Anchors as in the hub's `story_clock.py` (`version`, `real_at`, `story_at`, `rate`, `ramp_until`) plus `now`: story time = `story_at + (real − real_at) × rate` until `ramp_until`, then 1× from where the ramp ended. It only moves forward.
+
+- **The server follows it.** On start with `DEMO_MODE=1`, `clock.now()` reads the story clock, so triggers, windows, `late`, card times and the jobs of §2.3 run on story time. Stage times (§2.4) stay wall time. A demo reset (§12.5) puts it back on wall time (`version` + 1) before the calendar is re-based.
+- `GET /v1/demo/clock`: **no auth**, so the hub can poll it (`SPIRA_DEMO_CLOCK_URL`, once a second) and pass it to the Simulator on MQTT `P/clock`.
+- `POST /v1/demo/clock` `{advance_to, over_seconds = 6 (1–60)}` (app token): ramp to `advance_to` over that many real seconds; not after story time now → 400 `invalid_request`.
+- `GET /v1/demo/moments?episode_id=` (app token; without `episode_id` → `[]`): from the episode's latest plan version, in time order — each time trigger (tasks at the same time share one moment, `kind: time`), each guest-window opening (`kind: time`, `event: guest_arrived`), each card's schedule end (`kind: event`, `event: event_end`, the S4 schedule end, else the bundle's use window end; not for a stopped, archived or held card, or a closed window) and, while the episode is still `received`, the quiet-window end (`event: judgment.quiet_end`).
+- `POST /v1/demo/clock/next?episode_id=` `{over_seconds}`: ramp to the first moment still ahead — a time moment 20 s early (the hub pulls and is ready), others on time — and return it; none left → 404 with message `No story moments remain`.
+
+The hub, the Simulator and the server's demo home must name the same devices: `scripts/demo_peers.py` writes the hub installation and the Simulator profile from `DEMO_HOME` (`server/out/peers/`; `substrate` as in the Simulator, which only has virtual devices).
 
 ---
 
@@ -1114,7 +1128,7 @@ At close of each window, if the card had situation lines and the intent is not `
 
 Shape: `contracts/schemas/case_row.json`, example `contracts/fixtures/ep_9031/case_row.json`.
 
-`GET /v1/households/{hid}/memory` groups rows by same intent (intent id + tag set): `episodes` (case id, date, verdict), `off_lines` (line, `until` = off date + 180 days, case id), `changed` (device type, display text, case id), `habit_time` (the §10.3 habit result, else null). `DELETE …/memory/{case_id}` deletes that row (and with it its stop, off lines and changes).
+`GET /v1/households/{hid}/memory` groups rows by same intent (intent id + tag set), newest row first: `episodes` (case id, date of `executed_at`, verdict), `off_lines` (line, `until` = off date + `line_off_d`, case id), `changed` (device type, display text, case id; text = "손님 도착 뒤 " / "택배가 온 뒤 " by the task's event trigger + "색온도 {K}K로 바꿈" for a kelvin value, else the property, e.g. "손님 도착 뒤 색온도 2700K로 바꿈"), `habit_time` (the §10.3 habit result, else null). `DELETE …/memory/{case_id}` deletes that row (and with it its stop, off lines and changes).
 
 Per-item tasks are never written to memory. Writing fails (e.g. embedding error) → window `closed` with `memory = pending`; `close_windows` retries every pending row, and the episode stays open until it succeeds (§11.8).
 
@@ -1385,3 +1399,8 @@ Not yet in the Notion server spec (synchronised in one pass later). B.2 lists th
 | R49 | S3 KB examples drop the line "이번 주문과 겹치는 물건: N개 중 K개" and the rule "fewer shared items = less alike"; the how-to says example items may be the same item under another name. Exact names undercounted (B8: 28 of the 31 kept cases shared 0 names, yet were the right kid birthday cases); an embedding match per item name was measured and rejected, same and different items overlap (나무젓가락 0.92, 생일 초 0.67 vs 클라이밍 초크 0.71, 케이크 0.76). S3 sees both item lists and judges itself; search and counts unchanged (11-22, 서진) | §8.3, §9.3, `s3_blocks.yaml`, `s2_context.py` |
 | R50 | S1 `type` keeps an occasion or use word from the product name ("타요풍선 생일파티세트" → 생일 풍선, "생일초 공룡초 케이크 초" → 생일 초) and drops flavour, colour and character (theme attribute only); same product, same type. Dry run B8/B9 (same cart photo): S1 read 생일 풍선 / 포도맛 탄산음료 once and 풍선 세트 / 탄산음료 once; the whole similarity band moved about 0.025 and the KB neighbours above 0.70 went from 31 to 2 (KB block off). Shortening names (dropping modifiers) was rejected: occasion words are search cues and the theme already has its own attribute (11-22, 서진) | §7, `s1_system.txt` |
 | R51 | S4 fridge notices only for (a) little-known prep/storage whose omission costs something or (b) handling this intent changes; otherwise null even for intent items. The rule "an intent item gets an intent_change and a matching text" made every intent item get one (dry run: 탄산음료 "금요일 밤부터 냉장실에 세워 두어 차게", 생수 "직사광선을 피해 서늘한 곳에"). Step 3 and the block header no longer say every listed item needs a text; null examples for intent items added. The frozen-thaw example uses weekday placeholders (○요일 / △요일, the intent's schedule day and the day before) because the model copied its "토요일" verbatim (11-26, 서진) | §10.5, §10.8, `s4_system.txt`, `s4_blocks.yaml` |
+| R52 | Demo story clock on the server (`DEMO_MODE=1`): `clock.now()` follows it, so the hub, the Simulator and the server share one time; `GET /v1/demo/clock` without auth (the hub polls it with no headers), writes with the app token; never backwards, a demo reset returns it to wall time; moments come from the latest plan version, `next` reaches a time moment 20 s early. Routes were already called by the demo shell and the hub (fixture server only) (11-27, 서진) | §12.6, `demo.yaml` |
+| R53 | `POST /v1/hub/events` body = the contract's array (`event_batch.json`, what the hub sends); the spec text "object with an `events` array" was wrong | §12.2 |
+| R54 | `end_tasks`, `close_windows`, `close_episodes` run every 2 s with `DEMO_MODE=1` (10 min otherwise), so ramped story time is followed at once | §2.3 |
+| R55 | Demo peers from the demo home: `scripts/demo_peers.py` writes the hub installation and the Simulator profile from `DEMO_HOME` (9 devices, same ids, commands and values; the extra styler and purifier get Simulator value schemas for the demo home's values); `substrate` is taken from the Simulator because the fixture's physical `light_01` is refused by a hub with no driver (`not_delegated`) | §12.6 |
+| R56 | S7 closes a window at the observed `event_end` before the hub's restore results arrive: verdict and feedback are fixed at the close (feedback `changed` also from a restore item `skipped_user_changed`), later restore results update only the line `end_state`. Memory `changed` text rule written down | §13.4, §13.5 |

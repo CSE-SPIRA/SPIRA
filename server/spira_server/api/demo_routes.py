@@ -10,9 +10,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import clock
-from ..paths import SERVER_DIR
 from ..db.engine import session_scope
-from ..db.models import Card, Episode, LlmCall, OrderItem, Plan, Task
+from ..db.models import CalendarEvent, Card, DeviceList, Episode, Household, LlmCall, OrderItem, Plan, Task
+from ..paths import SERVER_DIR
 from ..pipeline.s5_cards import card_body
 from ..pipeline.stage_times import wall
 from ..settings import get_settings
@@ -148,6 +148,9 @@ def reset_household(household_id: str = Path(pattern=r"^h_[0-9a-z]+$")) -> dict:
     if key_hash is None:
         raise ApiError("not_found", "Unknown household.")
     path = SERVER_DIR / get_settings().demo_home
+    from .. import demo_clock
+
+    demo_clock.reset()                           # story clock back on wall time (§12.6); the calendar re-bases to it
     now = clock.now()
     try:
         home = load_home(path, now)
@@ -199,3 +202,40 @@ def list_replays(household_id: str = Path(pattern=r"^h_[0-9a-z]+$")) -> dict:
                                            .where(OrderItem.episode_id == ep.id)).scalar(),
                         "parked": ep.household_id != household_id})
         return {"replays": out}
+
+
+@router.get("/v1/demo/households/{household_id}/status", dependencies=[Depends(_demo_only)])
+def household_status(household_id: str = Path(pattern=r"^h_[0-9a-z]+$")) -> dict:
+    """What the Server already knows about the household before an order (the presenter's idle console): household
+    types, devices by room, the order history and the coming calendar. Stored values only; event titles are never
+    stored, so events show their id, tags and times."""
+    now = clock.now()
+    with session_scope() as s:
+        household = s.get(Household, household_id)
+        if household is None:
+            raise ApiError("not_found", "Unknown household.")
+        dl = s.get(DeviceList, household_id)
+        rooms: dict[str, int] = {}
+        for device in (dl.body or {}).get("devices", []) if dl else []:
+            room = device.get("room") or "-"
+            rooms[room] = rooms.get(room, 0) + 1
+        episodes = s.execute(select(Episode).where(Episode.household_id == household_id)
+                             .order_by(Episode.shared_at.desc())).scalars().all()
+        latest = None
+        if episodes:
+            items = s.execute(select(OrderItem.type).where(OrderItem.episode_id == episodes[0].id,
+                                                           OrderItem.masked.is_(False))
+                              .order_by(OrderItem.id)).scalars().all()
+            latest = {"episode_id": episodes[0].id, "shared_at": clock.iso(episodes[0].shared_at),
+                      "status": episodes[0].status, "items": [i for i in items if i]}
+        events = s.execute(select(CalendarEvent).where(CalendarEvent.household_id == household_id,
+                                                       CalendarEvent.end >= now)
+                           .order_by(CalendarEvent.start)).scalars().all()
+        return {
+            "household_id": household_id, "household_types": list(household.household_types or []),
+            "devices": {"count": sum(rooms.values()), "rooms": rooms},
+            "orders": {"count": len(episodes), "latest": latest},
+            "calendar": [{"id": e.id, "start": clock.iso(e.start), "end": clock.iso(e.end), "tags": list(e.tags or []),
+                          "tagged": e.tagged} for e in events],
+            "now": clock.iso(now),
+        }

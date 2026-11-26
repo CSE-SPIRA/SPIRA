@@ -271,6 +271,8 @@ async function boot() {
   state.scenes.reason = stages.flatMap(stageScenes);
   if (state.serverReplay && (!state.config.server || state.config.fixture)) state.serverReplay = null;
   $("frame").classList.toggle("server-replay", Boolean(state.serverReplay));
+  // Server log look (11-27): console tint, stage bands, dark title bar with a status dot.
+  $("frame").classList.toggle("look-a", true);
   ui.replays.bind();
   state.flow = createFlow($("stage-steps"), $("stage-beat"));
   ui.presenter.bindControls();

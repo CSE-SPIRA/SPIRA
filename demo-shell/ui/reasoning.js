@@ -1,5 +1,5 @@
 import { STAGE_NAMES } from "./flow.js";
-import { serverLog, stageFinished, TRACE_OF } from "./serverlog.js";
+import { idleLog, serverLog, stageFinished, TRACE_OF } from "./serverlog.js";
 import { DEVICE_NAMES, STATE_WORDS } from "/demo/shared/vocabulary.js";
 import { buildChain } from "./chain.js";
 import { stageNotice } from "./wire.js";
@@ -318,6 +318,16 @@ export function createReasoning(context, ui) {
     renderStageIndicator();
     ui.phone.renderPhone();
     const problem = stageNotice(scene.id, state.readProblems);
+    // Server mode before an order: the same console, waiting, with what the Server knows about the home.
+    if (scene.id === "share" && !state.episodeId && state.config.server && !state.config.fixture && !RECORDING &&
+        !REPLAY && !state.serverReplay) {
+      delete copy.dataset.judgment;
+      const markup = idleLog(state.homeStatus, { household: state.config.household_id });
+      if (copy.dataset.content !== markup) setMarkup(copy, markup);
+      copy.onclick = null;
+      ui.presenter.renderControls();
+      return;
+    }
     if (logMode() && (scene.id === "share" || TRACE_OF[scene.id])) {
       delete copy.dataset.judgment;
       const markup = serverLog(state.trace, TRACE_OF[scene.id] ?? null, traceNow(), {

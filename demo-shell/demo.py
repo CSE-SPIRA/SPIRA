@@ -55,6 +55,7 @@ SERVER_READS = (
     re.compile(r"^v1/demo/households/h_[A-Za-z0-9_]+/replays$"),
     re.compile(r"^v1/households/h_[A-Za-z0-9_]+/memory$"),
     re.compile(r"^v1/households/h_[A-Za-z0-9_]+/episodes$"),
+    re.compile(r"^v1/demo/households/h_[A-Za-z0-9_]+/status$"),
 )
 # The App's web build in the phone (app/build/web, built with --base-href /demo/app/) and the contract routes it may
 # call through /demo/app-api/ (contracts/openapi/app.yaml). The shell adds the app token; the browser never holds it.

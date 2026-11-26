@@ -429,7 +429,7 @@ test("the stage strip marks each stage done only when its own result arrives", a
   const strip = shell.byId("stage-steps").children;
   const done = () => strip.filter((node) => node.classList.contains("done")).map((node) => node.dataset.stage);
   const current = () => strip.find((node) => node.getAttribute("aria-current") === "step")?.dataset.stage;
-  assert.deepEqual(strip.map(({ textContent }) => textContent), ["1 추출", "2 맥락", "3 의도", "4 할 일", "5 계획", "6 집", "7 기록"]);
+  assert.deepEqual(strip.map(({ textContent }) => textContent), ["1 주문 추출", "2 맥락 검색", "3 의도 추론", "4 할 일 생성", "5 계획 확정", "6 집 실행", "7 기억 저장"]);
   assert.equal(current(), "extract");
   assert.deepEqual(done(), []);
 
@@ -688,7 +688,7 @@ test("a Server rationale 404 while judging waits at the stage instead of skippin
   const stage = () => shell.byId("reason-layout").dataset.stage;
   await shell.runFor(30000);
   assert.equal(stage(), "extract");
-  assert.match(shell.byId("stage-beat").textContent, /맥락을 기다려요/);
+  assert.match(shell.byId("stage-beat").textContent, /맥락 검색을 기다려요/);
   assert.doesNotMatch(shell.byId("stage-copy").innerHTML, /서버가 아직 이 단계를 내보내지 않아요/);
   evidence = { ...rationale, intents: [], none_reason: null, tasks: [], item_tasks: [], unbundled: [] };
   await shell.runFor(2000);
@@ -715,10 +715,26 @@ test("the presenter log moves on to the plan once the Server finished S5, withou
   });
   await shell.runFor(40000);
   assert.equal(shell.byId("reason-layout").dataset.stage, "plan");
-  assert.match(shell.byId("stage-copy").innerHTML, /S5 계획 · 카드/);
+  assert.match(shell.byId("stage-copy").innerHTML, /S5 계획 확정/);
   // Next is the house, not the phone card; without a Hub that has the plan it says what it waits for.
   assert.equal(shell.byId("next-cue").textContent, "대기 · 집의 계획 수신");
   assert.equal(shell.byId("path-control").hidden, true);
+
+  // Back, then next walks forward again; a finished stage in the bar opens that stage.
+  shell.byId("previous").onclick();
+  await shell.runFor(10);
+  assert.equal(shell.byId("reason-layout").dataset.stage, "tasks");
+  assert.equal(shell.byId("next-cue").textContent, "다음: 계획 확정");
+  shell.byId("next-cue").onclick();
+  await shell.runFor(10);
+  assert.equal(shell.byId("reason-layout").dataset.stage, "plan");
+  shell.byId("stage-steps").onclick({ target: { closest: () => ({ dataset: { stage: "context" } }) } });
+  await shell.runFor(10);
+  assert.equal(shell.byId("reason-layout").dataset.stage, "context");
+  assert.match(shell.byId("stage-copy").innerHTML, /S2 맥락 검색/);
+  assert.equal(shell.byId("next-cue").textContent, "다음: 의도 추론");
+  await shell.runFor(20000);
+  assert.equal(shell.byId("reason-layout").dataset.stage, "context");      // no auto-advance after a manual pick
 });
 
 test("the right panel follows a new order of the household from any phone", async (t) => {
@@ -933,11 +949,11 @@ test("a new live share clears old data and records arrivals across a 503 and a t
   shell.byId("files").onchange({ target: { files: [new File(["order image"], "order.png", { type: "image/png" })] } });
   await settle();
   shell.byId("next").onclick();
-  assert.match(shell.byId("stage-beat").textContent, /맥락을 기다려요 · 0초.*연결을 다시 확인해요/);
+  assert.match(shell.byId("stage-beat").textContent, /맥락 검색을 기다려요 · 0초.*연결을 다시 확인해요/);
   assert.doesNotMatch(shell.byId("phone-content").innerHTML, /케이크 토퍼/);
   assert.equal(shell.byId("judgment-calendar").hidden, true);
   await shell.runTimer(1000);
-  assert.match(shell.byId("stage-beat").textContent, /맥락을 기다려요 · 1초/);
+  assert.match(shell.byId("stage-beat").textContent, /맥락 검색을 기다려요 · 1초/);
   await shell.runTimer(1000);
   assert.equal(reads, 3);
   shell.byId("next").onclick();

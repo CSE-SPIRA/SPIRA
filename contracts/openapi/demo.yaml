@@ -1,4 +1,5 @@
-# Demo shell <-> Server: how far one judgment has come, for the presenter screen. Only when DEMO_MODE=1 (else 404).
+# Demo shell <-> Server: how far one judgment has come, and the story clock, for the presenter screen. Only when
+# DEMO_MODE=1 (else 404).
 # Auth: Authorization: Bearer <demo token> (same as the app). Not part of the app contract; the app never calls it.
 openapi: 3.1.0
 info:
@@ -111,6 +112,119 @@ paths:
                         items: {type: integer, minimum: 0}
                         parked: {type: boolean, description: Already moved to the replay archive by a reset.}
         '401': {$ref: '#/components/responses/Error'}
+  /v1/demo/clock:
+    get:
+      summary: Story clock (server/spec.md §12.6). No auth, so the Hub can follow it (SPIRA_DEMO_CLOCK_URL).
+      description: >-
+        story time = story_at + (real now − real_at) × rate until ramp_until, then 1× from where the ramp ended.
+        The Server's own clock follows it while DEMO_MODE=1, so triggers, windows and ends run on story time.
+      security: []
+      responses:
+        '200': {description: Clock, content: {application/json: {schema: {$ref: '#/components/schemas/Clock'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    post:
+      summary: Ramp story time forward to advance_to over over_seconds real seconds (1–60, default 6).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [advance_to]
+              properties:
+                advance_to: {$ref: '../schemas/common.json#/$defs/DateTime'}
+                over_seconds: {type: number, minimum: 1, maximum: 60, default: 6}
+      responses:
+        '200': {description: New clock, content: {application/json: {schema: {$ref: '#/components/schemas/Clock'}}}}
+        '400': {description: 'invalid_request: advance_to is not after story time now', content: {application/json: {schema: {$ref: '../schemas/error.json'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /v1/demo/clock/next:
+    post:
+      summary: Ramp to the next moment of the episode (time moments 20 s early, so the Hub is ready), return that moment.
+      parameters:
+        - {name: episode_id, in: query, required: true, schema: {$ref: '../schemas/common.json#/$defs/EpisodeId'}}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                over_seconds: {type: number, minimum: 1, maximum: 60, default: 6}
+      responses:
+        '200': {description: The moment the clock now ramps to, content: {application/json: {schema: {$ref: '#/components/schemas/Moment'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {description: 'Unknown episode, or message "No story moments remain"', content: {application/json: {schema: {$ref: '../schemas/error.json'}}}}
+        '422': {$ref: '#/components/responses/Error'}
+  /v1/demo/moments:
+    get:
+      summary: Story moments of one episode from its latest plan, in time order (without episode_id, []).
+      parameters:
+        - {name: episode_id, in: query, required: false, schema: {$ref: '../schemas/common.json#/$defs/EpisodeId'}}
+      responses:
+        '200': {description: Moments, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Moment'}}}}}
+        '401': {$ref: '#/components/responses/Error'}
+  /v1/demo/households/{household_id}/status:
+    get:
+      summary: What the Server knows about the household before an order (presenter idle console). Stored values only.
+      parameters:
+        - {name: household_id, in: path, required: true, schema: {$ref: '../schemas/common.json#/$defs/HouseholdId'}}
+      responses:
+        '200':
+          description: Household status
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [household_id, household_types, devices, orders, calendar, now]
+                properties:
+                  household_id: {$ref: '../schemas/common.json#/$defs/HouseholdId'}
+                  household_types: {type: array, items: {type: string}}
+                  devices:
+                    type: object
+                    additionalProperties: false
+                    required: [count, rooms]
+                    properties:
+                      count: {type: integer, minimum: 0}
+                      rooms: {type: object, additionalProperties: {type: integer, minimum: 0}}
+                  orders:
+                    type: object
+                    additionalProperties: false
+                    required: [count, latest]
+                    properties:
+                      count: {type: integer, minimum: 0}
+                      latest:
+                        oneOf:
+                          - {type: 'null'}
+                          - type: object
+                            additionalProperties: false
+                            required: [episode_id, shared_at, status, items]
+                            properties:
+                              episode_id: {$ref: '../schemas/common.json#/$defs/EpisodeId'}
+                              shared_at: {type: string}
+                              status: {type: string}
+                              items: {type: array, items: {type: string}, description: Item types, masked items left out.}
+                  calendar:
+                    type: array
+                    description: Events not ended yet, by start. Titles are never stored.
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [id, start, end, tags, tagged]
+                      properties:
+                        id: {type: string}
+                        start: {type: string}
+                        end: {type: string}
+                        tags: {type: array, items: {type: string}}
+                        tagged: {type: boolean}
+                  now: {type: string}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
 components:
   securitySchemes:
     appToken: {type: http, scheme: bearer}
@@ -119,6 +233,33 @@ components:
       description: See error.code (enums.json error_code). 404 also when DEMO_MODE is off.
       content: {application/json: {schema: {$ref: '../schemas/error.json'}}}
   schemas:
+    Clock:
+      type: object
+      additionalProperties: false
+      required: [version, real_at, story_at, rate, ramp_until, now]
+      description: Same anchors as hub/spira_hub/story_clock.py ClockState, plus `now` (story time when answered).
+      properties:
+        version: {type: integer, minimum: 1, description: +1 on every change; readers keep the highest.}
+        real_at: {$ref: '../schemas/common.json#/$defs/DateTime'}
+        story_at: {$ref: '../schemas/common.json#/$defs/DateTime'}
+        rate: {type: number, exclusiveMinimum: 0}
+        ramp_until: {anyOf: [{$ref: '../schemas/common.json#/$defs/DateTime'}, {type: 'null'}]}
+        now: {$ref: '../schemas/common.json#/$defs/DateTime'}
+    Moment:
+      type: object
+      additionalProperties: false
+      required: [id, at, kind, label, task_ids, event, episode_id]
+      description: >-
+        kind time = a time trigger (tasks at the same time share one moment) or a guest window opening; kind event =
+        the schedule end (event_end) the presenter acts out; the quiet-window end has event judgment.quiet_end.
+      properties:
+        id: {type: string}
+        at: {$ref: '../schemas/common.json#/$defs/DateTime'}
+        kind: {type: string, enum: [time, event]}
+        label: {type: string}
+        task_ids: {type: array, items: {$ref: '../schemas/common.json#/$defs/TaskId'}}
+        event: {type: [string, 'null'], description: 'guest_arrived, event_end, judgment.quiet_end or null'}
+        episode_id: {$ref: '../schemas/common.json#/$defs/EpisodeId'}
     Trace:
       type: object
       additionalProperties: false

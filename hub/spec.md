@@ -40,15 +40,16 @@ from [the HTTP client](spira_hub/contracts.py) and
 | `PUT /v1/hub/households/{household_id}/devices` | Yes | Registration stays unconfirmed and is retried on later refreshes. A successful plan pull can still reconcile. |
 | `GET /v1/hub/plans?household={household_id}` | Yes | The Hub records a pull error, retains the saved snapshot, and retries. Before any new effect, a failed recheck blocks execution as `plan_unconfirmed`. |
 | `POST /v1/hub/plans/{plan_id}/ack` | Yes, returns 204 | A 404 leaves the acknowledgement queued with `HTTP 404`. Later flushes retry the stored packet. |
-| `POST /v1/hub/events` | No | A 404 leaves the C-3 packet pending with `HTTP 404`. Later flushes retry the same packet, and a failed delivery yields no `plans_changed` response. Normal plan polling continues. |
-| `POST /v1/hub/executions` | No | A 404 leaves the C-4 run or restore packet pending with `HTTP 404`. Later flushes retry the same packet. The dashboard still shows the local outcome and its outstanding delivery. |
+| `POST /v1/hub/events` | Yes | A 404 leaves the C-3 packet pending with `HTTP 404`. Later flushes retry the same packet, and a failed delivery yields no `plans_changed` response. Normal plan polling continues. |
+| `POST /v1/hub/executions` | Yes | A 404 leaves the C-4 run or restore packet pending with `HTTP 404`. Later flushes retry the same packet. The dashboard still shows the local outcome and its outstanding delivery. |
 
 For replay, the Hub optionally reads the demo clock from
 `SPIRA_DEMO_CLOCK_URL`. It uses wall time until the first valid clock response
 and retains the last valid clock anchors through read failures. The Hub
 publishes configured demo-clock state to the Simulator on MQTT `P/clock`.
-The real Server has no demo-clock route on this branch. With the variable unset,
-the Hub uses wall time. See [Hub startup](spira_hub/__main__.py),
+With `DEMO_MODE=1` the real Server serves this clock at `GET /v1/demo/clock`
+(no auth) and follows it itself ([Server spec §12.6](../server/spec.md)). With
+the variable unset, the Hub uses wall time. See [Hub startup](spira_hub/__main__.py),
 [MQTT clock publication](spira_hub/device.py), and the
 [real Server demo routes](../server/spira_server/api/demo_routes.py).
 

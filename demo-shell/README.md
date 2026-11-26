@@ -67,6 +67,12 @@ intent shares now vs usual; S4: tasks, fridge notices, dropped tasks), and the
 next stage shows its real Server state (`의도 추론 중 … 12s`). A stage is ready
 when the trace says the Server finished it, so S4 shows before S5.
 
+Stage names (11-27): 1 주문 추출, 2 맥락 검색, 3 의도 추론, 4 할 일 생성, 5 계획 확정, 6 집 실행, 7 기억 저장, the same in the
+step bar, the log (S1–S5) and the next cue. The log fills the right area on a console tint: finished stages are bands,
+the current or reopened stage is a white card with the left bar, and the head is a dark title bar whose dot pulses green
+live and stays blue in a replay. In log mode a finished stage in the step bar opens that stage, and "다음" walks the
+stages again after "이전".
+
 App in the phone (`ui/app-phone.js`). With a Server and no fixture, when
 `app/build/web/index.html` exists (or `DEMO_APP_WEB` points at a build), the
 phone shows the App itself in an iframe (`/demo/app/`) instead of the upload
@@ -183,7 +189,7 @@ Add `owners=1` to the query string to show the owner tags. They are hidden by de
 | --- | --- |
 | Phone order screen and share stage | 앱 · 공유 |
 | Phone preparation screen and plan stage | 앱 · 카드 |
-| 추출, 맥락, 의도, 할 일 stages | 앱 · 판단 근거 |
+| 주문 추출, 맥락 검색, 의도 추론, 할 일 생성 stages | 앱 · 판단 근거 |
 | Phone 우리 집 map | 앱 · 우리 집 |
 | 3D house, device labels and house timeline | 시뮬레이터 · 집 |
 | Similar cases in the judgment scene | 서버 창 |

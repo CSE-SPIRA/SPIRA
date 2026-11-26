@@ -147,7 +147,7 @@ class _PreparationCalendarState extends State<PreparationCalendar> {
               isScrollControlled: true,
               useSafeArea: true,
               showDragHandle: true,
-              builder: (context) => _CalendarMemory(app, memory),
+              builder: (context) => MemoryDetailSheet(app, memory),
             ),
           ),
         ],
@@ -375,17 +375,17 @@ class _DayAgenda extends StatelessWidget {
   }
 }
 
-class _CalendarMemory extends StatefulWidget {
-  const _CalendarMemory(this.app, this.memory);
+class MemoryDetailSheet extends StatefulWidget {
+  const MemoryDetailSheet(this.app, this.memory, {super.key});
 
   final AppController app;
   final MemoryDate memory;
 
   @override
-  State<_CalendarMemory> createState() => _CalendarMemoryState();
+  State<MemoryDetailSheet> createState() => _MemoryDetailSheetState();
 }
 
-class _CalendarMemoryState extends State<_CalendarMemory> {
+class _MemoryDetailSheetState extends State<MemoryDetailSheet> {
   late var _read = widget.app.readMemory(widget.memory.episodeId);
 
   @override

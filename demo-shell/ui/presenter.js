@@ -1,5 +1,6 @@
 import { rehearsalControls } from "./wire.js";
 import { buildPresenterCues, canObserveLine } from "./presenter-cues.js";
+import { STAGE_NAMES } from "./flow.js";
 
 export function createPresenter(context, ui) {
   const { state, observe, RECORDING, QUIET_END, notice, exchange, sleep, $, REPLAY, MANUAL, PHONE_CLOCK } = context;
@@ -313,6 +314,12 @@ export function createPresenter(context, ui) {
         if (named("house")) return canUsePhoneMap() ? named("house") : { wait: "집의 계획 수신" };
         return state.chain.cardReady || state.readProblems.cards ? {} : { wait: "준비 카드" };
       }
+      // Log mode before the plan: "다음" walks the stages again (also after "이전").
+      if (ui.reasoning.logMode()) {
+        if (!ui.reasoning.canMoveReasonForward()) return { wait: "다음 단계 결과" };
+        const next = state.scenes.reason[ui.reasoning.nextReasonStep()];
+        return { id: "step", label: STAGE_NAMES[next?.id] ?? "다음 단계" };
+      }
       if (state.cardOpen) return { wait: "준비 계획" };
       if ((state.cards.length && ui.reasoning.canPresentCard()) ||
           (MANUAL && !state.auto && ui.reasoning.canMoveReasonForward())) return named("card");
@@ -382,6 +389,7 @@ export function createPresenter(context, ui) {
       ui.reasoning.autoAdvance({ cue: true });
       return;
     }
+    if (cue.id === "step") return move(1);
     if (cue.id === "house") return $("phone-map").onclick();
     if (cue.id === "record") return ui.house.openRecord();
     if (!cue.kind) return;
@@ -619,6 +627,17 @@ export function createPresenter(context, ui) {
     $("previous").onclick = () => move(-1);
     $("next").onclick = () => move(1);
     $("next-cue").onclick = pressNext;
+    // Log mode: a finished stage in the bar opens that stage (S1–S5).
+    $("stage-steps").onclick = (event) => {
+      const id = event.target?.closest?.("[data-stage]")?.dataset.stage;
+      const step = id ? ui.reasoning.reasonStep(id) : -1;
+      if (step < 0 || state.page !== "reason" || !ui.reasoning.logMode() || state.resetting) return;
+      if (!ui.reasoning.reasonReady(step)) return;
+      state.auto = null;
+      state.logOpen = null;
+      ui.reasoning.setStep(step);
+      renderControls();
+    };
     $("reset-top").onclick = $("reset-drawer").onclick = $("reset-notice").onclick = resetDemo;
     document.addEventListener("keydown", (event) => {
       if (state.resetting || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.repeat ||

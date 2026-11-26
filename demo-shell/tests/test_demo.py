@@ -620,3 +620,4 @@ def test_app_web_build_is_served_and_its_server_calls_carry_the_shell_token(clie
     assert seen[2][3]["content-type"].startswith("multipart/form-data") and seen[2][4] == b"--x--"
     assert len(seen) == 4
     assert any(rule.match("v1/households/h_042/episodes") for rule in demo.SERVER_READS)   # the panel's follow
+    assert any(rule.match("v1/demo/households/h_042/status") for rule in demo.SERVER_READS)  # the idle console

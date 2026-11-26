@@ -1,5 +1,4 @@
-"""Hub routes (contracts/openapi/hub.yaml). This batch: device list, plan pull and ack.
-Events and execution results come with the rest of S6.
+"""Hub routes (contracts/openapi/hub.yaml): device list, plan pull, ack, events and execution results.
 
 Every route: X-API-Key -> household (401), then every household the request names must be that one (403), checked
 before anything else is read or written (spec §12.1). The key dependency is declared first so a missing key is
@@ -7,16 +6,17 @@ before anything else is read or written (spec §12.1). The key dependency is dec
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import Response
 from spira_contracts.ack import Ack
 from spira_contracts.devices import Devices
+from spira_contracts.execution_result import ExecutionResult
 from sqlalchemy import select
 
 from .. import clock
 from ..db.engine import lock_household, session_scope
 from ..db.models import DeviceList, Episode, Household
-from ..pipeline import s5_plan
+from ..pipeline import s5_plan, s6_hub
 from .auth import require_hub, same_household
 from .bodies import body
 from .errors import ApiError
@@ -77,3 +77,25 @@ def post_ack(key: str = Depends(require_hub), plan_id: str = Path(pattern=EPISOD
     except LookupError:
         raise ApiError("not_found", "Unknown plan version.") from None
     return Response(status_code=204)
+
+
+@router.post("/v1/hub/events")
+async def post_events(request: Request, key: str = Depends(require_hub)) -> dict:
+    """Each element on its own (spec §12.2): invalid ones are listed in `rejected`, the rest stored one by one."""
+    try:
+        raw = await request.json()
+    except ValueError:
+        raise ApiError("validation_error", "Body is not JSON.", {"path": "(root)"}) from None
+    try:
+        return s6_hub.apply_events(key, raw)
+    except s6_hub.HubInputError as e:
+        raise ApiError(e.code, e.message, {"path": e.path} if e.path else None) from None
+
+
+@router.post("/v1/hub/executions")
+def post_execution(key: str = Depends(require_hub),
+                   data: dict = body(ExecutionResult, "execution_result.json")) -> dict:
+    try:
+        return s6_hub.apply_execution(key, data)
+    except s6_hub.HubInputError as e:
+        raise ApiError(e.code, e.message, {"path": e.path} if e.path else None) from None
