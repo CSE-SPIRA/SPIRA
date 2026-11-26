@@ -61,49 +61,9 @@ time,.numeric{font-variant-numeric:tabular-nums}
 #reason-layout{height:100%}
 .phone{height:100%;padding:8px;border:1px solid var(--black);border-radius:49px;background:var(--frame);box-shadow:0 22px 58px #243b3030,0 2px 2px #13251c66;overflow:hidden}
 .phone-screen{height:100%;position:relative;border-radius:40px;background:var(--surface);overflow:hidden}
-.phone-status{height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;color:var(--ink);font-size:var(--size-14);font-weight:600}
-.phone-status::after{content:"";position:absolute;left:50%;top:13px;width:86px;height:14px;border-radius:30px;background:var(--black);transform:translateX(-50%)}
-.phone-charge{width:19px;height:9px;border:1px solid;border-radius:3px;position:relative}
-.phone-charge::before{content:"";position:absolute;inset:2px;background:currentColor;border-radius:1px}
-.phone-charge::after{content:"";position:absolute;width:2px;height:4px;border-radius:0 3px 3px 0;background:currentColor;right:-3px;top:2px}
-#phone-content{position:absolute;inset:46px 0 84px;overflow:auto}
-.phone-bar{position:absolute;bottom:0;left:0;right:0;height:84px;border-top:1px solid var(--line);display:flex;justify-content:space-around;align-items:flex-start;background:var(--surface);padding-top:5px}
-.phone-bar button{background:none;border:0;border-radius:9px;padding:8px 16px;min-height:60px;color:var(--muted);font-size:var(--size-24)}
-.phone-bar button:disabled{opacity:.5}
-.phone-bar button[aria-pressed="true"]{color:var(--green);font-weight:700}
-.phone-bar::after{content:"";position:absolute;bottom:7px;left:calc(50% - 45px);width:90px;height:4px;border-radius:var(--radius-pill);background:var(--black)}
-.phone-head{padding:10px 19px 13px;border-bottom:1px solid var(--line)}
-.phone-head h2{font-size:var(--size-34);line-height:1.12;letter-spacing:-.035em}
-.phone-head p{font-size:var(--size-15);color:var(--muted);margin-top:7px}
-.receipt-list{padding:1px 16px}
-.receipt-row{display:grid;grid-template-columns:28px 1fr auto;align-items:center;gap:8px;min-height:46px;border-bottom:1px solid var(--soft);font-size:var(--size-18);font-weight:600}
-.receipt-qty{font-size:var(--size-13);color:var(--muted);font-weight:400}
+#app-preview{display:block;width:100%;height:100%;border:0}
+#app-placeholder{display:grid;place-items:center;height:100%;padding:20px;color:var(--muted);font-size:var(--size-20);text-align:center}
 .item-icon{display:inline-grid;place-items:center;width:36px;height:36px;flex:none;border-radius:10px;background:var(--green-soft);color:var(--green);font-size:var(--size-20);font-weight:600;letter-spacing:0}
-.receipt-row .item-icon{width:26px;height:26px;font-size:var(--size-16);border-radius:7px}
-.phone-share{position:absolute;bottom:9px;left:12px;right:12px;padding:9px 12px;background:var(--green-soft);border:1px solid var(--line);border-radius:14px}
-.phone-share button{width:100%;display:flex;justify-content:space-between;padding:7px 12px;background:var(--green-deep);color:var(--white);border:0;border-radius:var(--radius-8);font-size:var(--size-17);font-weight:600}
-.scan-picture{background:var(--soft);border:1px solid var(--line);border-radius:var(--radius-12);padding:6px 10px;overflow:hidden}
-.phone-main.with-preparation{display:grid;grid-template-rows:minmax(0,34%) minmax(0,1fr);height:100%}
-.with-preparation > section{min-height:0;overflow:auto}
-.with-preparation > .phone-order-area{border-bottom:1px solid var(--line)}
-.order-received{display:flex;align-items:center;gap:10px;margin:12px 16px;font-size:var(--size-20)}
-.order-thumbnail{width:62px;height:72px;object-fit:contain;border-radius:8px;background:var(--soft)}
-.order-skeleton{display:grid;gap:14px;margin:16px}
-.receipt-row small{display:block;font-size:var(--size-14);font-weight:400;color:var(--muted)}
-.phone-message,.phone-order-area .masked-count,.memory-sheet .masked-count{margin:10px 16px;font-size:var(--size-16);color:var(--muted)}
-.calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px;text-align:center;padding:16px}
-.calendar-grid > *{display:grid;place-items:center;min-height:40px;font-size:var(--size-18)}
-.calendar-grid b{color:var(--muted)}
-.calendar-grid button{border:1px solid var(--green-line);border-radius:8px;background:var(--green-soft);line-height:1.15}
-.calendar-grid i{width:7px;height:7px;border-radius:50%;background:var(--green-deep)}
-.memory-sheet{border-top:1px solid var(--line)}
-.card-waiting{color:var(--muted);margin:4px 0}
-
-.app-card{margin:15px 13px;padding:15px;border:1px solid var(--line);border-radius:16px;background:var(--paper)}
-.app-card h3{font-size:var(--size-24);letter-spacing:-.025em;line-height:1.28;margin-bottom:7px}
-.app-card li{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:7px;padding:10px 0;border-bottom:1px solid var(--line);font-size:var(--size-19);line-height:1.26;font-weight:600}
-.app-card li:last-child{border:0}
-.app-card small{display:block;color:var(--muted);font-size:var(--size-16);margin-top:4px;font-weight:400}
 
 #stage-copy{padding:12px 4px 0}
 #reason-layout[data-stage="share"] #stage-copy,#reason-layout[data-stage="plan"] #stage-copy{padding-top:44px}
@@ -256,19 +216,13 @@ h1{font-size:var(--size-60);line-height:1.11;letter-spacing:-.065em;font-weight:
 }
 
 #notice { color:var(--muted);font-size:var(--size-19); }
-.phone-status time { min-width:3em; }
-.order-actions { display:grid;gap:7px;position:static;margin:12px; }
-.order-actions label { position:relative;display:flex;align-items:center;min-height:60px;cursor:pointer;font-size:var(--size-18);color:var(--green-deep);text-decoration:underline; }
-.order-actions input { position:absolute;inset:0;width:100%;opacity:0;cursor:inherit; }
-.order-actions label:focus-within { outline:2px solid var(--green);outline-offset:2px; }
-.order-actions button:disabled, .segment button:disabled { opacity:.5; }
-.scan-picture img { display:block;width:100%;max-height:445px;object-fit:contain; }
-.app-card p { font-size:var(--size-16);line-height:1.4; }
+.segment button:disabled { opacity:.5; }
 .task-device { color:var(--muted);font-size:var(--size-17);line-height:1.3; }
 .notices { grid-template-columns:143px repeat(2,minmax(0,1fr)); }
 .notices article:nth-of-type(2n+3) { grid-column:2; }
 .plan-list li { grid-template-columns:172px minmax(0,1fr); }
 .plan-list small { display:block;color:var(--muted); }
+.plan-text { margin-bottom:12px;font-size:var(--size-23);font-weight:600; }
 .plan-card + .plan-card { margin-top:20px; }
 #home[aria-busy="true"] #timeline { opacity:.6; }
 #timeline button:disabled:not([aria-current="step"]):not(.past) { opacity:.6; }
@@ -291,23 +245,7 @@ h1{font-size:var(--size-60);line-height:1.11;letter-spacing:-.065em;font-weight:
 #view #entrance-observations:not([data-resting]){pointer-events:auto}
 #view #entrance-observations[data-resting],#view[data-closeup] #entrance-observations{visibility:hidden}
 .mast-clock{font-size:var(--size-24);font-weight:600;color:var(--green-deep);font-variant-numeric:tabular-nums;min-width:7.5em;text-align:right}
-.line-state{color:var(--green-deep);font-weight:600}
-.app-review{margin-top:12px;padding:12px;border-radius:12px;background:var(--green-soft);font-size:var(--size-15);line-height:1.4}
-.app-review b{display:block;color:var(--green-deep);margin-bottom:4px}
-.app-review p{margin-top:4px}
-
-/* The phone's next action gets the same treatment in the order, card and tab bar. */
-.phone-share button,.phone-action{min-height:60px;align-items:center;font-size:var(--size-22)}
-.phone-action{padding:8px 12px;border:1px solid var(--green-line);border-radius:9px;background:var(--surface);color:var(--green-deep);font-weight:600}
-.phone-action:disabled{opacity:.55}
-.card-notification{display:block;width:calc(100% - 30px);text-align:left;margin:12px 15px;padding:10px 14px}
-.card-notification small{display:block;font-size:var(--size-16);font-weight:400}
-.app-switch{min-width:60px}
-.app-stop{margin-top:7px}
-.phone-error{padding:6px 16px;color:var(--pink-ink);font-size:var(--size-17)}
-.phone [data-expected]:not(:disabled){min-height:66px;color:var(--white);background:var(--green-deep);outline:2px solid var(--green-line);outline-offset:2px;animation:phone-action 2.5s ease-in-out infinite}
-@keyframes phone-action{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 0 6px var(--green-soft)}}
 .task-row{gap:8px;padding-inline:10px}
 
 #stage-beat[data-ending]{margin-left:0;text-align:right}
-#frame[data-recording] :is(#stage-copy *,#phone-content *){animation-duration:0ms;animation-delay:0ms}
+#frame[data-recording] #stage-copy *{animation-duration:0ms;animation-delay:0ms}

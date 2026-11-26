@@ -3,7 +3,7 @@ import { buildPresenterCues, canObserveLine } from "./presenter-cues.js";
 import { stageLabel } from "./flow.js";
 
 export function createPresenter(context, ui) {
-  const { state, observe, RECORDING, QUIET_END, notice, exchange, sleep, $, REPLAY, AUTO_PLAY, PHONE_CLOCK } = context;
+  const { state, observe, RECORDING, QUIET_END, notice, exchange, sleep, $, REPLAY } = context;
 
   // The Hub and Simulator follow the Server's story clock independently.
   const FIXTURE_LEAD_MS = 5000;
@@ -163,7 +163,6 @@ export function createPresenter(context, ui) {
       if (state.reader === reader) {
         for (const { id } of clockLines) state.pendingClockLines.add(id);
       }
-      await sleep(RAMP_SECONDS * 1000 + 300);
     } finally {
       if ($("notice").textContent === message && !signal?.aborted) notice();
     }
@@ -207,14 +206,14 @@ export function createPresenter(context, ui) {
   }
 
   function showPage(page) {
-    if (page === "house" && !ui.house.canEnterHouse()) return;
+    if (page === "house" && !canEnterHouse()) return;
     const focusedPanel = (page === "reason" ? $("home") : $("reason")).contains(document.activeElement);
     state.page = page;
     $("reason").hidden = page !== "reason";
     $("home").hidden = page !== "house";
     $("orders").hidden = page !== "reason" || !state.config.fixture;
     if (page === "house") state.auto = null;
-    else state.recordOpen = state.memoryOpen = state.recordVisible = false;
+    else state.recordRequested = state.recordVisible = false;
     document.querySelectorAll("[data-page]").forEach((button) =>
       button.setAttribute("aria-pressed", String(button.dataset.page === page)));
     if (page === "house") {
@@ -228,7 +227,7 @@ export function createPresenter(context, ui) {
   }
 
   function enterHouse() {
-    if (!ui.house.canEnterHouse()) return;
+    if (!canEnterHouse()) return;
     if (RECORDING) {
       ui.recording.playReplayVisit();
       showPage("house");
@@ -248,20 +247,19 @@ export function createPresenter(context, ui) {
     $("story-clock").hidden = now === null;
     if (now !== null) {
       $("story-clock").textContent = STORY_CLOCK.format(now);
-      $("phone-time").textContent = PHONE_CLOCK.format(now);
     }
     const second = Math.floor(performance.now() / 1000);
     if ((state.waiting || state.retryUntil > 0) && second !== state.indicatorSecond) {
       state.indicatorSecond = second;
       ui.reasoning.renderStageIndicator();
     }
+    void dispatchDueEvent();
     requestAnimationFrame(tickClock);
   }
 
   function canEnterHouse() {
-    return ui.house.canEnterHouse() && !state.draft && (state.page === "house" ||
-      state.step >= ui.reasoning.reasonStep("plan") &&
-        (state.cardOpen || state.episode?.status === "closed" || (!state.cards.length && state.chain.cardReady)));
+    return ui.house.canEnterHouse() && !state.draft && state.cards.length > 0 &&
+      (state.page === "house" || state.step >= ui.reasoning.reasonStep("plan"));
   }
 
   const inTimeCue = (cue, { id, at }) => cue.momentIds.includes(id) && Date.parse(at) === cue.target;
@@ -301,33 +299,30 @@ export function createPresenter(context, ui) {
     const guestWindows = Object.fromEntries(Object.entries(relations).flatMap(([id, { trigger }]) =>
       trigger?.event === "guest_arrived" && trigger.window ? [[id, trigger.window]] : []));
     const cues = buildPresenterCues({
-      path: state.draft || !state.episodeId ? ui.phone.draftPath() : state.runPath, chain: state.chain, timeline: moments,
+      path: state.draft || !state.episodeId ? ui.order.draftPath() : state.runPath, chain: state.chain, timeline: moments,
       published: momentRead?.reader === state.reader ? state.publishedMoments : undefined,
       guestWindows: { ...guestWindows, ...state.hub?.guest_windows?.[state.episodeId] }, clock,
     });
     const named = (id) => cues.find((cue) => cue.id === id);
     if (state.sharing) return { wait: "주문 접수" };
-    if (!state.episodeId || state.draft) return state.config.server ? named("share") : { wait: "서버 연결" };
+    if (!state.episodeId || state.draft || state.page === "reason" && state.episode?.status === "read_failed") {
+      return state.config.server ? named("share") : { wait: "서버 연결" };
+    }
     if (state.page === "reason") {
       const plan = ui.reasoning.reasonStep("plan");
       if (state.step >= plan) {
-        if (state.episode?.status !== "closed" && state.cards.length && !state.cardOpen) return named("card");
-        if (named("house") && state.episode?.status !== "held" && state.chain.cardReady) {
+        if (named("house") && state.cards.length) {
           return canEnterHouse() ? named("house") : { wait: "집의 계획 수신" };
         }
         return ui.reasoning.reasonReady(plan) ? {} : { wait: "준비 카드" };
       }
       const next = ui.reasoning.nextReasonStep();
-      if ((AUTO_PLAY && state.auto) || !ui.reasoning.canMoveReasonForward()) {
+      if (!ui.reasoning.canMoveReasonForward()) {
         return { wait: stageLabel(state.scenes.reason[state.step].id) };
       }
       return { id: "reason", label: stageLabel(state.scenes.reason[next].id) };
     }
-    if (state.recordVisible) return {};
-    if (state.recordRequested) {
-      if (ui.phone.memoryDate() !== null) return { id: "memory", label: "캘린더의 기록" };
-      return { wait: "관찰 결과와 종료 상태" };
-    }
+    if (state.recordRequested) return {};
     if (!state.snapshot || !state.houseMarkup) return { wait: "집 상태" };
     if (!state.clockMissing && !state.cueClockMissing && (momentRead?.reader !== state.reader || !momentRead?.ready)) {
       return { wait: "시연 시계 확인" };
@@ -345,7 +340,7 @@ export function createPresenter(context, ui) {
   }
 
   function updateCue(moments, index) {
-    if (pendingCue?.reader !== state.reader) pendingCue = null;
+    if (pendingCue && pendingCue.reader !== state.reader) pendingCue = null;
     if (pendingCue && !pendingCue.running) {
       const { cue } = pendingCue;
       const observed = cueMomentIndex(cue, moments);
@@ -356,9 +351,14 @@ export function createPresenter(context, ui) {
         if (observed >= 0 && state.page === "house" && ui.house.goHouse(observed)) return;
       }
     }
-    const next = REPLAY ? { id: "replay", label: "다음 →" } : pendingCue ? { wait: pendingCue.wait } : nextCue(moments, index);
+    void dispatchDueEvent();
+    const next = REPLAY
+      ? { id: "replay", label: state.page === "reason" && state.scenes.reason[state.step].id === "plan"
+        ? "집으로" : state.page === "house" && index === moments.length - 1 && ui.house.houseEnded(moments)
+          ? "기록" : "다음 →" }
+      : pendingCue ? { wait: pendingCue.wait } : nextCue(moments, index);
     const button = $("next-cue");
-    button.disabled = REPLAY ? $("next").disabled : Boolean(!next.id || state.homeBusy || state.reactionPending || state.resetting);
+    button.disabled = REPLAY ? $("next").disabled : Boolean(!next.id || state.homeBusy || state.resetting);
     const label = REPLAY ? next.label : next.label ? `다음: ${next.label}` : next.wait ? `대기 · ${next.wait}` : "시연 완료";
     if (button.textContent !== label) button.textContent = label;
   }
@@ -369,27 +369,39 @@ export function createPresenter(context, ui) {
     const clock = await postClock(target, clockOptions(signal), reader);
     if (state.reader !== reader) return;
     ui.recording.log("presenter", { action: "clock", status: 200, result: clock });
-    await sleep(RAMP_SECONDS * 1000 + 300);
-    if (state.reader === reader && clockNow() < target) {
-      await readClock();
-      if (clockNow() < target) throw new Error("시연 시각을 확인하지 못했어요.");
+  }
+
+  async function dispatchDueEvent() {
+    const pending = pendingCue;
+    if (!pending || pending.running || !pending.dispatch || pending.reader !== state.reader) return;
+    const { cue, reader } = pending;
+    const now = clockNow() ?? Date.now();
+    if (cue.target > now) return;
+    pending.dispatch = false;
+    pending.running = true;
+    pending.wait = cue.label + " 결과";
+    try {
+      if (cue.until !== undefined && now >= cue.until) {
+        pendingCue = null;
+        notice("손님을 맞이할 시간이 지났어요.");
+      } else if (await presenterAction(cue) === false && pendingCue === pending) {
+        pendingCue = null;
+      }
+    } finally {
+      pending.running = false;
+      if (state.reader === reader) renderControls();
     }
   }
 
   async function pressNext() {
     if (REPLAY) return move(1);
-    if (pendingCue || state.sharing || state.homeBusy || state.reactionPending || state.resetting) return;
+    if (pendingCue || state.sharing || state.homeBusy || state.resetting) return;
     const moments = ui.house.timeline();
     const cue = nextCue(moments, moments.indexOf(ui.house.currentMoment(moments)));
-    if (cue.id === "share") {
-      if (!state.config.fixture) return $("files")?.click();
-      return ui.phone.shareSample();
-    }
-    if (cue.id === "card") return ui.phone.openCard();
+    if (cue.id === "share") return ui.order.shareSample();
     if (cue.id === "reason") return move(1);
     if (cue.id === "house") return enterHouse();
-    if (cue.id === "record") return ui.house.openRecord();
-    if (cue.id === "memory") return ui.phone.openMemory();
+    if (cue.id === "record") return ui.record.open();
     if (!cue.kind) return;
     const observed = cueMomentIndex(cue, moments);
     if (observed >= 0) return ui.house.goHouse(observed);
@@ -400,14 +412,8 @@ export function createPresenter(context, ui) {
     try {
       await advanceCueClock(cue.target, reader);
       if (state.reader !== reader) return;
-      pending.wait = cue.kind === "time" ? cue.label + " 기기 상태" : cue.label + " 결과";
-      renderControls();
-      if (cue.kind === "event" && !ui.house.timeline().some(({ ready, event }) => ready && event === cue.event)) {
-        if (cue.until !== undefined && (clockNow() ?? Date.now()) >= cue.until) {
-          throw new Error("손님을 맞이할 시간이 지났어요.");
-        }
-        if (await presenterAction(cue) === false) pendingCue = null;
-      }
+      if (cue.kind === "time") pending.wait = cue.label + " 기기 상태";
+      else if (!ui.house.timeline().some(({ ready, event }) => ready && event === cue.event)) pending.dispatch = true;
     } catch (error) {
       if (state.reader !== reader) return;
       pendingCue = null;
@@ -416,6 +422,7 @@ export function createPresenter(context, ui) {
     } finally {
       if (state.reader === reader) {
         pending.running = false;
+        await dispatchDueEvent();
         renderControls();
       }
     }
@@ -426,7 +433,7 @@ export function createPresenter(context, ui) {
     const blocked = state.sharing || state.homeBusy || state.resetting;
     for (const id of ["reset-drawer", "reset-notice"]) {
       $(id).hidden = REPLAY || !state.config.reset;
-      $(id).disabled = blocked || Boolean(state.reactionPending);
+      $(id).disabled = blocked;
     }
     $("reset-scope").hidden = $("reset-drawer").hidden || Boolean(state.config.fixture);
     const moments = ui.house.timeline();
@@ -435,12 +442,8 @@ export function createPresenter(context, ui) {
     const next = moments.slice(index + 1).some(({ ready }) => ready);
     $("previous").disabled = blocked || (inHouse ? !previous && !state.recordRequested : state.step === 0);
     const needsShare = !inHouse && !state.episodeId;
-    const canOpenCard = RECORDING && ui.reasoning.canPresentCard() && !state.cardOpen &&
-      state.episode?.status !== "closed" && state.cards.length;
-    const waiting = !inHouse && state.episodeId && ((!ui.reasoning.canMoveReasonForward() && !canOpenCard) || state.draft);
-    const hasMemoryDot = state.recordRequested && !state.recordVisible && ui.phone.memoryDate() !== null;
-    const atEnd = inHouse && (state.recordVisible ||
-      (state.recordRequested ? !hasMemoryDot : !next && !ui.house.houseEnded(moments)));
+    const waiting = !inHouse && state.episodeId && (!ui.reasoning.canMoveReasonForward() || state.draft);
+    const atEnd = inHouse && (state.recordRequested || !next && !ui.house.houseEnded(moments));
     $("presenter-controls").hidden = !inHouse || REPLAY || state.recordVisible;
     const clock = rehearsalControls(state.clock, state.clockMoments, state.clockMissing, REPLAY);
     $("presenter-clock").hidden = !clock.advance;
@@ -449,19 +452,24 @@ export function createPresenter(context, ui) {
     $("next").disabled = blocked || atEnd || waiting || needsShare;
     $("next-share").hidden = !needsShare || state.sharing;
     $("path-control").hidden = inHouse || REPLAY || Boolean(state.episodeId && !state.draft);
-    $("demo-path").value = ui.phone.draftPath();
+    $("demo-path").value = ui.order.draftPath();
     $("demo-path").disabled = blocked || !state.config.server;
     document.querySelectorAll("[data-order]").forEach((button) => {
       button.setAttribute("aria-pressed", String(button.dataset.order === state.order));
-      button.disabled = blocked || !state.config.server || REPLAY || Boolean(state.reactionPending);
+      button.disabled = blocked || !state.config.server || REPLAY;
     });
-    for (const id of ["sample", "files"]) {
-      if ($(id)) $(id).disabled = blocked || !state.config.server;
-    }
     document.querySelectorAll("[data-page]").forEach((button) => {
       button.disabled = blocked || (button.dataset.page === "house" && !canEnterHouse());
     });
     updateCue(moments, index);
+    if (inHouse && state.recordLink) {
+      const end = moments.findLastIndex(({ kind, ready }) => kind === "end" && ready);
+      if (end >= 0) {
+        state.recordLink = false;
+        ui.house.goHouse(end);
+        ui.record.open();
+      }
+    }
   }
 
   async function resetDemo() {
@@ -521,17 +529,14 @@ export function createPresenter(context, ui) {
     if (state.sharing || state.homeBusy || state.resetting) return;
     if (delta > 0 && state.page === "reason") {
       if (!state.episodeId || state.draft) return;
-      if (RECORDING && ui.reasoning.canPresentCard() && !state.cardOpen && state.episode?.status !== "closed" && state.cards.length) {
-        return ui.phone.openCard();
-      }
       if (!ui.reasoning.canMoveReasonForward()) return;
     }
     state.auto = null;
     if (state.page === "house" && state.recordRequested) {
       if (delta < 0) {
-        state.recordOpen = state.memoryOpen = state.recordRequested = false;
+        state.recordRequested = false;
         ui.house.renderTimeline();
-      } else ui.phone.openMemory();
+      }
     } else if (state.page === "house") {
       const moments = ui.house.timeline();
       const index = RECORDING ? state.replayStep : moments.indexOf(ui.house.currentMoment(moments));
@@ -540,7 +545,7 @@ export function createPresenter(context, ui) {
       if (next >= 0) ui.house.goHouse(next);
       else if (delta > 0 && ui.house.houseEnded(moments)) {
         if (RECORDING) ui.recording.applyReplayFrame(state.replay.house.at(-1).frame);
-        ui.house.openRecord();
+        ui.record.open();
       }
     } else if (state.scenes.reason[state.step].id === "plan" && delta > 0) {
       enterHouse();
@@ -563,16 +568,10 @@ export function createPresenter(context, ui) {
   }
 
   function resolveHouseLink() {
-    if (state.page === "reason" && state.houseOnReceipt && canEnterHouse()) {
-      state.houseOnReceipt = false;
-      enterHouse();
-      return true;
-    }
     if (!state.houseLink || !state.chain.ready.plan) return false;
-    if (state.runPath === "house" && !ui.house.canEnterHouse()) return false;
+    if (!canEnterHouse()) return false;
     const { record } = state.houseLink;
     state.houseLink = null;
-    if (!ui.house.canEnterHouse()) return false;
     state.recordLink = record;
     enterHouse();
     return true;
@@ -588,7 +587,7 @@ export function createPresenter(context, ui) {
     };
     $("orders").addEventListener("click", (event) => {
       const button = event.target.closest("[data-order]");
-      if (button) ui.phone.chooseOrder(button.dataset.order);
+      if (button) ui.order.chooseOrder(button.dataset.order);
     });
     document.querySelectorAll("[data-page]").forEach((button) => {
       button.onclick = () => {
@@ -607,25 +606,13 @@ export function createPresenter(context, ui) {
       const button = event.target.closest("[data-presenter]");
       if (button) void presenterAction({ name: button.dataset.presenter, event: button.dataset.event });
     });
-    $("phone-calendar").onclick = ui.phone.openCalendar;
-    $("phone-order").onclick = () => {
-      state.recordOpen = state.memoryOpen = false;
-      state.draft = false;
-      $("phone-content").scrollTop = 0;
-      if (state.page === "house") ui.house.renderTimeline();
-      else ui.reasoning.renderReason();
-    };
-    $("phone-content").onclick = (event) => {
-      const button = event.target.closest("button[data-reaction]");
-      if (button?.dataset.reaction) return ui.phone.react(button.dataset.card, button.dataset.task, button.dataset.reaction);
-    };
     $("previous").onclick = () => move(-1);
     $("next").onclick = () => move(1);
     $("next-cue").onclick = pressNext;
     $("reset-drawer").onclick = $("reset-notice").onclick = resetDemo;
     document.addEventListener("keydown", (event) => {
       if (state.resetting || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.repeat ||
-        event.target.closest("input, textarea, select, #reset-drawer, #reset-notice, #memory-dot, #phone-calendar, #phone-order, #card-notification, button[data-reaction]")) return;
+        event.target.closest("input, textarea, select, #reset-drawer, #reset-notice")) return;
       if (event.key.toLowerCase() === "r") {
         location.href = "/demo?recordings";
       } else if (event.key === "ArrowLeft") {

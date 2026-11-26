@@ -1,41 +1,38 @@
 # Demo shell
 
-**ACTIVE** · This guide defines the demo shell's behaviour, operation and
-inputs. The [integration contracts](../contracts/) define Server payloads.
-The shell's phone is a simplified App view of the main lifecycle.
+**ACTIVE** · This guide covers running and presenting the demo shell.
+The [shell specification](spec.md) defines its behaviour, and the
+[integration contracts](../contracts/) define Server payloads.
 
-At `/demo`, the phone stays on the left and the Server's judgment plays on the
-right. Before sharing, choose 집까지 or 계획까지 in the presenter header.
-The `ep_9031` sample defaults to 집까지. Share from the phone and open the
-preparation card with the presenter cue. A house run opens 우리 집 after the
-Hub receives its plan. A plan run ends at 계획.
-
-The stage strip follows the episode status and arriving items, evidence,
-intents, tasks and cards. A Hub plan receipt for the active episode at or
-after its share time marks 집 done. The extraction table shows fields supplied
-by the Server, with empty cells for unexported fields. The context stage
-shows order time, household context and similar cases on one card. The
-intent stage keeps the situation, verdict and their source labels in view.
-
-| Check | Expected behaviour |
-| --- | --- |
-| Share an order | The phone shows receipt and reading. The live extraction stage MUST show a skeleton and fill it as data arrives. |
-| Advance while judgment is loading | Each stage MUST fill from its own export and preserve the unavailable notice for a missing export. The presenter controls live advancement. |
-| Open a recording | Playback MUST advance without dwell holds. |
-| Open the card and play the house | The phone MUST stay on the left and show Server line states, pending reactions and outcomes. Reasoning stays on the stage screens. |
-| Close the episode | The card MUST leave the phone's main screen. The execution day's calendar dot opens the memory sheet. |
+At `/demo`, the real Flutter App runs at phone size on the left. The shell
+owns the Server stages, house, record and presenter controls on the right.
+The App and the shell show what they independently read from the same
+Server. The App source and build entry points live in `app/`.
 
 ## Run
 
 ```bash
-scripts/demo-up --tagger # from the repository root, needs uv and mosquitto
+scripts/demo-up --tagger # from the repository root
 ```
 
-Open the printed **Demo** URL. In fixture mode, choose 생일 주문 or 평소 장보기, then tap
-다음 (Space/→) to share the sample or upload a screenshot from the phone.
-Keep pressing 다음 when its label changes to open the preparation card, visit the
-house and play its moments, then open the calendar and select its memory dot.
-The cue shows what it is waiting for.
+The launcher uses `uv`, `mosquitto` and Flutter. It runs `flutter build web`,
+serves the build and its preview proxy, and supplies the preview URL to the
+shell. Builds are cached under `/private/tmp` on macOS by the App tree,
+working build inputs and build settings. The launcher prints the URLs for
+you to open.
+
+Use `--no-app` for the placeholder or `--app-web DIR` to serve an existing
+build. A supplied build must target the chosen App proxy port, household
+and peer mode. `--proxy-port` defaults to 8731 and `--web-port` to 8732.
+Set `DEMO_STATE_ROOT` to choose a directory for launcher state and the build
+cache.
+
+Open the printed **Demo** URL. In fixture mode, choose 생일 주문 or 평소 장보기
+and press **공유** (Space/→) to submit the sample, or use **주문 분석하기** in
+the App to upload a screenshot. Advance through the Server stages with **다음**.
+**집으로** opens the house once a card and its Hub plan receipt are available.
+**기록** ends on the house record. In the App, open the calendar to see the
+memory. The cue shows what it is waiting for.
 Use ← to go back and open 진행자 조작 to recover with the manual controls.
 The share uses the contract's `POST /v1/orders`. In fixture mode, sharing a
 sample queues its matching recording before uploading. To rehearse with your
@@ -49,9 +46,9 @@ the returned `hub_api_key` as `SPIRA_HUB_KEY`.
 scripts/demo-up --server "$SERVER_URL" --household "$SPIRA_HOUSEHOLD_ID"
 ```
 
-Use the returned household ID. The launcher serves a local App preview with
-Server mode enabled and keeps its credentials in the proxy. In the shell,
-share your own screenshot. A missing Server read shows
+Use the returned household ID. The shell and App preview use that Server.
+The preview proxy keeps the credentials on the launcher machine. Submit your
+own screenshot using **주문 분석하기** in the App. A missing Server read shows
 서버가 아직 이 단계를 내보내지 않아요 on its stage. The shell uses the Server's
 clock and moments when available. Without a rehearsal clock, the cue skips
 clock advances and shows a notice. Text tags and illustrated device displays are
@@ -114,6 +111,8 @@ Open `/demo?recordings` or press **R** to name, star or play a run. Starred runs
 come first, newest first within each group. The index is also available at
 `GET /demo/api/recordings`. Open `/demo?recording=<id>` and press 다음
 (Space/→) to advance immediately through the saved stages and house moments.
+Saved playback uses the phone placeholder. It can run from the recorded
+Server and house data while the peers are offline.
 The house uses locally cached renderer assets when the Simulator is offline.
 Older recordings may need the Simulator to supply assets that have yet to be
 cached. Playback redraws TV and fridge artwork from recorded template,
@@ -138,23 +137,20 @@ in the living room. A set adds seven balloons to the bunch and three to the
 floor, up to each slot's count limit. The shell scene rules omit garland and confetti. A line
 palette can recolour the balloons after that line is observed.
 
-After the last house moment, the phone shows the Server's verdict and line
-feedback when available. When the episode closes, the card leaves the main
-screen. Open 캘린더 and select the dot for the execution day to show the
-memory sheet. The sheet uses the episode, card and rationale observations.
+After the last house moment, **기록** shows the house record. When memory
+is available, the App calendar's dot for the execution day opens the App's
+memory sheet independently.
 
 Deep links include `/demo?episode=ep_9031&step=3` and
 `/demo?episode=ep_9031&page=house`. They require a readable Server episode.
-House links also wait for that run's Hub receipt.
+House links also wait for that run's card and Hub receipt.
 
 Add `owners=1` to the query string to show the owner tags. They are hidden by default.
 
 | Panel or region | Owner tag |
 | --- | --- |
-| Phone order screen and share stage | 앱 · 공유 |
-| Phone preparation screen and plan stage | 앱 · 카드 |
-| 추출, 맥락, 의도, 할 일 stages | 서버 창 |
-| Phone calendar and memory sheet | 앱 · 캘린더 |
+| Embedded phone | 앱 |
+| Server stages and house record | 서버 창 |
 | 3D house, device labels and house timeline | 시뮬레이터 · 집 |
 
 ## Where to change what
@@ -172,13 +168,13 @@ Add `owners=1` to the query string to show the owner tags. They are hidden by de
 | Hub device registration and command bindings | [`scripts/demo-devices.json`](../scripts/demo-devices.json), added to `hub/installation.example.json` by `scripts/demo_up.py` | Shared contract fixtures |
 | 3D models, device faces and lamp anchor | [`simulator/spira_simulator/ui/house/house.js`](../simulator/spira_simulator/ui/house/house.js) | |
 | Web evidence chain shape, joins and fixed map devices | `ui/chain.js` | Panel renderers |
-| The next phone action and line switch rules | `ui/wire.js` | |
 | Judgment stage order and evidence display | `ui/judgment.js` and `ui/judgment-view.js` | Server rationale |
 | Text tagger lists, validation and cache | `tag-lists.json` and `tagger.py` | |
 | Prepared item icons, storage words and props per unit | `ui/item-types.json` | Item names |
-| App contract polling and tag reads | `ui/episode.js` | |
+| Server episode discovery, polling and tag reads | `ui/episode.js` | |
+| Presenter sample order upload | `ui/order-share.js` | App order UI |
+| House record | `ui/house-record.js` | App calendar |
 | Reasoning stages and pacing | `ui/reasoning.js` | |
-| Phone, sharing, reactions and final review | `ui/phone.js` | |
 | House timeline and cameras | `ui/house-timeline.js` | |
 | Presenter cues, navigation and rehearsal clock | `ui/presenter-cues.js`, `ui/presenter.js` | |
 | Recording timestamps and playback | `ui/recording.js`, `ui/run.js` | |
@@ -210,7 +206,7 @@ for the story clock.
 The fixed 1920×1080 stage has two columns. The 448×856 phone stays centered
 in the left column. The right column has a fixed strip above the judgment or
 house. At 1440×900, `fit()` scales the frame to 75% and centers it. The phone
-content can scroll when a card is long or several cards arrive.
+viewport fills the phone frame.
 
 Run the shell tests from the repository root. The evidence-chain tests use
 Node.js 22.15 or newer and also run directly via
@@ -220,7 +216,7 @@ Node.js 22.15 or newer and also run directly via
 PYTHONPATH=demo-shell uv run --no-project --python 3.12 \
   --with-requirements demo-shell/requirements.txt --with-editable contracts/generated/python \
   --with pytest --with httpx2 \
-  python -m pytest -q demo-shell/tests
+  python -m pytest -q demo-shell/tests scripts/tests
 ```
 
 Rules the demo keeps:
@@ -251,6 +247,7 @@ Rules the demo keeps:
 | --- | --- |
 | `DEMO_SIMULATOR_URL` | Simulator origin for house assets, snapshot and viewer fragment |
 | `DEMO_OPERATOR_TOKEN` | Simulator operator credential for presenter controls |
+| `DEMO_APP_URL` | App web URL shown in the phone frame |
 | `DEMO_SERVER_URL`, `DEMO_APP_TOKEN` | Server for the contract reads and the order share |
 | `DEMO_HOUSEHOLD` | Household for contract reads and shares (default `h_042`) |
 | `DEMO_FIXTURE_EPISODE` | Enables fixture scene selection, request logging, and quiet-window fast-forward |

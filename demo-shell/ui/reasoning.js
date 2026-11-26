@@ -50,7 +50,7 @@ export function createReasoning(context, ui) {
     if (!retry) state.retryUntil = 0;
     const line = [help, judgmentBeatLine(beat), retry].filter(Boolean).join(" · ");
     $("stage-beat").toggleAttribute("data-ending", stage === "record" || waiting === "record" || waiting === "hub");
-    const ready = { ...state.chain.ready, record: state.episode?.status === "closed" && ui.phone.recordReady() };
+    const ready = { ...state.chain.ready, record: state.episode?.status === "closed" && ui.record.ready() };
     let prior = true;
     for (const id of ["extract", "context", "intent", "tasks", "plan"]) {
       if (problemFor(id)) {
@@ -61,7 +61,7 @@ export function createReasoning(context, ui) {
     }
     state.flow(stage, ready, line);
 
-    if (!state.recordFinished && state.record && ((state.recordVisible && state.finalMemory) ||
+    if (!state.recordFinished && state.record && ((state.recordVisible && (state.finalMemory || ui.record.unavailable())) ||
         (state.page === "reason" && scene.id === "plan" && state.chain.cardReady && state.runPath === "plan"))) {
       state.recordFinished = true;
       ui.recording.log("finish", { stage: state.recordVisible ? "record" : "plan" });
@@ -69,11 +69,12 @@ export function createReasoning(context, ui) {
   }
 
   function waitingStage(scene) {
-    if (state.page === "house") return state.recordRequested && !state.recordVisible ? "record" : null;
+    if (state.page === "house") {
+      return state.recordVisible && !state.finalMemory && !ui.record.unavailable() ? "record" : null;
+    }
     if (!state.episodeId || state.draft) return null;
     if (scene.id === "share" && !reasonReady(reasonStep("extract"))) return "extract";
-    if (scene.id === "plan" && state.chain.cardReady && state.runPath === "house" &&
-        state.cardOpen && !state.chain.ready.hub && state.episode?.status !== "held") return "hub";
+    if (scene.id === "plan" && state.runPath === "house" && state.cards.length && !state.chain.ready.hub) return "hub";
     if (!reasonReady(state.step)) return scene.id;
     return null;
   }
@@ -139,6 +140,7 @@ export function createReasoning(context, ui) {
 
   function planStage({ cards, cardReady, tasks, devices }) {
     if (cards.length) return rows(cards, (card) => `<section class="plan-card">
+    <p class="plan-text">${esc(card.text)}</p>
     <ul class="plan-list">${rows(card.lines, (line) => {
         const serverDevices = tasks.find(({ id }) => id === line.task_id)?.devices ?? [];
         const presentation = stageLine(line.task_id, line.text, serverDevices, devices);
@@ -206,15 +208,12 @@ export function createReasoning(context, ui) {
     const ready = reasonReady(state.step);
     if (state.shownAt === null && ready) state.shownAt = performance.now();
     $("reason-layout").dataset.stage = id;
-    $("phone-dock").dataset.stage = id;
     renderStageIndicator();
-    ui.phone.renderPhone();
     const { chain } = state;
     const title = id === "plan" && chain.cardReady && !problemFor(id)
       ? chain.cards.length ? scene.readyTitle : scene.noCardTitle
       : scene.title ?? STAGE_NAMES[id];
-    const owner = { share: "share", plan: "card" }[id] ?? "server";
-    const markup = `<div class="copy-enter"><header class="stage-head">${ownerTag(owner)}
+    const markup = `<div class="copy-enter"><header class="stage-head">${ownerTag("server")}
     <h1${id === "share" ? ' class="headline"' : ""}>${esc(title)}</h1>
     ${ready && scene.lead && !problemFor(id) ? `<p class="lead">${esc(scene.lead)}</p>` : ""}
     </header>${stageBody(scene)}</div>`;
@@ -259,10 +258,6 @@ export function createReasoning(context, ui) {
     return Boolean(problemFor(scene.id) || stageReady(scene));
   }
 
-  function canPresentCard() {
-    return state.page === "house" || state.step >= reasonStep("plan");
-  }
-
   function nextReasonStep() {
     let next = state.step + 1;
     const { id } = state.scenes.reason[state.step];
@@ -302,7 +297,6 @@ export function createReasoning(context, ui) {
     if (state.scenes.reason[next].beat === "slots" && noSlots()) next += 1;
     if (next !== state.step) state.shownAt = null;
     state.step = next;
-    if (REPLAY && !RECORDING && next >= reasonStep("plan")) state.cardOpen = true;
     renderReason();
   }
 
@@ -314,7 +308,7 @@ export function createReasoning(context, ui) {
   }
 
   return {
-    canPresentCard, reasonStep, reasonReady, setStep, renderReason, autoAdvance,
+    reasonStep, reasonReady, setStep, renderReason, autoAdvance,
     renderStageIndicator, refreshChain, missingJudgment, canMoveReasonForward, nextReasonStep,
   };
 }

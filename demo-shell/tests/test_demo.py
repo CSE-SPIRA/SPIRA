@@ -21,6 +21,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("DEMO_SERVER_URL", "http://server.test")
     monkeypatch.setenv("DEMO_APP_TOKEN", "t")
     monkeypatch.delenv("DEMO_HUB_URL", raising=False)
+    monkeypatch.delenv("DEMO_APP_URL", raising=False)
     monkeypatch.delenv("DEMO_NUMBERS_PATH", raising=False)
     monkeypatch.delenv("DEMO_FIXTURE_EPISODE", raising=False)
     monkeypatch.setenv("DEMO_HOUSEHOLD", "h_042")
@@ -29,7 +30,7 @@ def client(monkeypatch, tmp_path):
         yield test_client
 
 
-def test_page_assets_and_config(client):
+def test_page_assets_and_config(client, monkeypatch):
     page = client.get("/demo").raise_for_status().text
     for name in ("demo.js", "chain.js", "flow.js", "story-time.js", "wire.js", "judgment.js",
                  "judgment-view.js", "markup.js", "scenes.json", "item-types.json", "tags.js"):
@@ -44,10 +45,17 @@ def test_page_assets_and_config(client):
     assert 'observe("viewer", "/demo/api/sim/viewer"' in script
     assert client.get("/demo/assets/house.js").status_code == 404
     assert client.get("/demo/assets/wire-view.js").status_code == 404
+    assert client.get("/demo/assets/phone.js").status_code == 404
+    assert '<iframe id="app-preview"' in page
+    assert "앱 미리보기를 켜 주세요" in page
     assert client.get("/demo/assets/..%2Fdemo.py").status_code == 404
     assert client.get("/demo/api/config").json() == {
-        "household_id": "h_042", "server": True, "hub": False, "fixture": False, "story_timing": None, "tagger": False,
+        "household_id": "h_042", "app_url": None, "server": True, "hub": False, "fixture": False,
+        "story_timing": None, "tagger": False,
     }
+    app_url = "http://127.0.0.1:8732/"
+    monkeypatch.setenv("DEMO_APP_URL", app_url)
+    assert client.get("/demo/api/config").json()["app_url"] == app_url
 
 
 def test_reset_requires_loopback_and_same_origin_and_forwards_launcher_status(client, monkeypatch):
@@ -171,33 +179,6 @@ def test_grocery_share_selects_recording_only_on_fixture(client, monkeypatch, fi
     assert seen == expected_requests
 
 
-@pytest.mark.parametrize(("reaction", "status", "body"), [
-    ({"reaction": "line_off", "task_id": "t_clean#1"}, 200, {"card_id": "nc_331"}),
-    ({"reaction": "line_on", "task_id": "t_clean#1"}, 409, {"code": "line_started", "message": "Started"}),
-    ({"reaction": "stop"}, 200, {"card_id": "nc_331", "stopped": True}),
-])
-def test_reaction_forwards_contract_body_and_preserves_result(client, monkeypatch, reaction, status, body):
-    seen = []
-
-    async def post(self, url, *, json, headers):
-        seen.append((url, json))
-        return httpx.Response(status, json=body)
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", post)
-    receipt = client.post("/demo/api/reaction", json={"card_id": "nc_331", **reaction})
-    assert receipt.status_code == status
-    assert receipt.json() == body
-    assert seen == [("http://server.test/v1/cards/nc_331/reactions", reaction)]
-
-
-@pytest.mark.parametrize("reaction", [
-    {"reaction": "stop", "task_id": None},
-    {"reaction": "line_off"},
-    {"reaction": "line_on", "task_id": "invalid"},
-])
-def test_reaction_rejects_invalid_task_scope(client, reaction):
-    assert client.post("/demo/api/reaction", json={"card_id": "nc_331", **reaction}).status_code == 400
-
 
 def test_evidence_chain():
     node = shutil.which("node")
@@ -283,12 +264,17 @@ def test_server_proxy_reads_only_contract_routes(client, monkeypatch, fixture_mo
     seen = []
 
     async def fake_get(self, url, **kwargs):
-        seen.append((url, kwargs["headers"]))
+        seen.append((url, kwargs["headers"], kwargs["params"]))
         return httpx.Response(200, json={"ok": True})
 
     monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
     assert client.get("/demo/api/server/v1/episodes/ep_9031/rationale").json() == {"ok": True}
-    assert seen == [("http://server.test/v1/episodes/ep_9031/rationale", expected_headers)]
+    assert client.get("/demo/api/server/v1/households/h_042/episodes?limit=100").json() == {"ok": True}
+    assert client.get("/demo/api/server/v1/households/h_051/episodes").status_code == 404
+    assert seen == [
+        ("http://server.test/v1/episodes/ep_9031/rationale", expected_headers, {}),
+        ("http://server.test/v1/households/h_042/episodes", expected_headers, {"limit": "100"}),
+    ]
     for path in ("v1/hub/plans", "_fixture/receipts", "v1/cards/nc_1/reactions"):
         assert client.get(f"/demo/api/server/{path}").status_code == 404
 

@@ -10,11 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 def create_app():
     server = os.environ["SPIRA_SERVER_URL"]
-    hub = os.environ["SPIRA_HUB_URL"]
     household = os.environ["SPIRA_HOUSEHOLD"]
     origin = os.environ["SPIRA_WEB_ORIGIN"]
     app_key = f"Bearer {os.environ['SPIRA_APP_TOKEN']}"
-    hub_key = os.environ["SPIRA_HUB_KEY"]
     household_path = f"/v1/households/{household}"
     routes = {
         ("POST", "/v1/orders"), ("GET", f"{household_path}/episodes"),
@@ -30,7 +28,7 @@ def create_app():
     }
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.add_middleware(CORSMiddleware, allow_origins=[origin], allow_methods=["GET", "POST", "PUT", "DELETE"],
-                       allow_headers=["Authorization", "Content-Type", "X-API-Key"])
+                       allow_headers=["Authorization", "Content-Type"])
 
     @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
     async def forward(request: Request):
@@ -38,21 +36,15 @@ def create_app():
             raise HTTPException(403)
         method, path = request.method, request.url.path
         headers = {"Accept": "application/json"}
-        if (method, path) == ("GET", "/home/onboarding/devices"):
-            peer = hub
-            headers["X-API-Key"] = hub_key
-        elif (method, path) == ("GET", "/health"):
-            peer = server
-        elif (method, path) in routes or re.fullmatch(patterns.get(method, r"(?!)"), path):
-            peer = server
+        if (method, path) in routes or re.fullmatch(patterns.get(method, r"(?!)"), path):
             headers["Authorization"] = app_key
-        else:
+        elif (method, path) != ("GET", "/health"):
             raise HTTPException(404)
         if content_type := request.headers.get("content-type"):
             headers["Content-Type"] = content_type
         try:
             async with httpx.AsyncClient(timeout=35, trust_env=False) as client:
-                upstream = await client.request(method, f"{peer}{path}", headers=headers,
+                upstream = await client.request(method, f"{server}{path}", headers=headers,
                                                 params=request.query_params, content=await request.body())
         except httpx.HTTPError as error:
             raise HTTPException(502, "Peer is unavailable") from error

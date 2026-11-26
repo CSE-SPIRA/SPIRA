@@ -5,7 +5,12 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 export PYTHONDONTWRITEBYTECODE=1
-if [ -d /private/tmp ]; then export TMPDIR=/private/tmp; fi
+if [ -n "${DEMO_STATE_ROOT:-}" ]; then
+  mkdir -p "$DEMO_STATE_ROOT"
+  export TMPDIR="$DEMO_STATE_ROOT"
+elif [ -d /private/tmp ]; then
+  export TMPDIR=/private/tmp
+fi
 exec uv --quiet run --no-project --python 3.12 \
   --with-requirements hub/requirements.txt \
   --with-requirements hub/tests/fixture_server/requirements.txt \

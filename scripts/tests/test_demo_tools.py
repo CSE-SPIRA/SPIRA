@@ -23,7 +23,7 @@ from app.scripts import browser_demo_web as web
 from scripts.demo_app_proxy import create_app
 from scripts.demo_fixture import create_demo_fixture
 from scripts.demo_start import guest_window, window_status
-from scripts.demo_up import choose_ports
+from scripts.demo_up import cached_app, choose_ports
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -37,15 +37,20 @@ def test_web_cache_reuses_build_and_tracks_source_and_defines(tmp_path, monkeypa
     flutter = tmp_path / "bin/flutter"
     flutter.parent.mkdir()
     flutter.touch(mode=0o755)
+    git = shutil.which("git")
+    assert git
+    (flutter.parent / "git").symlink_to(git)
+    tree = subprocess.check_output([git, "rev-parse", "HEAD:app"], cwd=ROOT, text=True).strip()
     monkeypatch.setenv("PATH", str(flutter.parent))
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("DEMO_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.setattr(web, "temporary_root", lambda: tmp_path)
     monkeypatch.setattr(web, "APP", source / "app")
     monkeypatch.setattr(web, "BUILD_INPUTS", ("app/lib",))
     defines = {"SPIRA_BASE_URL": "http://127.0.0.1:8941"}
     builds = []
 
     def build(command, cwd):
-        assert command[0] == str(flutter)
+        assert command[:3] == [str(flutter), "build", "web"]
         assert (cwd / "lib/main.dart").read_text() == dart.read_text()
         output = next(Path(arg.partition("=")[2]) for arg in command if arg.startswith("--output="))
         output.mkdir()
@@ -55,21 +60,23 @@ def test_web_cache_reuses_build_and_tracks_source_and_defines(tmp_path, monkeypa
         return 0
 
     original_key = web.cache_key(defines, source)
-    path, hit = web.cached_web(defines, build)
+    path, hit = cached_app(defines, build)
     assert path.name == original_key
+    assert path.is_relative_to(tmp_path / "state")
+    assert tree in path.parts
     assert not hit
-    assert web.cached_web(defines, build) == (path, True)
+    assert cached_app(defines, build) == (path, True)
     assert len(builds) == 1
 
     dart.write_text("updated source")
-    updated, hit = web.cached_web(defines, build)
+    updated, hit = cached_app(defines, build)
     assert not hit
     assert updated != path
     assert web.cache_key({"SPIRA_BASE_URL": "http://127.0.0.1:8948"}, source) != updated.name
     assert len(builds) == 2
 
     flutter.unlink()
-    assert web.cached_web(defines, build) == (updated, True)
+    assert cached_app(defines, build) == (updated, True)
 
 
 def test_guest_window_from_completed_hub_task():
@@ -128,10 +135,8 @@ def test_real_app_proxy_uses_backend_credentials(monkeypatch):
     origin = "http://127.0.0.1:8700"
     for name, value in {
         "SPIRA_SERVER_URL": "http://server.test",
-        "SPIRA_HUB_URL": "http://hub.test",
         "SPIRA_HOUSEHOLD": "h_123",
         "SPIRA_WEB_ORIGIN": origin,
-        "SPIRA_HUB_KEY": "test-hub-key",
         "SPIRA_APP_TOKEN": "test-app-token",
     }.items():
         monkeypatch.setenv(name, value)
@@ -150,7 +155,6 @@ def test_real_app_proxy_uses_backend_credentials(monkeypatch):
         assert client.get("/_fixture/control", headers=headers).status_code == 404
         assert client.get("/v1/households/h_123/cards").status_code == 403
     assert calls == [
-        ("http://hub.test/home/onboarding/devices", {"Accept": "application/json", "X-API-Key": "test-hub-key"}, {}),
         ("http://server.test/v1/households/h_123/cards",
          {"Accept": "application/json", "Authorization": "Bearer test-app-token"}, {"since": "2026-10-15"}),
     ]
@@ -166,7 +170,7 @@ def test_stack_starts_without_flutter(tmp_path):
     env = {
         **os.environ,
         "PATH": str(binaries),
-        "XDG_CACHE_HOME": str(tmp_path / "empty-cache"),
+        "DEMO_STATE_ROOT": str(tmp_path / "state"),
         "PYTHONPATH": os.pathsep.join((str(ROOT), str(ROOT / "contracts/generated/python"))),
     }
     with ExitStack() as stack:
@@ -236,12 +240,14 @@ def wait_for(probe, seconds=30):
 
 
 @contextmanager
-def local_launcher(tmp_path, *options, env=None):
+def local_launcher(tmp_path, *options, env=None, app_web=None):
     if shutil.which("mosquitto") is None:
         pytest.skip("Mosquitto is required for the live launcher test")
-    ports = choose_ports(dict.fromkeys(("sim", "fixture", "mqtt", "hub", "shell", "start"), 0), "127.0.0.1")
+    ports = choose_ports(dict.fromkeys(("sim", "fixture", "mqtt", "hub", "shell", "start", "proxy", "app"), 0), "127.0.0.1")
     command = [
-        sys.executable, str(ROOT / "scripts/demo_up.py"), "--no-app",
+        sys.executable, str(ROOT / "scripts/demo_up.py"),
+        *(["--no-app"] if app_web is None else ["--app-web", str(app_web)]),
+        "--proxy-port", str(ports["proxy"]), "--web-port", str(ports["app"]),
         "--port", str(ports["sim"]), "--shell-port", str(ports["shell"]),
         "--start-port", str(ports["start"]), "--peer-ports",
         *(str(ports[name]) for name in ("fixture", "mqtt", "hub")), *options,
@@ -249,7 +255,8 @@ def local_launcher(tmp_path, *options, env=None):
     log_path = tmp_path / "launcher.log"
     with log_path.open("w") as log:
         process = subprocess.Popen(command, cwd=ROOT, env={
-            **os.environ, "PYTHONPATH": str(ROOT), "PYTHONDONTWRITEBYTECODE": "1", **(env or {}),
+            **os.environ, "PYTHONPATH": str(ROOT), "PYTHONDONTWRITEBYTECODE": "1",
+            "DEMO_STATE_ROOT": str(tmp_path / "state"), **(env or {}),
         }, stdout=log, stderr=subprocess.STDOUT)
         try:
             def ready():
@@ -267,6 +274,37 @@ def local_launcher(tmp_path, *options, env=None):
             if process.poll() is None:
                 process.terminate()
                 process.wait(timeout=20)
+
+
+@pytest.mark.parametrize("prebuilt", [False, True], ids=["no-app", "app-web"])
+def test_launcher_config_embeds_a_prebuilt_app_or_disables_the_preview(tmp_path, prebuilt):
+    web_dir = tmp_path / "web" if prebuilt else None
+    if web_dir is not None:
+        web_dir.mkdir()
+        (web_dir / "index.html").write_text("prebuilt App")
+    with local_launcher(tmp_path, app_web=web_dir) as (client, urls, logs):
+        config = client.get(urls["shell"] + "/demo/api/config").raise_for_status().json()
+        assert not (logs / "app-build.log").exists()
+        if not prebuilt:
+            assert config["app_url"] is None
+            assert not (logs / "app-web.log").exists()
+            return
+        assert config["app_url"] == urls["app"]
+        assert client.get(config["app_url"]).raise_for_status().text == "prebuilt App"
+        headers = {"Origin": urls["app"], "Authorization": "Bearer demo"}
+        cards = "/v1/households/h_042/cards"
+        through_proxy = client.get(urls["proxy"] + cards, headers=headers).raise_for_status().json()
+        direct = client.get(urls["fixture"] + cards, headers=headers).raise_for_status().json()
+        assert through_proxy["cards"] == direct["cards"]
+        assert through_proxy["server_time"] <= direct["server_time"]
+        accepted = client.post(
+            urls["proxy"] + "/v1/orders", headers=headers, data={"household_id": "h_042"},
+            files={"images": ("example.png", b"fixture order", "image/png")},
+        ).raise_for_status().json()
+        episodes = client.get(
+            urls["shell"] + "/demo/api/server/v1/households/h_042/episodes",
+        ).raise_for_status().json()["episodes"]
+        assert episodes[0]["episode_id"] == accepted["episode_id"]
 
 
 def test_launcher_reset_restarts_fresh_peers_on_same_ports_with_keep(tmp_path):
@@ -331,13 +369,21 @@ def test_launcher_reset_restarts_fresh_peers_on_same_ports_with_keep(tmp_path):
         assert 'data-signal="package"' not in clean and "data-guest-arrival=" not in clean
 
 
-def test_launcher_reset_in_server_mode_uses_only_local_reset_routes(tmp_path):
+@pytest.mark.parametrize("with_app", [False, True], ids=["no-app", "app-web"])
+def test_launcher_reset_in_server_mode_uses_only_local_reset_routes(tmp_path, with_app):
     calls = []
 
     class Server(BaseHTTPRequestHandler):
         def respond(self):
-            calls.append((self.command, urlsplit(self.path).path))
-            self.send_response(200 if self.path == "/health" else 404)
+            path = urlsplit(self.path).path
+            calls.append((self.command, path))
+            if path == "/v1/households/h_123/episodes" and self.headers.get("Authorization") == "Bearer test-app-token":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"episodes":[],"next_before":null}')
+                return
+            self.send_response(200 if path == "/health" else 404)
             self.end_headers()
 
         do_GET = do_POST = do_PUT = do_DELETE = respond
@@ -351,10 +397,22 @@ def test_launcher_reset_in_server_mode_uses_only_local_reset_routes(tmp_path):
         url = f"http://127.0.0.1:{server.server_port}"
         try:
             keys = {"SPIRA_HUB_KEY": "test-hub-key", "SPIRA_APP_TOKEN": "test-app-token"}
-            with local_launcher(tmp_path, "--server", url, "--household", "h_123", env=keys) as (client, urls, logs):
+            app_web = tmp_path / "web" if with_app else None
+            if app_web is not None:
+                app_web.mkdir()
+                (app_web / "index.html").write_text("Server App")
+            with local_launcher(tmp_path, "--server", url, "--household", "h_123",
+                                env=keys, app_web=app_web) as (client, urls, logs):
                 shell = urls["shell"]
                 config = client.get(f"{shell}/demo/api/config").raise_for_status().json()
                 assert config["reset"] and not config["fixture"] and config["household_id"] == "h_123"
+                assert config["app_url"] == (urls["app"] if with_app else None)
+                episode_feed = "/v1/households/h_123/episodes"
+                if with_app:
+                    assert client.get(config["app_url"]).raise_for_status().text == "Server App"
+                    app_feed = client.get(urls["proxy"] + episode_feed, headers={"Origin": urls["app"]})
+                    shell_feed = client.get(shell + "/demo/api/server" + episode_feed)
+                    assert app_feed.raise_for_status().json() == shell_feed.raise_for_status().json()
                 snapshot_url = f"{urls['sim']}/sim/snapshot"
                 before = client.get(snapshot_url).raise_for_status().json()
                 recording_url = f"{shell}/demo/api/recordings/{'a' * 32}"
@@ -373,9 +431,10 @@ def test_launcher_reset_in_server_mode_uses_only_local_reset_routes(tmp_path):
                 # Server health/clock probes once, at initial startup only.
                 plan_poll = ("GET", "/v1/hub/plans")
                 assert plan_poll in calls
-                assert [call for call in calls if call != plan_poll] == [
-                    ("GET", "/health"), ("GET", "/v1/demo/clock"),
-                ]
+                initial = [("GET", "/health"), ("GET", "/v1/demo/clock")]
+                if with_app:
+                    initial.extend([("GET", "/health"), ("GET", episode_feed), ("GET", episode_feed)])
+                assert [call for call in calls if call != plan_poll] == initial
         finally:
             server.shutdown()
             thread.join()
