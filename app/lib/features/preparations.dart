@@ -179,7 +179,13 @@ class _OrderPanelState extends State<_OrderPanel> {
               episode: order,
               images: images,
               rationale: app.rationaleFor(orderId),
-              processing: !widget.collapsible && app.isSharedOrder(orderId),
+              // An order shared elsewhere (another device or the presenter)
+              // shows the same staged wait while the Server reads it.
+              processing:
+                  !widget.collapsible &&
+                  (app.isSharedOrder(orderId) ||
+                      order?.status == wire.EpisodeStatus.RECEIVED ||
+                      order?.status == wire.EpisodeStatus.READING),
               received:
                   app.accepted.contains(orderId) ||
                   app.orderImages(orderId).isNotEmpty,

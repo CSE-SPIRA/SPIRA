@@ -372,6 +372,22 @@ Finder get mainCards => find.descendant(
 Finder get stopButton => find.widgetWithText(OutlinedButton, '멈추기');
 
 void main() {
+  testWidgets('AP-AT-16 an order shared elsewhere shows the staged wait', (
+    tester,
+  ) async {
+    final peer = Peer()
+      ..episodes['ep_9031'] = (fixture('episode.json')
+        ..['status'] = 'reading'
+        ..['items'] = []
+        ..['item_count'] = 0
+        ..['item_tasks'] = []
+        ..['card_ids'] = []);
+    peer.rationales.remove('ep_9031');
+    await openApp(tester, controller(peer, fixture: false));
+    expect(find.byKey(const ValueKey('order-progress')), findsOneWidget);
+    expect(find.text('주문을 읽고 있어요'), findsOneWidget);
+  });
+
   testWidgets('AP-AT-14/16 stored stages reach a card with no episode list', (
     tester,
   ) async {
