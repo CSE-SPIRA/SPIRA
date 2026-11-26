@@ -12,7 +12,7 @@ intent:
   time_known: "{WEEKDAY}요일 {START}~{END} ({DAYS}일 뒤)"
   time_unknown: "모름 (일정이 아직 없음)"
 notice_items:
-  header: "[관리법 문구가 필요한 물건]"
+  header: "[관리법을 확인할 물건]"
   line: "- {ITEM} · {GROUP}{BUNDLE}"      # ITEM = "{type} × {qty} [{key}: {value}, …]"; BUNDLE = " · 의도 {N}의 물건" or ""
 home:
   header: "[이 집]"
