@@ -1,32 +1,84 @@
-"""Wall-clock scheduling for the committed live scene templates."""
+"""Publish the committed scene templates on story time."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+from random import Random
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 from spira_contracts.calendar import Calendar
 from spira_contracts.card import Card
 from spira_contracts.plan import Plan
 
-from .replay import CONTRACTS, Replay
+from .replay import CONTRACTS, JudgmentStage, Replay
+from .story_clock import StoryClock
 
 
 class NextOrder(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     episode_id: Literal["ep_9031", "ep_9150", "ep_9120"]
-    starts_in_seconds: int = Field(default=65, ge=1, le=3600)
-    duration_seconds: int = Field(default=30, ge=1, le=3600)
-
-
-def scene_times(order: NextOrder, now: datetime):
-    starts = now + timedelta(seconds=order.starts_in_seconds)
-    return starts, starts + timedelta(seconds=order.duration_seconds)
 
 
 def server_numbers():
     return yaml.safe_load((CONTRACTS.parent / "server/config/numbers.yaml").read_text(encoding="utf-8"))
+
+
+# Fixture processing gaps in story seconds. The quiet-window presets can
+# insert a wait between S1 and S2 without changing these gaps.
+STAGE_GAPS = {
+    JudgmentStage.READING: 1,
+    JudgmentStage.ITEMS: 3,
+    JudgmentStage.EVIDENCE: 2,
+    JudgmentStage.INTENTS: 3,
+    JudgmentStage.TASKS: 3,
+    JudgmentStage.PUBLISHED: 3,
+}
+
+
+def stage_offsets():
+    offsets = {}
+    elapsed = 0
+    for stage, gap in STAGE_GAPS.items():
+        if stage == JudgmentStage.EVIDENCE:
+            elapsed = 0  # Later offsets are relative to the end of the quiet window.
+        elapsed += gap
+        offsets[stage] = elapsed
+    return offsets
+
+
+def realistic_schedule(seed, sequence):
+    rng = Random(f"{seed}:{sequence}")
+    quiet = server_numbers()["quiet_s"]
+    offsets = stage_offsets()
+    previous = 0
+    for stage, seconds in offsets.items():
+        if stage == JudgmentStage.EVIDENCE:
+            previous = 0
+        offsets[stage] = previous = max(previous, seconds + rng.randint(-4, 8))
+    if rng.randrange(4):
+        first, second = rng.choice([
+            (JudgmentStage.EVIDENCE, JudgmentStage.INTENTS),
+            (JudgmentStage.INTENTS, JudgmentStage.TASKS),
+            (JudgmentStage.TASKS, JudgmentStage.PUBLISHED),
+        ])
+        offsets[second] = offsets[first]
+    return quiet, offsets
+
+
+def judgment_times(shared_at, quiet_seconds, offsets):
+    quiet_end = shared_at + timedelta(seconds=quiet_seconds)
+    return quiet_end, {
+        stage: (shared_at if stage < JudgmentStage.EVIDENCE else quiet_end) + timedelta(seconds=seconds)
+        for stage, seconds in offsets.items()
+    }
+
+
+def schedule_publication(replay):
+    ready_at = replay.judgment_at[JudgmentStage.PUBLISHED].isoformat()
+    replay.set_plan(replay.plan.model_copy(update={"sent_at": ready_at}))
+    if replay.card:
+        replay.card = replay.card.model_copy(update={"updated_at": ready_at})
 
 
 def substitute(value, replacements: dict[str, str]):
@@ -37,37 +89,7 @@ def substitute(value, replacements: dict[str, str]):
     return replacements.get(value, value) if isinstance(value, str) else value
 
 
-def schedule_templates(
-    replay: Replay, plan_name: str, card_name: str,
-    starts: datetime, ends: datetime, *, demo_mode: bool,
-):
-    numbers = server_numbers()
-    offsets = numbers["demo"] if demo_mode else numbers
-    card = replay.load(Card, card_name)
-    source_start = datetime.fromisoformat(card.starts_at)
-    source_end = next(
-        datetime.fromisoformat(event.end) for event in replay.calendar.events
-        if datetime.fromisoformat(event.start) == source_start
-    )
-    timestamps = {
-        source_start: starts,
-        source_end: ends,
-    }
-    for name, old_anchor, new_anchor, sign in (
-        ("guest_window_before_min", source_start, starts, -1),
-        ("before_start_default_min", source_start, starts, -1),
-        ("end_fallback_min", source_end, ends, 1),
-    ):
-        timestamps[old_anchor + timedelta(minutes=sign * numbers[name])] = (
-            new_anchor + timedelta(minutes=sign * offsets[name])
-        )
-    replacements = {old.isoformat(): new.isoformat() for old, new in timestamps.items()}
-    for name in (plan_name, card_name):
-        replay.files[name] = substitute(replay.files[name], replacements)
-
-
-def live_replay(order: NextOrder, *, demo_mode: bool, now: datetime | None = None, sequence: int = 1):
-    now = now if now is not None else datetime.now(timezone.utc)
+def live_replay(order: NextOrder, *, clock: StoryClock, sequence: int = 1, pace=None):
     replay = Replay(order.episode_id)
     if sequence > 1:
         identifiers = {order.episode_id: f"{order.episode_id}{sequence}"}
@@ -80,66 +102,25 @@ def live_replay(order: NextOrder, *, demo_mode: bool, now: datetime | None = Non
             "episode_id": identifiers[order.episode_id],
             "card_ids": [identifiers[card_id] for card_id in replay.episode.card_ids],
         })
-    if replay.card and replay.card.starts_at:
-        schedule_templates(
-            replay, "plan.v1.json", "card.v1.json", *scene_times(order, now),
-            demo_mode=demo_mode,
-        )
-    plan = replay.files["plan.v1.json"]
-    plan["sent_at"] = now.isoformat()
-    if demo_mode:
-        notice_after = server_numbers()["demo"]["notice_after_door_min"]
-        for task in plan["tasks"]:
-            if task["end"].get("on") == "fridge.door_opened":
-                task["end"]["after"] = f"{notice_after}m"
+    shared_at = datetime.fromisoformat(replay.episode.shared_at)
+    offsets = stage_offsets()
+    quiet_seconds, offsets = pace or (offsets[JudgmentStage.ITEMS], offsets)
+    replay.capture_quiet_seconds = quiet_seconds
+    replay.quiet_end, replay.judgment_at = judgment_times(shared_at, quiet_seconds, offsets)
     replay.live = True
-    replay.clock = now
-    replay.set_plan(replay.load(Plan, "plan.v1.json"))
+    replay.story_clock = clock
+    replay.clock = replay.judgment_at[JudgmentStage.PUBLISHED]
+    replay.plan = replay.load(Plan, "plan.v1.json")
+    schedule_publication(replay)
     if replay.card:
-        card_name = "card.v1.json" if "card.v1.json" in replay.files else "card.held.json"
-        card = replay.load(Card, card_name)
+        card = replay.load(Card, "card.v1.json") or replay.load(Card, "card.held.json")
         summary = card.summary.model_copy(update={"waiting_for": replay.waiting_for(card.lines)})
-        replay.card = card.model_copy(update={"updated_at": now.isoformat(), "summary": summary})
-    replay.episode = replay.episode.model_copy(update={"shared_at": now.isoformat()})
+        replay.card = card.model_copy(update={"updated_at": replay.plan.sent_at, "summary": summary})
+        replay.prepare_observation()
     return replay
 
 
-def scene_calendar(replay: Replay, order: NextOrder, now: datetime):
-    if replay.card.starts_at and order.episode_id == "ep_9031":
-        starts = datetime.fromisoformat(replay.card.starts_at)
-        ends = starts + timedelta(seconds=order.duration_seconds)
-    else:
-        starts, ends = scene_times(order, now)
-    first = replay.calendar.events[0]
-    original_start = datetime.fromisoformat(first.start)
-    shift = starts - original_start
-    events = [first.model_copy(update={"start": starts.isoformat(), "end": ends.isoformat()})]
-    for event in replay.calendar.events[1:]:
-        start = datetime.fromisoformat(event.start) + shift
-        end = datetime.fromisoformat(event.end) + shift
-        events.append(event.model_copy(update={"start": start.isoformat(), "end": end.isoformat()}))
-    return Calendar(events=events)
-
-
-def apply_scene_calendar(
-    replay: Replay, order: NextOrder, calendar: Calendar, *, demo_mode: bool, now: datetime | None,
-):
-    if order.episode_id != "ep_9120" or replay.calendar_applied or replay.paused:
-        return
-    if not any(line.when is None and line.checked for line in replay.card.lines):
-        return
-    if [(event.id, event.title) for event in calendar.events] != [
-        (event.id, event.title) for event in replay.calendar.events
-    ]:
-        return
-    now = now if now is not None else datetime.fromisoformat(replay.tick())
-    if calendar == replay.calendar:
-        calendar = scene_calendar(replay, order, now)
-    event = calendar.events[0]
-    schedule_templates(
-        replay, "plan.v2.json", "card.found.json",
-        datetime.fromisoformat(event.start), datetime.fromisoformat(event.end),
-        demo_mode=demo_mode,
-    )
-    replay.files["plan.v2.json"]["sent_at"] = now.isoformat()
-    replay.find_calendar_time()
+def apply_scene_calendar(replay: Replay, calendar: Calendar):
+    if calendar == replay.calendar and replay.published():
+        replay.find_calendar_time()
+        replay.prepare_observation()

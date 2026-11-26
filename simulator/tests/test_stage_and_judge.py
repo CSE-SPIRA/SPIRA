@@ -16,6 +16,7 @@ from spira_simulator.sources import JsonSource
 from spira_simulator.world import DEVICE_SCHEMA, World
 
 AUTH = ("operator", uuid4().hex)
+GUEST_WINDOW_EXPLANATION = "이 시간 안에 손님이 오면 켜져요. 지나면 실행하지 않아요."
 
 
 class SourceStub:
@@ -34,6 +35,18 @@ def operator_app(tmp_path, **kwargs):
         broker_enabled=False,
         **kwargs,
     )
+
+
+@pytest.mark.parametrize(("bind_host", "status"), [("127.0.0.1", 200), ("0.0.0.0", 401)])
+def test_demo_operator_auth_follows_bind_address(tmp_path, bind_host, status):
+    # A LAN listener also accepts requests sent to its loopback interface.
+    headers = {"Host": "127.0.0.1", "X-Forwarded-For": "127.0.0.1"}
+    with TestClient(
+        operator_app(tmp_path, bind_host=bind_host), base_url="http://127.0.0.1",
+    ) as client:
+        for route in ("/operator", "/operator/guest-window", "/operator/options"):
+            assert client.get(route, headers=headers).status_code == status
+            assert client.get(route, headers=headers, auth=AUTH).status_code == 200
 
 
 def post(client, endpoint, **payload):
@@ -81,6 +94,7 @@ def test_overlay_reads_authenticated_plan_and_fixture_executions(
     mock_http_source(monkeypatch, handle)
     with TestClient(operator_app(tmp_path)) as client:
         overlay = client.get("/sim/overlay").raise_for_status().json()
+        assert "예정된 집 준비 없음" not in client.get("/sim/viewer").text
 
     assert overlay["errors"] == []
     assert overlay["preparation"] == []
@@ -622,14 +636,200 @@ def test_raw_home_signals_and_wall_clock_sim_at18_local_evidence(tmp_path, monke
         assert len(client.get("/operator/truth", auth=AUTH).json()) == len(signals)
 
 
+def test_korean_home_controls_record_the_shells_household_observations(
+    tmp_path, monkeypatch, clock
+):
+    app = operator_app(tmp_path)
+
+    def home_section(client):
+        page = client.get("/operator", auth=AUTH).raise_for_status().text
+        assert '<html lang="ko">' in page
+        assert 'href="/sim/assets/house/tokens.css"' in page
+        _, opening, remainder = page.partition('<section class="house-events"')
+        section, closing, engineering = remainder.partition("</section>")
+        assert "<h1>Household operator</h1>" in engineering
+        return ElementTree.fromstring(opening + section + closing)
+
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.world, "clock", clock)
+        wire = Wire(app.state.world)
+        monkeypatch.setattr(app.state.protocol, "publish", wire.publish)
+        home = home_section(client)
+        assert home.findtext("h1") == "집에서 일어나는 일"
+        assert home.get("data-home-endpoint") == "/operator/home"
+        buttons = {button.text: button for button in home.findall(".//button")}
+        assert list(buttons) == ["택배 들이기", "손님 도착", "파티 끝"]
+        observations = home.findall(".//div[@class='house-event']/p")
+        assert len(observations) == 3
+        assert all("아직 관찰된 일이 없어요" in row.text for row in observations)
+
+        for label in buttons:
+            action = buttons[label].get("data-home-action")
+            result = post(client, home.get("data-home-endpoint"), action=action).json()
+            assert result == {
+                "applied": True, "at": {
+                    "택배 들이기": "토 14:00", "손님 도착": "토 14:01", "파티 끝": "토 14:02",
+                }[label],
+                "occurred_at": clock().isoformat(),
+                "observation": {
+                    "택배 들이기": "택배 들임", "손님 도착": "손님 있음", "파티 끝": "손님 나감",
+                }[label],
+            }
+            if label == "손님 도착":
+                viewer = client.get("/sim/viewer?fragment=true").raise_for_status().text
+                entrance = ElementTree.fromstring(viewer).find(
+                    ".//ul[@id='entrance-history']"
+                )
+                assert [item.text.strip() for item in entrance][:3] == [
+                    "손님 있음", "문 열림 감지", "초인종 울림",
+                ]
+                assert "data-home-action" not in viewer
+            clock.advance(60)
+
+        assert [frame[1]["event_type"] for frame in wire.frames] == [
+            "camera.package_removed", "doorbell.pressed", "door_lock.opened",
+            "presence.room_occupied", "presence.room_empty",
+        ]
+        viewer = client.get("/sim/viewer?fragment=true").raise_for_status().text
+        assert "손님 나감" in viewer
+        post(
+            client,
+            home.get("data-home-endpoint"),
+            action=buttons["손님 도착"].get("data-home-action"),
+        )
+
+    with TestClient(app) as client:
+        home = home_section(client)
+        observations = home.findall(".//div[@class='house-event']/p")
+        assert [
+            (row.findtext("time"), row.find("time").tail.strip()) for row in observations
+        ] == [
+            ("토 14:00", "· 택배 들임"),
+            ("토 14:03", "· 손님 있음"),
+            ("토 14:02", "· 손님 나감"),
+        ]
+
+
+def test_guest_window_is_shared_by_operator_and_viewer_until_missed(tmp_path, monkeypatch, clock):
+    plan = fixture_json("ep_9031/plan.v1.json")
+    mood = next(task for task in plan["tasks"] if task["task_id"] == "t_mood#3")
+    mood["trigger"]["window"] = {
+        "from": "2026-10-17T14:01:00+09:00", "to": "2026-10-17T14:11:00+09:00",
+    }
+    app = operator_app(tmp_path, plan_source=SourceStub(plan))
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.world, "clock", clock)
+        operator_label = "손님 맞이 14:01–14:11"
+        operator_status = {"label": operator_label, "detail": GUEST_WINDOW_EXPLANATION}
+        assert "손님 오면 · 14:01–14:11" in client.get("/sim/viewer").raise_for_status().text
+        operator_page = client.get("/operator", auth=AUTH).raise_for_status().text
+        assert f'id="guest-window" class="guest-window">{operator_label}</span>' in operator_page
+        assert f'aria-live="polite">{GUEST_WINDOW_EXPLANATION}</small>' in operator_page
+        assert client.get("/operator/guest-window", auth=AUTH).json() == operator_status
+        post(client, "/operator/home", action="guests_arrive")  # Before the window opens.
+        clock.advance(11 * 60)
+        assert "실행 안 됨" not in client.get("/sim/viewer").text
+        assert client.get("/operator/guest-window", auth=AUTH).json() == operator_status
+        clock.advance(1)
+        view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
+        for device in ("light_01", "display_01"):
+            marker = view.find(f'.//div[@data-device="{device}"]')
+            assert marker.findtext('p[@class="observed-outcome"]') == "손님이 오지 않아 실행 안 됨"
+            assert marker.find('p[@class="planned"]') is None
+        passed = "손님 맞이 시간이 지났어요"
+        operator_page = client.get("/operator", auth=AUTH).raise_for_status().text
+        assert f'aria-live="polite">{passed}</small>' in operator_page
+        assert GUEST_WINDOW_EXPLANATION not in operator_page
+        assert client.get("/operator/guest-window", auth=AUTH).json() == {
+            "label": operator_label, "detail": passed,
+        }
+        post(client, "/operator/home", action="guests_arrive")  # After the window closes.
+        assert client.get("/operator/guest-window", auth=AUTH).json()["detail"] == passed
+
+
+def test_operator_guest_window_keeps_in_window_arrival(tmp_path, monkeypatch, clock):
+    plan = fixture_json("ep_9031/plan.v1.json")
+    app = operator_app(tmp_path, plan_source=SourceStub(plan))
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.world, "clock", clock)
+        clock.advance(3 * 60 * 60)  # The fixture window closes at 17:00, inclusively.
+        post(client, "/operator/home", action="guests_arrive")
+        clock.advance(1)
+        post(client, "/operator/home", action="guests_arrive")
+        assert client.get("/operator/guest-window", auth=AUTH).json() == {
+            "label": "손님 맞이 13:30–17:00", "detail": "",
+        }
+
+
+def test_cleaner_keeps_spira_dot_through_job_completion(tmp_path, monkeypatch, clock):
+    app = operator_app(tmp_path)
+    cleaner = "mqtt:cleaner_01"
+
+    def tile(client):
+        view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
+        return view.find('.//div[@data-device="cleaner_01"]/article')
+
+    with TestClient(app) as client:
+        world = app.state.world
+        monkeypatch.setattr(world, "clock", clock)
+        Wire(world).command(cleaner, {"clean": {"room": "거실"}})
+        running = tile(client)
+        assert running.findtext('p[@class="device-value"]') == "청소 중"
+        assert running.find('h3/span[@class="spira-dot"]') is not None
+        clock.advance(60)
+        world.complete_due()
+        finished = tile(client)
+        assert finished.findtext('p[@class="device-value"]') == "청소 끝"
+        assert finished.find('h3/span[@class="spira-dot"]') is not None
+        post(client, "/operator/device", target=cleaner, actor="resident", actor_name="아빠",
+             values={"clean": {"room": "거실"}})
+        clock.advance(60)
+        world.complete_due()
+        assert tile(client).find('h3/span[@class="spira-dot"]') is None
+        assert "아빠" in tile(client).findtext('p[@class="change-marker"]')
+
+
+def test_fridge_shows_each_observed_notice_and_its_full_text(tmp_path):
+    app = operator_app(tmp_path)
+    notices = [
+        f'{item["item"]} · {item["text"]}' for item in fixture_json("ep_9031/episode.json")["item_tasks"]
+    ]
+    with TestClient(app) as client:
+        wire = Wire(app.state.world)
+        for notice in notices:
+            wire.command("mqtt:fridge_01", {"show_notice": notice})
+        view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
+        fridge = view.find('.//div[@data-device="fridge_01"]/article')
+        buttons = fridge.findall('p[@class="device-value notice-row"]/button')
+        assert [button.findtext("span") for button in buttons] == notices
+        for button, notice in zip(buttons, notices, strict=True):
+            assert button.get("title") == notice
+            detail = fridge.find(f'p[@id="{button.get("popovertarget")}"]')
+            assert detail.get("popover") == "auto" and detail.text == notice
+
+
 def test_sim_at10_read_only_faint_waiting_and_item_only_episode(tmp_path):
     source = SourceStub(fixture_json("ep_9031/plan.v1.json"))
     with TestClient(operator_app(tmp_path, plan_source=source)) as client:
         initial = client.get("/sim/snapshot").json()
         viewer = client.get("/sim/viewer")
-        assert viewer.status_code == 200 and "<button" not in viewer.text
+        assert viewer.status_code == 200 and "<form" not in viewer.text
         assert 'class="planned"' in viewer.text
-        assert "border: 1px dashed #9db3e3" in client.get("/sim/style.css").text
+        css = client.get("/sim/assets/house/viewer.css").raise_for_status().text
+        assert "border: 1px dashed var(--green-line)" in css
+        active_view = ElementTree.fromstring(
+            client.get("/sim/viewer?fragment=true").raise_for_status().text
+        )
+        assert all(
+            button.get("type") == "button" and button.get("popovertarget")
+            for button in active_view.findall(".//button")
+        )
+        assert active_view.find('.//div[@data-device="light_01"]').get("data-resting") is None
+        assert active_view.find('.//div[@data-device="styler_01"]').get("data-resting") == ""
+        assert (
+            active_view.findtext('.//div[@data-device="light_01"]/article/p[@class="device-value"]')
+            == "따뜻한 빛"
+        )
         for mode, label in (
             ("stale", "오래된 관찰값"),
             ("missing", "관찰값 누락"),
@@ -670,6 +870,19 @@ def test_sim_at10_read_only_faint_waiting_and_item_only_episode(tmp_path):
         grocery_page = client.get("/sim/viewer").text
         assert "예정된 집 준비 없음" in grocery_page
         assert all(task["text"] not in grocery_page for task in grocery_episode["item_tasks"])
+        grocery_view = ElementTree.fromstring(
+            client.get("/sim/viewer?fragment=true").raise_for_status().text
+        )
+        assert {
+            marker.get("data-device")
+            for marker in grocery_view.findall(".//div[@data-device]")
+            if marker.findall('p[@class="planned"]')
+        } == {"fridge_01"}
+        assert all(
+            marker.get("data-resting") == ""
+            for marker in grocery_view.findall(".//div[@data-device]")
+            if marker.get("data-device") != "fridge_01"
+        )
         for path in ("/sim/snapshot", "/sim/viewer", "/sim/overlay"):
             assert client.post(path, json={}).status_code == 405
         after = client.get("/sim/snapshot").json()
@@ -716,6 +929,18 @@ def test_sim_at16_mixed_stage_labels_virtual_assumption_provisional(tmp_path):
         assert tiles["tapo:light_02"]["qualification"] == "unqualified"
         assert not tiles["tapo:light_02"]["available"]
         assert tiles["matter:light_03"]["substrate"] == "virtual"
+        view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
+        for device, exceptions in (
+            ("light_01", []),
+            ("light_02", ["실물 기기 · 미검증"]),
+            ("light_03", []),
+        ):
+            heading = view.find(f'.//div[@data-device="{device}"]/article/h3')
+            assert [mark.text for mark in heading.findall("small")] == exceptions
+        operator = client.get("/operator", auth=AUTH).raise_for_status().text
+        assert "light_01 · Virtual · Class A (panel reporting assumed)" in operator
+        assert "light_02 · Physical (unqualified) · Class B" in operator
+        assert "light_03 · Virtual · Class B" in operator
         for target in ("tapo:light_02", "matter:light_03"):
             assert tiles[target]["local_operation_reporting"] is False
             assert app.state.world.read(target)["local_operation"] is False
@@ -774,6 +999,36 @@ def test_restore_overlay_keeps_report_and_observation_separate(tmp_path, status)
         assert public_value(restores)
 
 
+def test_viewer_shows_five_latest_restore_rows_with_older_rows_in_more(tmp_path):
+    records = fixture_json("ep_9031/executions.json")
+    restore = next(row for row in records if row["kind"] == "restore" and row["task_id"] == "t_safe#2")
+    records = [row for row in records if row["kind"] == "run"]
+    source = SourceStub(records)
+    timestamps = [f"2026-10-17T17:{minute:02}:00+09:00" for minute in range(7)]
+    for index in (3, 6, 1, 0, 4, 2, 5):
+        source.body.append(dict(restore, result_id=f"rs_test_{index}", at=timestamps[index],
+                                items=[restore["items"][0]]))
+    app = operator_app(tmp_path, execution_source=source)
+    with TestClient(app) as client:
+        view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").raise_for_status().text)
+        panel = view.find('.//section[@class="home-restore"]')
+        recent = panel.findall("ul/li/time")
+        assert [time.get("datetime") for time in recent] == timestamps[:1:-1]
+        assert panel.findtext("header/h2") == "되돌림 기록"
+        more = panel.find("header/button")
+        assert more.text == "더 보기"
+        history = panel.find(f'section[@id="{more.get("popovertarget")}"]')
+        assert history.get("popover") == "auto"
+        assert [time.get("datetime") for time in history.findall("ul/li/time")] == timestamps[1::-1]
+        assert "모의 기기" not in client.get("/sim/viewer").text
+
+        source.body = [row for row in records if row.get("at") not in timestamps[:2]]
+        view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").raise_for_status().text)
+        panel = view.find('.//section[@class="home-restore"]')
+        assert len(panel.findall("ul/li")) == 5
+        assert panel.find("header/button") is None
+
+
 def test_protective_fallback_overlay_preserves_observed_state(tmp_path):
     plan = fixture_json("ep_9031/plan.v3.json")
     records = fixture_json("ep_9031/executions.json")
@@ -819,7 +1074,7 @@ def test_protective_fallback_overlay_preserves_observed_state(tmp_path):
             assert tile["revisions"] == before[target]["revisions"]
 
 
-def test_sim_at19_live_floor_plans_and_household_content(tmp_path, monkeypatch, clock):
+def test_sim_at19_live_3d_households_and_household_content(tmp_path, monkeypatch, clock):
     birthday_payload = fixture_json("ep_9031/plan.v3.json")
     birthday = Plan.model_validate(birthday_payload)
     mood = next(task.actions for task in birthday.tasks if task.task_id == "t_mood#3")
@@ -844,6 +1099,14 @@ def test_sim_at19_live_floor_plans_and_household_content(tmp_path, monkeypatch, 
         post(
             client,
             "/operator/device",
+            target="mqtt:purifier_01",
+            actor="resident",
+            actor_name="엄마",
+            values={"mode": "auto"},
+        )
+        post(
+            client,
+            "/operator/device",
             target=OVEN,
             actor="resident",
             actor_name="엄마",
@@ -854,10 +1117,14 @@ def test_sim_at19_live_floor_plans_and_household_content(tmp_path, monkeypatch, 
         clock.advance(60)
         page = client.get("/sim/viewer").raise_for_status().text
         assert f'<a href="{other_home}">부모님 댁</a>' in page
-        assert "javascript:" not in page and "테스트 홈 · 지아네" in page
+        assert "javascript:" not in page and "<h1>지아네</h1>" in page
+        assert "h_042" not in page
+        assert "h_042" in client.get("/operator", auth=AUTH).raise_for_status().text
+        assert "SPIRA가 설정했어요" in page and "아직 실행 전이에요" in page
+        assert "패널 조작을 알려 준다고 가정해요" not in page
         view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
         clock_text = view.find(".//time")
-        assert clock_text.text == "10/17 토 14:01"
+        assert clock_text.text == "토 14:01"
         assert clock_text.get("datetime") == "2026-10-17T14:01:00+09:00"
         rooms = {
             room.findtext("h2"): {
@@ -866,14 +1133,14 @@ def test_sim_at19_live_floor_plans_and_household_content(tmp_path, monkeypatch, 
             for room in view.findall(".//section[@data-room]")
         }
         assert rooms == {
-            "거실": {"cleaner_01", "light_01", "display_01"},
+            "거실": {"cleaner_01", "light_01", "display_01", "purifier_01", "aircon_01"},
             "주방": {"cooktop_01", "oven_01", "fridge_01", "plug_kettle"},
+            "현관": {"styler_01"},
         }
         for device, content in {
             "oven_01": "170° · 19분 남음 · 굽는 중",
-            "light_01": "분홍 330/45/70",
+            "light_01": "분홍 빛",
             "display_01": "공주 화면",
-            "fridge_01": notice,
         }.items():
             assert (
                 view.findtext(
@@ -881,16 +1148,28 @@ def test_sim_at19_live_floor_plans_and_household_content(tmp_path, monkeypatch, 
                 )
                 == content
             )
-        assert "가상" in page and "패널 조작 보고 가정" in page
-        assert {
-            row.text.strip()
-            for row in view.findall('.//section[@class="entrance"]//li')
-        } == {
-            "택배 들임",
-            "초인종 울림",
-            "문 열림 감지",
-            "손님 있음",
-        }
+        for device, content in (("purifier_01", "자동"), ("styler_01", "대기 설정 없음")):
+            marker = view.find(f'.//div[@data-device="{device}"]')
+            assert marker.get("data-resting") == ""
+            assert marker.find("article/h3").get("title") == content
+            assert marker.find("article/h3/small") is None
+            assert marker.findtext('article/p[@class="device-value visually-hidden"]') == content
+        fridge = view.find('.//div[@data-device="fridge_01"]/article')
+        notice_trigger = fridge.find('p[@class="device-value notice-row"]/button')
+        assert notice_trigger.get("title") == notice_trigger.findtext("span") == notice
+        detail = fridge.find(f'p[@id="{notice_trigger.get("popovertarget")}"]')
+        assert detail.get("popover") == "auto" and detail.text == notice
+        assert view.findtext('.//h3[@id="entrance-summary"]') .startswith("손님 있음 · 토 ")
+        assert view.find('.//h3[@id="entrance-summary"]').get("tabindex") == "0"
+        assert [
+            (row.get("data-signal"), row.text.strip())
+            for row in view.findall('.//ul[@id="entrance-history"]/li')
+        ] == [
+            ("presence", "손님 있음"),
+            ("door", "문 열림 감지"),
+            ("bell", "초인종 울림"),
+            ("package", "택배 들임"),
+        ]
         post(
             client,
             "/operator/device",
@@ -900,9 +1179,20 @@ def test_sim_at19_live_floor_plans_and_household_content(tmp_path, monkeypatch, 
             values={"color": {"kelvin": 2700}},
         )
         post(client, "/operator/home", action="event_end")
-        page = client.get("/sim/viewer").text
-        assert "2700K" in page and "아빠 · 기기 패널" in page
-        assert "손님 나감" in page and "손님 있음" not in page
+        view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
+        person_marker = view.find('.//div[@data-device="light_01"]')
+        assert person_marker.get("data-resting") is None
+        assert person_marker.findtext('article/p[@class="device-value"]') == "따뜻한 빛"
+        assert person_marker.findtext('article/p[@class="change-marker"]') == "아빠 · 기기 패널"
+        assert view.findtext('.//h3[@id="entrance-summary"]') .startswith("손님 나감 · 토 ")
+        latest = view.find('.//ul[@id="entrance-history"]/li')
+        assert (latest.get("data-signal"), latest.text.strip()) == ("empty", "손님 나감")
+        post(client, "/operator/home", action="guests_arrive")
+        view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
+        assert view.findtext('.//h3[@id="entrance-summary"]') .startswith("손님 있음 · 토 ")
+        history = view.findall('.//ul[@id="entrance-history"]/li')
+        assert len(history) == 8
+        assert sum(row.text.strip() == "손님 있음" for row in history) == 2
 
     first_home = "http://127.0.0.1:8730/sim/viewer"
     monkeypatch.setenv("WORLD_PEER_VIEWERS", f"지아네={first_home}")
@@ -913,7 +1203,7 @@ def test_sim_at19_live_floor_plans_and_household_content(tmp_path, monkeypatch, 
         page = client.get("/sim/viewer").text
         assert (
             f'<a href="{first_home}">지아네</a>' in page
-            and "테스트 홈 · 부모님 댁" in page
+            and "<h1>부모님 댁</h1>" in page
         )
         view = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
         assert {
@@ -924,6 +1214,7 @@ def test_sim_at19_live_floor_plans_and_household_content(tmp_path, monkeypatch, 
         } == {
             "living_room": {"cleaner_01", "speaker_01"},
             "kitchen": {"oven_01", "fridge_01"},
+            "entrance": set(),
         }
         assert (
             view.findtext(
@@ -931,7 +1222,62 @@ def test_sim_at19_live_floor_plans_and_household_content(tmp_path, monkeypatch, 
             )
             == "잔잔한 음악 · 볼륨 30"
         )
-        assert view.findtext('.//section[@class="entrance"]/h2') == "현관"
+        assert view.findtext('.//section[@data-room="entrance"]/h2') == "현관"
+
+
+def test_viewer_planned_rows_show_targets_and_collapse_duplicates(tmp_path, monkeypatch, clock):
+    plan = fixture_json("ep_9031/plan.v3.json")
+    light_task = next(task for task in plan["tasks"] if task["task_id"] == "t_mood#3")
+    for index, command, value, trigger in (
+        (7, "color", {"hue": 350, "saturation": 65, "brightness": 80}, light_task["trigger"]),
+        (8, "color_temp", {"kelvin": 2700}, {"time": "2026-10-17T12:40:00+09:00"}),
+        (9, "color_temp", {"kelvin": 6500}, {"time": "2026-10-17T12:41:00+09:00"}),
+    ):
+        plan["tasks"].append({
+            **light_task,
+            "task_id": f"t_mood#{index}",
+            "actions": [{"device": "light_01", "cmd": command, "value": value}],
+            "trigger": trigger,
+        })
+
+    app = operator_app(tmp_path, plan_source=SourceStub(plan))
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.world, "clock", clock)
+        view = ElementTree.fromstring(
+            client.get("/sim/viewer?fragment=true").raise_for_status().text
+        )
+        for device, expected in (
+            ("display_01", ["공주 화면 · 손님 오면 · 13:30–17:00"]),
+            ("plug_kettle", ["끄기 · 토 13:30"]),
+            ("fridge_01", ["안내 표시 · 택배를 들이면"]),
+            ("light_01", ["분홍 빛 · 손님 오면 · 13:30–17:00", "따뜻한 빛 · 토 12:40", "흰 빛 · 토 12:41"]),
+        ):
+            rows = view.findall(f'.//div[@data-device="{device}"]/p[@class="planned"]')
+            assert ["".join(row.itertext()) for row in rows] == expected
+
+        display = view.find('.//div[@data-device="display_01"]')
+        display_button = display.find('p[@class="planned"]/button')
+        assert display_button.get("title") == GUEST_WINDOW_EXPLANATION
+        assert display.findtext(
+            f'p[@id="{display_button.get("popovertarget")}"][@popover="auto"]'
+        ) == GUEST_WINDOW_EXPLANATION
+
+        light = view.find('.//div[@data-device="light_01"]')
+        details = [
+            f"색조 330° · 채도 45% · 밝기 70%\n색조 350° · 채도 65% · 밝기 80%\n{GUEST_WINDOW_EXPLANATION}",
+            "2700K",
+            "6500K",
+        ]
+        buttons = light.findall('p[@class="planned"]/button')
+        assert [button.get("title") for button in buttons] == [
+            detail.replace("\n", " ") for detail in details
+        ]
+        assert [
+            light.findtext(f'p[@id="{button.get("popovertarget")}"][@popover="auto"]')
+            for button in buttons
+        ] == details
+        overlay = client.get("/sim/overlay").raise_for_status().json()
+        assert len(overlay["notices"]) == 2
 
 
 def test_sim_at20_viewer_projects_world_markers_and_no_reasoning(tmp_path, monkeypatch):
@@ -980,20 +1326,33 @@ def test_sim_at20_viewer_projects_world_markers_and_no_reasoning(tmp_path, monke
         assert "아빠" not in json.dumps(public, ensure_ascii=False)
         assert overlay["errors"] == []
         for row in overlay["preparation"] + overlay["notices"]:
-            assert set(row) == {
+            fields = {
                 "plan_id", "task_id", "device", "command", "target_value", "wait", "protective",
             }
-        assert "오븐 · 굽기 설정 대기 170° 20분 · 10/17 토 14:00" in page
-        assert "냉장고 · 안내 표시 · 택배를 들이면" in page
+            if row["wait"] == "guest_arrived":
+                fields |= {"window", "missed"}
+            assert set(row) == fields
+        assert '<span class="planned-clock"> · 토 14:00</span>' in page
         view = ElementTree.fromstring(fragment)
+        oven_plan = view.find('.//div[@data-device="oven_01"]/p[@class="planned"]')
+        assert "".join(oven_plan.itertext()) == "170° 20분 굽기 대기 · 토 14:00"
+        assert oven_plan.findtext('span[@class="planned-clock"]') == " · 토 14:00"
+        visual_values = {
+            marker.get("data-device"): json.loads(marker.get("data-values"))
+            for marker in view.findall(".//div[@data-device]")
+        }
+        assert visual_values["display_01"] == {"play_mood": {"scene": "kids_party"}}
+        assert visual_values["light_01"] == {"power": True, "color": {"kelvin": 2700}}
+        assert visual_values["fridge_01"] == {"show_notice": None}
         for device, kind, expected in (
             ("light_01", "person", "아빠 · 가전 앱"),
-            ("display_01", "spira", "SPIRA"),
+            ("display_01", "spira", None),
             ("plug_kettle", "unknown", "누가 바꿨는지 모름"),
         ):
             tile = view.find(f'.//div[@data-device="{device}"]/article')
             assert tile.get("data-change") == kind
             assert tile.findtext('p[@class="change-marker"]') == expected
+            assert (tile.find('h3/span[@class="spira-dot"]') is not None) == (kind == "spira")
         forbidden = [
             *notices,
             *[item["name"] for item in episode["items"]],
@@ -1011,10 +1370,13 @@ def test_sim_at20_viewer_projects_world_markers_and_no_reasoning(tmp_path, monke
             '"action_path"',
             '"rationale"',
             '"card_id"',
+            "marker-trace",
+            "←",
         ]
         for surface in (
             page,
             fragment,
+            json.dumps(visual_values, ensure_ascii=False),
             json.dumps(overlay, ensure_ascii=False),
             json.dumps(public, ensure_ascii=False),
         ):
@@ -1056,6 +1418,9 @@ def test_sim_at21_named_panel_and_appliance_app_share_device_path(
         assert client.get("/operator").status_code == 401
         panel = client.get("/operator", auth=AUTH).raise_for_status().text
         appliance = client.get("/app", auth=AUTH).raise_for_status().text
+        for page in (panel, appliance):
+            assert 'href="/sim/assets/house/tokens.css"' in page
+            assert 'href="/sim/style.css"' in page
         assert "엄마 · 기기 패널 · 조명 2700K로 변경" in panel
         assert all(
             f"<summary>{name}</summary>" in panel
@@ -1105,6 +1470,11 @@ def test_sim_at21_named_panel_and_appliance_app_share_device_path(
             assert signals[-1]["target"] == LIGHT
         current = client.get(response.headers["location"], auth=AUTH).text
         assert "4000K" in current and '<option value="아빠" selected>' in current
+        viewer = ElementTree.fromstring(client.get("/sim/viewer?fragment=true").text)
+        assert (
+            viewer.findtext('.//div[@data-device="light_01"]/article/p[@class="device-value"]')
+            == "흰 빛"
+        )
         truth = client.get("/operator/truth", auth=AUTH).json()
         assert [
             (row["actor"], row["actor_name"], row["action_path"]) for row in truth
@@ -1113,3 +1483,58 @@ def test_sim_at21_named_panel_and_appliance_app_share_device_path(
             ("resident", "아빠", "other_app"),
         ]
         assert public_value(signals)
+
+
+@pytest.mark.parametrize("count", [None, 4])
+def test_sim_at24_presence_follows_world_observations(tmp_path, monkeypatch, clock, count):
+    profile = load_profile()
+    if count is not None:
+        profile.home_signals["guests_arrive"][-1].payload["count"] = count
+    profile.home_signals["guests_depart"] = profile.home_signals["event_end"]
+    plan = fixture_json("ep_9031/plan.v3.json")
+    app = operator_app(tmp_path, profile=profile, plan_source=SourceStub(plan))
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.world, "_wall_time", clock)
+
+        def markers():
+            return ElementTree.fromstring(client.get("/sim/viewer?fragment=true").raise_for_status().text)
+
+        def entrance():
+            return markers().find('.//div[@id="entrance-observations"]')
+
+        def light():
+            return markers().find('.//div[@data-device="light_01"]')
+
+        assert client.get("/sim/overlay").json()["guest_windows"]
+        assert entrance().get("data-guest-arrival") is None
+        assert light().get("data-person-at") is None
+        post(client, "/operator/home", action="guests_arrive")
+        assert entrance().get("data-guest-count") == str(3 if count is None else count)
+
+        clock.advance()
+        panel = client.get("/operator", auth=AUTH).text
+        url, fields = next(
+            (url, fields)
+            for url, fields in SurfaceForms(panel).buttons
+            if fields == {"person": "지아", "control": "kelvin_2700"}
+        )
+        assert client.post(url, data=fields, auth=AUTH, follow_redirects=False).status_code == 303
+        assert light().get("data-person-at") == clock().isoformat()
+        assert light().get("data-person-figure") == "child"
+        assert light().findtext('article/p[@class="change-marker"]') == "지아 · 기기 패널"
+        clock.advance(6)
+        assert light().get("data-person-at") is None
+        assert entrance().get("data-guest-count") is not None
+
+        post(client, "/operator/home", action="event_end")
+        assert entrance().get("data-guest-arrival") is None
+        clock.advance()
+        post(client, "/operator/home", action="guests_arrive")
+        assert entrance().get("data-guest-arrival") == clock().isoformat()
+        post(client, "/operator/home", action="guests_depart")
+        assert entrance().get("data-guest-arrival") is None
+
+        post(client, "/operator/device", target=LIGHT, actor="external_automation",
+             values={"color": {"kelvin": 3500}})
+        assert light().get("data-person-at") is None
+        assert light().findtext('article/p[@class="change-marker"]') == "누가 바꿨는지 모름"

@@ -2,14 +2,21 @@
 
 Owner: Yejoon Kim
 
-Pulls the plan from the SPIRA Server, waits for triggers, checks current device state, executes, reads results back, and restores what it changed.
+The Home Hub is the adapter that executes SPIRA Server plans in the home.
+It waits for triggers, checks current device state and delegation, reads back
+effects, and reports observations and results to the Server. It preserves
+changes made by people. The Hub has no direct App connection.
 Folder layout inside is decided by the owner. See [`spec.md`](spec.md).
+[Screen reference](screens.md)
 
-## Contract fixture server
+## Run locally
+
+### Contract fixture server
 
 `hub/tests/fixture_server` is **non-inference test support** for the App, Hub,
 and Simulator. It replays committed payloads for H10-R1 and HUB-AT19. OCR, LLM,
 KB retrieval, device execution, and S7 inference are outside this test peer.
+See the [fixture specification](tests/fixture_server/spec.md) for live reads.
 
 From the repository root, run one episode with `uv` and Python 3.12.
 
@@ -27,6 +34,13 @@ Select `ep_9150` or `ep_9120` with `--episode`. The first two episodes use
 `h_042`, and `ep_9120` uses `h_051`. For clients in another local process or
 emulator, configure the host and port with `--host` and `--port`.
 
+Add `--default-scene ep_9031` or set `SPIRA_FIXTURE_DEFAULT_SCENE=ep_9031`
+to start unpublished and run the live birthday replay on each new
+`POST /v1/orders` upload. The live replay keeps the recorded device schedule
+and publishes results one stage at a time on the story clock. The Server
+pace preset uses the normal quiet window.
+See the [live scene options](tests/fixture_server/README.md).
+
 Each instance starts at the first plan and card fixtures for its selected
 episode. Restart to replay from the beginning. Turning off the birthday
 cleaning line `t_clean#1` advances to v2. A package event advances the fixture
@@ -41,11 +55,12 @@ an existing fixture task using a fresh task ID. For cancellation, a received
 cancellations. Order uploads and edits return acknowledgement for the selected
 episode. Profile writes and device registrations exercise their contract
 responses without re-planning the fixture. The onboarding response uses the
-selected household ID and the committed demo key. `ep_9150` starts with the
-clam and strawberry item notices and its no-intent rationale. Rationale returns
-404 when there is no committed snapshot for the published episode. The birthday
-and groceries episodes serve their committed rationale as soon as they are
-published. Memory is empty before the
+selected household ID and the committed demo key. In static replay `ep_9150`
+starts with the clam and strawberry item notices and its no-intent rationale.
+In live replay the episode is readable at acceptance, items appear at S1,
+and rationale starts with evidence at S2. Intents appear at S3, and task and
+card data at S5. The family scene has no committed rationale snapshot.
+Memory is empty before the
 birthday final snapshot and in the other episodes. The family episode detail
 uses the initial plan timestamp and held card ID with empty item lists.
 
@@ -57,16 +72,7 @@ schema-rejected bodies. Read attribution directly from each event's
 `payload.by`. Responses carry the `X-SPIRA-Fixture` header with the
 non-inference label.
 
-In-process tests can pass `hub.tests.fixture_server.create_app("ep_9031")` to
-the FastAPI test client. Run the replay and OpenAPI schema checks with:
-
-```bash
-PYTHONPATH=contracts/generated/python uv run --no-project --python 3.12 \
-  --with-requirements hub/tests/fixture_server/requirements.txt \
-  python -m pytest -q hub/tests/fixture_server
-```
-
-## Run the Hub
+### Hub process
 
 From the repository root, use Python 3.12 through `uv`. Start the fixture
 Server above in one terminal. Start the local MQTT broker in another.
@@ -77,8 +83,10 @@ Server above in one terminal. Start the local MQTT broker in another.
 
 Export the variables in [`.env.example`](.env.example) from a local secret
 source. Set `SPIRA_SERVER_URL` to the fixture listener and `SPIRA_HOUSEHOLD` to
-its household. Set `SPIRA_HUB_KEY` to the key returned by fixture onboarding
-and use the same MQTT prefix as the device peer. MQTT defaults to loopback,
+its household. Enter the household connection code locally as `SPIRA_HUB_KEY`.
+The code is the key returned by `POST /v1/households` and displayed by the App.
+The demo launcher sets `SPIRA_HUB_KEY` when it starts the Hub. Use the same
+MQTT prefix as the device peer. MQTT defaults to loopback,
 port 1883, and prefix `spira/g0`. Set `SPIRA_MQTT_PREFIX` to override the
 prefix. Start the Hub in a third terminal.
 
@@ -88,27 +96,69 @@ PYTHONPATH=contracts/generated/python uv run --no-project --python 3.12 \
   --installation hub/installation.example.json --db hub/hub.sqlite3
 ```
 
-The dashboard listens on loopback at port 8088. It shows waiting work,
-command receipts and read-backs, C-3 delivery, and restore or skip
-results. Start the Simulator separately with the same MQTT prefix. The
+The engineering dashboard is served at `/` on loopback port 8088. Its health
+and state routes support local diagnostics. Use `--home-name` to name the
+household on the ledger. It defaults to **우리 집**. The ledger groups activity by
+preparation and shows the installed device list alongside it on desktop.
+Open **자세한 기록** for waiting work, command receipts and read-backs, C-3 delivery,
+and restore or skip results. Start the Simulator separately with the same MQTT prefix. The
 example installation declares virtual devices using `mqtt:<logical_id>`.
-The fixture's dates are fixed. The live Hub uses wall time, so past windows
-and elapsed lifecycles remain past. The acceptance tests
-exercise those snapshots at their original scenario times.
+The Hub uses wall time by default. The demo launcher sets
+`SPIRA_DEMO_CLOCK_URL` so the Hub polls the fixture story clock once per second
+and shares the state with the Simulator over MQTT.
+
+## Tests
+
+### Runtime acceptance tests
+
+```sh
+PYTHONPATH=contracts/generated/python uv run --no-project --python 3.12 \
+  --with-requirements hub/requirements.txt \
+  --with-requirements hub/tests/fixture_server/requirements.txt \
+  python -m pytest -q hub/tests
+```
+
+Tests use the committed fixture Server, targeted HTTP fault stubs, and a fake
+device implementing the MQTT protocol. The Simulator light test uses the
+Simulator's device protocol to check that the Server receives a person-made
+change and the Hub preserves it at restoration. The real-broker transport test
+runs when Mosquitto is installed. The Class A cases are provisional pending
+O-01/PQ-01.
+
+### Contract fixture Server tests
+
+In-process tests can pass `hub.tests.fixture_server.create_app("ep_9031")` to
+the FastAPI test client. Run the replay and OpenAPI schema checks with:
+
+```bash
+PYTHONPATH=contracts/generated/python uv run --no-project --python 3.12 \
+  --with-requirements hub/tests/fixture_server/requirements.txt \
+  python -m pytest -q hub/tests/fixture_server
+```
+
+## Where to change what
+
+| Change | File |
+| --- | --- |
+| Installed devices, bindings and home signals | [`installation.example.json`](installation.example.json) |
+| Shared design and vocabulary | [`design/`](../design/README.md) |
+| Runtime and dashboard implementation | [`spira_hub/`](spira_hub) |
+| Fixture Server replay | [`tests/fixture_server/`](tests/fixture_server) |
 
 ### Installation and lifecycle
 
-- `devices` contains the C-2 devices admitted and delegated by the installation
-  owner. Discovery only reports capabilities. For each logical ID, `bindings`
-  names the native `target` and maps delegated commands to desired properties.
+- `devices` contains the device types and rooms registered as C-2. Set the
+  user's delegation in `commands` and `never` until the Server provides a path
+  for these settings. Discovery only reports capabilities. For each logical ID,
+  `bindings` names the native `target` and maps delegated commands to desired properties.
   A mapping can name a single property for the complete command value, rename
   every parameter with `{"properties": {...}}`, or supply `{"fixed": {...}}`
   for a command that takes no C-1 value.
 - An optional `native_identity` distinguishes a replacement behind a reused
   target. Change it before assigning the reused target to the replacement.
-  Editing the installation changes live delegation. Save the JSON atomically
-  so a reader sees a complete snapshot. C-2 revision increases on projection
-  changes and the receiver's current revision is reconciled on startup.
+  Save installation edits atomically so the Hub sees a complete snapshot when
+  it rechecks delegation just before dispatch. C-2 revision increases on
+  projection changes and the receiver's current revision is reconciled on startup.
 - `home_signals` binds a home fact to exact native targets and event types.
   The example maps `camera.package_removed` from `mqtt:sim_camera` to
   `package.brought_in` using `removed_count`. It maps the ordered sequence
@@ -127,18 +177,12 @@ exercise those snapshots at their original scenario times.
   interrupted after reservation is exposed as unknown. The Hub reconciles
   Server authority and fresh device evidence before resuming restore writes.
 
-### Runtime acceptance tests
+## Contract boundaries
 
-```sh
-PYTHONPATH=contracts/generated/python uv run --no-project --python 3.12 \
-  --with-requirements hub/requirements.txt \
-  --with-requirements hub/tests/fixture_server/requirements.txt \
-  python -m pytest -q hub/tests
-```
-
-Tests use the committed fixture Server, targeted HTTP fault stubs, and a fake
-device implementing the MQTT protocol. The real-broker transport test runs when
-Mosquitto is installed. The Class A cases are provisional pending O-01/PQ-01.
+See the [Hub specification](spec.md#1-purpose-and-boundaries) for the Server
+boundary, [delegation and capabilities](spec.md#h2-delegation-and-capabilities)
+for C-2 registration, and the [Simulator device protocol](../simulator/protocol.md)
+for the device boundary.
 
 ### Open questions
 

@@ -6,6 +6,7 @@ authoritative in [`contracts/`](../contracts/README.md). The Hub↔Simulator
 device boundary is defined in [`protocol.md`](protocol.md), which is normative
 for both parts. Implementation guidance is non-normative and lives in
 [`design-notes.md`](design-notes.md).
+The [screen reference](screens.md) describes the pages and their current behavior.
 
 This specification does not certify an implementation, real Server integration,
 or physical-device equivalence. Those claims require separate evidence.
@@ -16,8 +17,9 @@ The Simulator is an independent household with three roles:
 
 1. **Stage:** accept device commands, change device state, and show the observed
    home by room and device.
-2. **People:** let the operator act as a resident, child, guest, or external
-   automation without telling the Hub which actor was chosen.
+2. **People:** let a person act from the house or the operator act as a
+   resident, child, guest, or external automation. The Hub observes device
+   effects without receiving the actor identity.
 3. **Judge:** privately compare who acted with the `by` value that the fixture
    Server actually received from the Hub.
 
@@ -30,6 +32,15 @@ The Simulator MUST NOT infer purchase intent, create plans, decide Hub success,
 write Hub or Server result state, expose actor truth on a Hub-readable channel,
 or present virtual behavior as physical qualification. It is not a daily-control
 app or a 3D digital twin.
+
+The Simulator has no required Server dependency. Its only operational peer is
+the Hub through the [device protocol](protocol.md). World state and person actions
+work with optional evidence inputs unset. On this branch the viewer and operator
+can read C-1 for display from a local file or a configured HTTP source,
+including a direct plan-pull URL supplied by the demo launcher. The judge and
+restore overlay can use the Hub dashboard or configured test evidence.
+See [Simulator startup wiring](spira_simulator/api.py) and the
+[demo launcher](../scripts/demo_up.py).
 
 ## 2. Numbered requirements
 
@@ -86,6 +97,8 @@ created by a prior SPIRA command so that the latter cannot stop it.
 
 ### E4. Operator actions and faults (PC-4, PC-5, PC-6)
 
+In the demo, the enabled operator and its API MUST allow access without credentials for a Simulator bound only to `127.0.0.1`, and MUST require HTTP Basic credentials when bound for LAN access. The server's bind configuration determines this policy.
+
 **E4-R1.** The operator MUST provide package brought in, guest arrival, and event
 end occurrences, plus device changes by resident, child, guest, or external
 automation. For a device action, the operator chooses only who acted; the
@@ -100,42 +113,55 @@ judge to evaluate the corresponding received C-3 event.
 accepted-but-unchanged effect, and unavailable readback without manufacturing a
 Hub completion or changing Server result state.
 
+**SM-3.** A person MUST be able to switch off a running cleaner at the house.
+World MUST stop the cleaner and expose the device change for Hub observation.
+The Hub reports a user-attributed stop and an `unknown` result for the
+interrupted run. The card and memory demonstration MUST use person changes
+after a completed run, such as light colour or music.
+
+**SM-4.** The operator MUST offer music and light colour changes as named
+person actions on capable devices. These actions MUST use the same World and
+Hub observation path as other person changes.
+
 <a id="e5"></a>
 
 ### E5. Household viewer (PC-2, PC-4, PC-5, PC-6)
 
-**E5-R1.** The stage viewer MUST fill in only observed device state. Planned or
+**E5-R1.** The stage viewer MUST show observed device state, with provisional
+feedback for person actions as specified in D-5-R2. Planned or
 waiting work MUST be shown only as a visually faint, distinct overlay. Stale,
 missing, or unavailable observations MUST remain visibly so; disconnection MUST
 NOT change World state.
 
-**E5-R2.** The viewer MUST identify virtual versus physical substrate per device,
-show Class A local-operation reporting as an explicit assumption, and avoid any
+**E5-R2.** The viewer MUST mark physical devices and display their qualification
+status. The operator MUST identify substrate per device and show Class A
+local-operation reporting as an explicit assumption. The viewer MUST avoid any
 aggregate claim that virtual success qualifies a physical device.
 
 **E5-R3.** A no-preparation episode, such as ordinary groceries, MUST be able to
 show no planned or applied household preparation. Viewer controls MUST NOT create
-execution success. Operator writes and judge output MUST remain on the operator
-side, not the household viewer.
+execution success. Faults and judge output MUST remain on the operator side.
 
-**E5-R4.** The household viewer MUST draw the household as a floor plan: the
-profile's rooms as areas, each device placed in its room, and the entrance as
-the place of home events (package, doorbell, door). A viewer MUST be able to
+**E5-R4.** The household viewer MUST draw a 3D household with the
+profile's rooms, each device placed in its room, and the entrance as the place
+of home events (package, doorbell, door). A viewer MUST be able to
 link to the viewers of the other configured households, so the presenter can
 switch homes.
 
 **E5-R5.** Each device tile MUST state its observed value as household content,
 not raw fields: for example the oven's set temperature, remaining time and
 whether it is baking, the light's colour or colour temperature, the display's
-scene, and the fridge notice text. The same tile MUST still follow E5-R1 and
-E5-R2.
+scene, and the fridge notices. Each observed fridge notice has its own row,
+with an item label when supplied by the device and the full notice available
+from the row. The same tile MUST still follow E5-R1 and E5-R2.
 
 **E5-R6.** The viewer MAY mark who made the latest change to a device from World
 truth (SPIRA, or a person's display name and path). It MUST NOT show the Hub's
-attribution, the judge's verdict, or anything from SPIRA's reasoning: no items,
-intents, rationale or card text. Planned overlays show the device, the action
-with its device-level target value, and its trigger or time; item notice text
-stays out of the stage until the device shows it.
+attribution, the judge's verdict, or SPIRA's reasoning, order details, intents,
+rationale or card text. Planned overlays show the device, the action with its
+device-level target value, and its trigger or time. The viewer and operator
+show the plan's guest trigger window. If the guest window passes without a
+matching trigger, the viewer shows that the action did not run.
 
 **E5-R7.** The viewer MUST show the wall-clock day of week and time (E9-R1).
 
@@ -147,6 +173,35 @@ oven"), built from the profile's people and device commands, never from a plan.
 openable on its own URL on another phone, that lists the household's devices and
 lets a person change their values. A change from it MUST travel the
 `other_app` path (no local-operation report), so it reads as Class B to the Hub.
+
+**SM-1.** The default camera MUST frame the entire house prominently. Devices
+changed in the same moment MUST receive simultaneously visible markers. A
+device starting a run MUST receive a marker. Off devices MUST remain free of
+device labels.
+
+**SM-2.** Selecting a change marker or its device MUST open a room or device
+close-up with a short explanation of the observed change. Selecting it again,
+pressing Escape, or advancing to another moment MUST restore the overview and
+hide the explanation. Markers MUST be keyboard-focusable buttons with Korean
+labels. Advancing MUST work without selecting a marker.
+
+**D-5-R1.** In the Simulator viewer and demo shell house, selecting a device
+MUST open its SM-2 close-up and an adjacent person-action panel. The panel MUST
+use the operator's device-specific controls and household people. The birthday
+house MUST offer mother, father, child, and guest, default to mother, and
+remember the last person selected. Actions MUST use the operator person-action
+path through World and the Hub's device observation. The operator page MUST
+remain available as a backup. Device selection and actions MUST work by
+keyboard. Escape MUST close both the panel and the close-up.
+
+**D-5-R2.** Choosing an action MUST update the house immediately and show that
+a World read-back is pending. A fresh World reading MUST replace the provisional
+state. If the read fails, the house MUST restore its last observed state and
+show the failure. The house MUST use actual data waits for action feedback.
+
+**SM-5.** The demo shell MUST keep the active card visible to the left of the
+house throughout the house stage. Server judgment text MUST stay out of
+Simulator screens and World state.
 
 <a id="e6"></a>
 
@@ -209,9 +264,9 @@ qualification are separate from selecting it as the target. All other reference
 devices may remain virtual, and the full reference flow MUST remain demonstrable
 with virtual devices only.
 
-**E8-R2.** A virtual fallback MUST be labelled virtual and MUST NOT impersonate
-the physical target. Each displayed device and result MUST retain its actual
-substrate and qualification status.
+**E8-R2.** A virtual fallback MUST be labelled virtual in the operator
+inventory and MUST NOT impersonate the physical target. Displayed device
+metadata and results MUST use the actual substrate and qualification status.
 
 <a id="e9"></a>
 
@@ -240,11 +295,18 @@ passing claim until an implementation change supplies bounded evidence.
 | SIM-AT-09 | Inject stale, missing, and unavailable readback after a command | Each condition is explicit while independent World state persists; none is shown as verified completion | E2-R1, E4-R3, E5-R1 | PC-4 | Required |
 | SIM-AT-10 | Open the stage for an active plan and an ordinary-groceries episode | Observed state is filled, waiting work is faint, stale state is marked, and the groceries episode adds no preparation; viewer interaction creates no effect | E5-R1, E5-R3 | PC-2, PC-4 | Required |
 | SIM-AT-14 | Send a multi-property command containing one invalid property | The command is rejected and every value and witness remains unchanged | E2-R3 | PC-4 | Required |
-| SIM-AT-16 | Compose physical Tapo, virtual Class A, and virtual Matter devices | Every tile/result shows physical or virtual per device; assumptions are labelled; Tapo and Matter report `local_operation=false`; no physical qualification is inferred | E5-R2, E6-R2, E8-R1, E8-R2 | PC-4, PC-5, PC-6 | **Provisional only for the Class A comparison, pending PQ-01** |
+| SIM-AT-16 | Compose physical Tapo, virtual Class A, and virtual Matter devices | The viewer marks physical devices; the operator identifies each device's substrate and reporting assumption; Tapo and Matter report `local_operation=false`; no physical qualification is inferred | E5-R2, E6-R2, E8-R1, E8-R2 | PC-4, PC-5, PC-6 | **Provisional only for the Class A comparison, pending PQ-01** |
 | SIM-AT-18 | Run the demo with Server `DEMO_MODE=1` | App/Hub/Simulator observations use offset wall-clock timestamps; shortened waits come from Server data and no virtual demo-clock control is present | E9-R1 | PC-4 | Required |
-| SIM-AT-19 | Open both households' viewers during the birthday scene | Each shows a floor plan with devices in their rooms and the entrance; tiles read as content (oven temperature and time, light colour, display scene, fridge notice); weekday and wall-clock time are shown; a link reaches the other home | E5-R4, E5-R5, E5-R7 | PC-4 | Required |
-| SIM-AT-20 | Inspect the viewer page and its data during an active plan | No item, intent, rationale, card text, Hub `by` or judge verdict appears; overlays carry device, action and trigger or time only | E5-R6 | PC-4, PC-5 | Required |
+| SIM-AT-19 | Open both households' viewers during the birthday scene | Each shows a 3D household with devices in their rooms and home events at the entrance; device labels read as content (oven temperature and time, light colour, display scene, fridge notice); weekday and wall-clock time are shown; a link reaches the other home | E5-R4, E5-R5, E5-R7 | PC-4 | Required |
+| SIM-AT-20 | Inspect the viewer page and its data during an active plan | Order details, intent, rationale, card text, Hub `by` and judge verdict stay private. Overlays show the planned action and trigger, including any guest window. Fridge notice labels come from observed device values. | E5-R6 | PC-4, PC-5 | Required |
 | SIM-AT-21 | Use a named person control, then change the same device from the appliance-app page | The control emits the panel path with the person's name; the appliance-app change uses `other_app` with `local_operation=false`; both are in the truth journal | E5-R8, E5-R9, E6-R2 | PC-5, PC-6 | **Provisional for the Class A panel signal, pending PQ-01** |
+| SM-AT-1 | Guests arrive and multiple devices change | The overview stays in place and all changed devices show markers together | SM-1 | PC-4 | Required |
+| SM-AT-2 | Select a marker, then select it again | The camera closes in and an explanation appears. The camera returns to the overview and the explanation disappears | SM-2 | PC-4 | Required |
+| SM-AT-3 | A person switches off the running cleaner | The cleaner stops in World, the Hub reports `cleaner.stopped` with `by: user`, and the interrupted run has an `unknown` result | SM-3 | PC-5 | **Provisional for the Class A panel signal, pending PQ-01** |
+| SM-AT-4 | Inspect Simulator screens and World state | Server judgment text is absent | E5-R6, SM-5 | PC-4, PC-5 | Required |
+| SM-AT-5 | Start the cleaner at its scheduled time | The running cleaner has a change marker in the house overview | SM-1 | PC-4 | Required |
+| SIM-AT-22 | Select the light by mouse or keyboard and choose a person's yellow colour action | The close-up and its action panel open together. The house shows yellow immediately, then confirms yellow from World. Hub observes the change with `by: user`. Escape closes both views | D-5-R1, D-5-R2, SM-2, SM-4 | PC-4, PC-5 | **Provisional for the Class A panel signal, pending PQ-01** |
+| SIM-AT-23 | Choose a person action with an unavailable World read-back | The house shows pending feedback immediately, then restores the last observed value and reports the failure | D-5-R2 | PC-4 | Required |
 
 ## 4. Open items
 
