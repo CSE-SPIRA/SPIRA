@@ -112,6 +112,7 @@ class TestPlatform implements AppPlatform {
 }
 
 class Peer {
+  static const initialServerTime = '2026-11-05T01:02:03+09:00';
   final episodes = <String, Map<String, dynamic>>{};
   final requests = <http.Request>[];
   final reactions = <(String, Map<String, dynamic>)>[];
@@ -132,6 +133,9 @@ class Peer {
   bool failCalendar = false;
   int rationaleReads = 0;
   int pollCount = 0;
+  String serverTime = initialServerTime;
+  int? episodeListError;
+  int? episodePageSize;
   Future<http.Response> Function(http.Request)? reaction;
   Future<http.Response> Function(http.Request)? upload;
   Future<http.Response> Function()? readRationale;
@@ -184,13 +188,26 @@ class Peer {
         'cards': request.url.queryParameters['since'] == '1970-01-01T00:00:00Z'
             ? historyCards
             : cards,
-        'server_time': '2026-11-05T01:02:03+09:00',
+        'server_time': serverTime,
       });
     }
     if (method == 'GET' && path == '$householdPath/episodes') {
+      if (episodeListError case final status?) {
+        return response({
+          'code': 'validation_error',
+          'message': 'failed',
+        }, status);
+      }
+      final before = request.url.queryParameters['before'];
+      final eligible = episodes.values.where((episode) {
+        return before == null ||
+            DateTime.parse(episode['shared_at'] as String)
+                .isBefore(DateTime.parse(before));
+      }).toList();
+      final page = eligible.take(episodePageSize ?? eligible.length).toList();
       return response({
         'episodes': [
-          for (final episode in episodes.values)
+          for (final episode in page)
             {
               for (final key in [
                 'episode_id',
@@ -202,7 +219,9 @@ class Peer {
                 key: episode[key],
             },
         ],
-        'next_before': null,
+        'next_before': page.length < eligible.length
+            ? page.last['shared_at']
+            : null,
       });
     }
     if (method == 'GET' && path == '$householdPath/memory') {
@@ -1910,6 +1929,120 @@ void main() {
       expect(card, findsNothing);
     },
   );
+
+  for (final rewound in [false, true]) {
+    testWidgets(
+      'empty Server lists clear the restored closed preparation (clock rewound: $rewound)',
+      (tester) async {
+        final peer = Peer()
+          ..cards = [fixture('card.v1.json')]
+          ..episodes['ep_9031'] = (fixture('episode.json')
+            ..['status'] = 'notified');
+        final store = TestStore();
+        final first = controller(peer, store: store, fixture: false);
+        await openApp(tester, first);
+        peer.birthday['status'] = 'closed';
+        peer.cards = [fixture('card.final.json')];
+        await first.sync();
+        await tester.pumpAndSettle();
+        final card = find.byKey(const ValueKey('nc_331'));
+        expect(card, findsOneWidget);
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        peer.episodes.clear();
+        peer.cards = [];
+        peer.episodeListError = 422;
+        if (rewound) peer.serverTime = '2026-11-04T01:02:03+09:00';
+        final relaunched = controller(peer, store: store, fixture: false);
+        await openApp(tester, relaunched);
+        const error = '새로 불러오지 못했어요. 다시 시도해 주세요.';
+        expect(find.text(error), findsOneWidget);
+        expect(card, findsOneWidget);
+        expect(relaunched.lastServerCheck, Peer.initialServerTime);
+
+        peer.episodeListError = null;
+        await tapText(tester, '다시 시도');
+        expect(relaunched.lastServerCheck, peer.serverTime);
+        expect(relaunched.episodes, isEmpty);
+        expect(relaunched.cards, isEmpty);
+        expect(card, findsNothing);
+        expect(find.text('지난 준비 1개'), findsNothing);
+        expect(find.text(error), findsNothing);
+        expect(find.text('다시 시도'), findsNothing);
+        expect(
+          find.text('주문 화면을 캡처하고 공유 메뉴에서 SPIRA를 선택해 주세요.'),
+          findsOneWidget,
+        );
+        final saved = store.saved.whereType<Map<String, dynamic>>().last;
+        expect(saved['episodes'], isEmpty);
+        expect(saved['cards'], isEmpty);
+      },
+    );
+  }
+
+  testWidgets(
+    'the episode list reconciles cached cards beyond the first page',
+    (tester) async {
+      final peer = Peer()
+        ..cards = [fixture('card.final.json')]
+        ..episodes['ep_9031'] = (fixture('episode.json')
+          ..['status'] = 'closed');
+      final app = controller(peer);
+      await openApp(tester, app);
+      expect(app.cards, contains('nc_331'));
+
+      final newer = fixture('episode.json', episode: 'ep_9150')
+        ..['shared_at'] = '2026-11-04T01:00:00+09:00';
+      final older = peer.birthday;
+      peer.episodes
+        ..clear()
+        ..addAll({'ep_9150': newer, 'ep_9031': older});
+      peer.episodePageSize = 1;
+      peer.cards = [];
+      await app.sync();
+      expect(app.episodes, contains('ep_9031'));
+      expect(app.cards, contains('nc_331'));
+
+      older['card_ids'] = [];
+      await app.sync();
+      expect(app.episodes, contains('ep_9031'));
+      expect(app.cards, isEmpty);
+      expect(app.refreshError, isNull);
+    },
+  );
+
+  testWidgets('a rewound cursor reloads cards for surviving orders', (
+    tester,
+  ) async {
+    final peer = Peer()
+      ..cards = [fixture('card.final.json')]
+      ..episodes['ep_9031'] = (fixture('episode.json')..['status'] = 'closed');
+    final app = controller(peer);
+    await openApp(tester, app);
+    final previous = app.cards['nc_331']!;
+
+    final current = fixture('card.final.json')
+      ..['updated_at'] = '2026-10-17T17:50:00+09:00';
+    expect(
+      DateTime.parse(current['updated_at'] as String)
+          .isBefore(DateTime.parse(previous.updatedAt)),
+      isTrue,
+    );
+    peer.cards = [];
+    peer.historyCards = [current];
+    peer.serverTime = '2026-11-04T01:02:03+09:00';
+    await app.sync();
+    expect(app.lastServerCheck, peer.serverTime);
+    expect(app.cards['nc_331']?.updatedAt, current['updated_at']);
+    expect(app.refreshError, isNull);
+
+    await app.sync();
+    final lastPoll = peer.requests.lastWhere(
+      (r) => r.url.path.endsWith('/cards'),
+    );
+    expect(lastPoll.url.queryParameters['since'], peer.serverTime);
+    expect(app.cards['nc_331']?.updatedAt, current['updated_at']);
+  });
 
   testWidgets('the next share moves the restored preparation into history', (
     tester,

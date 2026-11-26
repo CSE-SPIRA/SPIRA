@@ -40,6 +40,7 @@ enum DeviceChoice { undecided, delegated, never }
 const _idlePollInterval = Duration(seconds: 30);
 const _activePollInterval = Duration(seconds: 3);
 const _closedPreparationDuration = Duration(minutes: 30);
+const _cardHistoryStart = '1970-01-01T00:00:00Z';
 
 class AppController extends ChangeNotifier {
   AppController({
@@ -703,9 +704,34 @@ class AppController extends ChangeNotifier {
   Future<void> _refresh() async {
     final id = household!;
     try {
-      final poll = await api.cards(id, since: _cursor);
-      final list = await api.episodes(id);
+      final cursor = _cursor;
+      var poll = await api.cards(id, since: cursor);
+      final serverTime = DateTime.parse(poll.serverTime);
+      final rewound =
+          cursor != null && serverTime.isBefore(DateTime.parse(cursor));
+      var list = await api.episodes(id);
       final listed = list.episodes.map((row) => row.episodeId).toSet();
+      final older = {
+        ...episodes.keys,
+        ...cards.values.map((card) => card.episodeId),
+      }..removeAll(listed);
+      // A cached order may have moved beyond the first page of history.
+      while (older.isNotEmpty && list.nextBefore != null) {
+        final before = list.nextBefore!;
+        list = await api.episodes(id, before: before);
+        if (list.nextBefore case final next?
+            when !DateTime.parse(next).isBefore(DateTime.parse(before))) {
+          throw const FormatException('Episode history did not advance');
+        }
+        for (final row in list.episodes) {
+          if (older.remove(row.episodeId)) listed.add(row.episodeId);
+        }
+      }
+      // Updates since a cursor from a later Server clock can omit current cards.
+      if (rewound && (listed.isNotEmpty || accepted.isNotEmpty)) {
+        poll = await api.cards(id, since: _cardHistoryStart);
+        DateTime.parse(poll.serverTime);
+      }
       final details = (await Future.wait(
         {...listed, ...accepted}.map((episodeId) async {
           try {
@@ -725,26 +751,48 @@ class AppController extends ChangeNotifier {
           throw const FormatException('Wrong household');
         }
       }
-      final serverTime = DateTime.parse(poll.serverTime);
-      final cursor = _cursor;
-      if (cursor != null && serverTime.isBefore(DateTime.parse(cursor))) {
-        throw const FormatException('Card cursor moved backwards');
-      }
       for (final card in poll.cards) {
         DateTime.parse(card.updatedAt);
       }
-      await _loadMissingHistory(id, details, poll.cards);
+      final currentEpisodes = details
+          .map((episode) => episode.episodeId)
+          .toSet();
+      final removedEpisodes = episodes.keys.toSet()..removeAll(currentEpisodes);
+      final currentCards = {
+        for (final episode in details)
+          for (final cardId in episode.cardIds) cardId: episode.episodeId,
+      };
+      final updates = poll.cards.where((card) {
+        return !removedEpisodes.contains(card.episodeId) &&
+            (!currentEpisodes.contains(card.episodeId) ||
+                currentCards[card.cardId] == card.episodeId);
+      }).toList();
+      final updatedIds = updates.map((card) => card.cardId).toSet();
+      final removedCards = cards.values
+          .where(
+            (card) =>
+                !updatedIds.contains(card.cardId) &&
+                (rewound || currentCards[card.cardId] != card.episodeId),
+          )
+          .map((card) => card.cardId)
+          .toSet();
+      _dropMissingOrders(removedEpisodes, removedCards);
+      if (rewound) {
+        _historyChecked.clear();
+      } else {
+        await _loadMissingHistory(id, details, updates);
+      }
       final changedRationaleEpisodes = <String>{};
-      for (final card in poll.cards) {
+      for (final card in updates) {
         final previous = cards[card.cardId];
-        if (previous != null &&
+        final olderVersion =
+            previous != null &&
             DateTime.parse(card.updatedAt)
-                .isBefore(DateTime.parse(previous.updatedAt))) {
-          continue;
-        }
+                .isBefore(DateTime.parse(previous.updatedAt));
+        if (olderVersion && !rewound) continue;
         if (previous == null || previous.updatedAt != card.updatedAt) {
           changedRationaleEpisodes.add(card.episodeId);
-          if (previous != null) {
+          if (previous != null && !olderVersion) {
             final change = PreparationChange.between(previous, card);
             if (change != null) {
               _initialPreparations.putIfAbsent(card.cardId, () => previous);
@@ -868,6 +916,35 @@ class AppController extends ChangeNotifier {
     await _deliverNotifications();
   }
 
+  void _dropMissingOrders(Set<String> episodeIds, Set<String> cardIds) {
+    for (final id in episodeIds) {
+      episodes.remove(id);
+      accepted.remove(id);
+      _recentClosures.remove(id);
+      _rationales.remove(id);
+      _storedRationales.remove(id);
+      _orderCaptures.remove(id);
+      _shownCaptures.remove(id);
+    }
+    for (final id in cardIds) {
+      cards.remove(id);
+      _startedTasks.remove(id);
+      _pendingStops.remove(id);
+      _uncertainStops.remove(id);
+      _historyChecked.remove(id);
+      _initialPreparations.remove(id);
+      _preparationChanges.remove(id);
+      controlErrors.remove(id);
+    }
+    if (episodeIds.isEmpty && cardIds.isEmpty) return;
+    _notifications.removeWhere((key, _) {
+      final pair = jsonDecode(key) as List<dynamic>;
+      return pair.first == 'read_failed'
+          ? episodeIds.contains(pair.last)
+          : cardIds.contains(pair.first);
+    });
+  }
+
   Future<void> _loadMissingHistory(
     String householdId,
     List<wire.Episode> details,
@@ -886,10 +963,7 @@ class AppController extends ChangeNotifier {
     try {
       // The cursorless read only returns open cards. Fetch missing history
       // without moving the live cursor or sending old notifications.
-      final history = await api.cards(
-        householdId,
-        since: '1970-01-01T00:00:00Z',
-      );
+      final history = await api.cards(householdId, since: _cardHistoryStart);
       for (final card in history.cards) {
         if (missing[card.cardId] == card.episodeId) cards[card.cardId] = card;
       }
