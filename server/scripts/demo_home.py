@@ -4,10 +4,11 @@
     python scripts/demo_home.py --home dev/home.yaml
     source out/demo.env
 
-Run before `scripts/demo-up --server` (repository root). The household is deleted and written again, with a new hub
-key each time. The calendar is relative to now (`+2d 14:00`) and tagged by the server LLM, as in a dry run.
-out/demo.env (mode 600, never committed) holds SPIRA_HOUSEHOLD_ID, SPIRA_HUB_KEY and SPIRA_APP_TOKEN; the keys are
-not printed.
+Run before `scripts/demo-up --server` (repository root). The household is deleted and written again (test orders,
+tasks, cards and memory go). The hub key stays when the household already exists, so a running hub keeps working;
+`--new-key` makes a new one. With DEMO_MODE=1 the demo page's "새로 시작" does the same through the server. The calendar is relative to now (`+2d 14:00`) and tagged by the server LLM, as in a dry run.
+out/demo.env (mode 600, never committed) holds SPIRA_HOUSEHOLD_ID, SPIRA_HUB_KEY and SPIRA_APP_TOKEN; written only
+when a key is made (the key is shown nowhere else). The keys are not printed.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--home", required=True, type=Path, help="fake home yaml (dev/home.example.yaml)")
     p.add_argument("--household", help="household id instead of the one in the yaml (h_ + lowercase/digits)")
     p.add_argument("--out", type=Path, default=SERVER / "out" / "demo.env")
+    p.add_argument("--new-key", action="store_true", help="make a new hub key (the hub must be restarted)")
     args = p.parse_args(argv)
 
     from alembic import command
@@ -33,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from spira_server import clock
     from spira_server.api.auth import new_hub_key
-    from spira_server.dev.seed import HomeError, load_home, seed
+    from spira_server.dev.seed import HomeError, existing_hub_key_hash, load_home, park_replays, seed
     from spira_server.settings import get_settings
 
     settings = get_settings()
@@ -50,20 +52,29 @@ def main(argv: list[str] | None = None) -> int:
     if args.household:
         home.household_id = args.household
         home.devices["household_id"] = args.household
-    key, digest = new_hub_key()
+    kept = None if args.new_key else existing_hub_key_hash(home.household_id)
+    key, digest = (None, kept) if kept else new_hub_key()
+    parked = park_replays(home.household_id)
     written = seed(home, now, hub_key_hash=digest)
     if written["calendar"] and not written["calendar_tagged"]:
         print("calendar was stored but not tagged (LLM call failed): S3 will see no events", file=sys.stderr)
 
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(args.out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(f"export SPIRA_HOUSEHOLD_ID={home.household_id}\n")
-        f.write(f"export SPIRA_HUB_KEY={key}\n")
-        f.write(f"export SPIRA_APP_TOKEN={settings.app_demo_token}\n")
+    if key is not None:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(args.out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(f"export SPIRA_HOUSEHOLD_ID={home.household_id}\n")
+            f.write(f"export SPIRA_HUB_KEY={key}\n")
+            f.write(f"export SPIRA_APP_TOKEN={settings.app_demo_token}\n")
     print(f"demo home {home.household_id}: {written['devices']} devices, {written['calendar']} calendar events "
-          f"(tagged: {written['calendar_tagged']}), {written['past_orders']} past orders, now={clock.iso(now)}")
-    print(f"keys -> {args.out} (source it before scripts/demo-up)")
+          f"(tagged: {written['calendar_tagged']}), {written['past_orders']} past orders, "
+          f"{len(parked)} replays kept, now={clock.iso(now)}")
+    if key is not None:
+        print(f"keys -> {args.out} (source it before scripts/demo-up)")
+    elif args.out.exists():
+        print(f"hub key kept; {args.out} unchanged")
+    else:
+        print(f"hub key kept, but {args.out} is missing: run again with --new-key (then restart the hub)", file=sys.stderr)
     return 0
 
 
