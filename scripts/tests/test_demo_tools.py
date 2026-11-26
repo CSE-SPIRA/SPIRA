@@ -1,13 +1,16 @@
 import json
 import os
-from contextlib import ExitStack
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime, timedelta
 from http.client import HTTPConnection, IncompleteRead, RemoteDisconnected
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import shutil
 import socket
 import subprocess
 import sys
+from threading import Barrier, Thread
 import time
 import urllib.request
 from urllib.parse import urlsplit
@@ -20,6 +23,7 @@ from app.scripts import browser_demo_web as web
 from scripts.demo_app_proxy import create_app
 from scripts.demo_fixture import create_demo_fixture
 from scripts.demo_start import guest_window, window_status
+from scripts.demo_up import choose_ports
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -220,3 +224,158 @@ def test_stack_starts_without_flutter(tmp_path):
             if process.poll() is None:
                 process.terminate()
                 process.wait(timeout=20)
+
+
+def wait_for(probe, seconds=30):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if value := probe():
+            return value
+        time.sleep(0.1)
+    raise AssertionError("Demo condition did not become ready")
+
+
+@contextmanager
+def local_launcher(tmp_path, *options, env=None):
+    if shutil.which("mosquitto") is None:
+        pytest.skip("Mosquitto is required for the live launcher test")
+    ports = choose_ports(dict.fromkeys(("sim", "fixture", "mqtt", "hub", "shell", "start"), 0), "127.0.0.1")
+    command = [
+        sys.executable, str(ROOT / "scripts/demo_up.py"), "--no-app",
+        "--port", str(ports["sim"]), "--shell-port", str(ports["shell"]),
+        "--start-port", str(ports["start"]), "--peer-ports",
+        *(str(ports[name]) for name in ("fixture", "mqtt", "hub")), *options,
+    ]
+    log_path = tmp_path / "launcher.log"
+    with log_path.open("w") as log:
+        process = subprocess.Popen(command, cwd=ROOT, env={
+            **os.environ, "PYTHONPATH": str(ROOT), "PYTHONDONTWRITEBYTECODE": "1", **(env or {}),
+        }, stdout=log, stderr=subprocess.STDOUT)
+        try:
+            def ready():
+                output = log_path.read_text()
+                assert process.poll() is None, output
+                if "Ctrl-C to stop." in output:
+                    return Path(next(line.split(maxsplit=1)[1] for line in output.splitlines() if line.startswith("Logs:")))
+
+            logs = wait_for(ready)
+            urls = {name: f"http://127.0.0.1:{port}" for name, port in ports.items()}
+            with httpx.Client(timeout=90, trust_env=False) as client:
+                yield client, urls, logs
+            assert process.poll() is None, log_path.read_text()
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                process.wait(timeout=20)
+
+
+def test_launcher_reset_restarts_fresh_peers_on_same_ports_with_keep(tmp_path):
+    with local_launcher(tmp_path, "--keep", "--realistic", "11", "--tagger") as (client, urls, logs):
+        shell, fixture, hub, sim = (urls[name] for name in ("shell", "fixture", "hub", "sim"))
+        episode_list = f"{fixture}/v1/households/h_042/episodes"
+        app_headers = {"Authorization": "Bearer demo"}
+        fixture_control = f"{fixture}/_fixture/control/state"
+        viewer_url = f"{sim}/sim/viewer?fragment=true"
+        reset_url = f"{shell}/demo/api/reset"
+        config = client.get(f"{shell}/demo/api/config").raise_for_status().json()
+        assert config["fixture"] and config["reset"] and config["tagger"]
+        assert "진행자 조작 → 새로 시작" in client.get(urls["start"]).raise_for_status().text
+        assert client.post(f"{urls['start']}/reset").status_code == 403
+        assert client.get(episode_list, headers=app_headers).raise_for_status().json()["episodes"] == []
+        initial_clock = client.get(f"{fixture}/v1/demo/clock").raise_for_status().json()["story_at"]
+        initial_world = client.get(f"{sim}/sim/snapshot").raise_for_status().json()
+        epoch = initial_world["world_epoch"]
+        accepted = client.post(f"{shell}/demo/api/order", data={"sample": "birthday"},
+                               files={"images": ("sample.png", b"demo screenshot", "image/png")})
+        assert accepted.status_code == 202, accepted.text
+        episode = accepted.json()["episode_id"]
+        assert client.get(episode_list, headers=app_headers).raise_for_status().json()["episodes"][0]["episode_id"] == episode
+        story_at = client.get(f"{fixture}/v1/demo/clock").raise_for_status().json()["story_at"]
+        later = datetime.fromisoformat(story_at) + timedelta(hours=1)
+        client.post(f"{fixture}/v1/demo/clock", json={"set_to": later.isoformat()}).raise_for_status()
+
+        def world_now():
+            return datetime.fromisoformat(client.get(f"{sim}/sim/snapshot").raise_for_status().json()["now"])
+
+        assert wait_for(lambda: later <= world_now() < later + timedelta(minutes=5))
+        for action in ("delivery", "guests_arrive"):
+            client.post(f"{shell}/demo/api/home/{action}").raise_for_status()
+        dirty = client.get(viewer_url).raise_for_status().text
+        assert 'data-signal="package"' in dirty and "data-guest-arrival=" in dirty
+        assert wait_for(lambda: client.get(f"{hub}/state").raise_for_status().json()["plan_history"])
+        shell_log = (logs / "shell.log").read_text()
+
+        barrier = Barrier(2, timeout=5)
+
+        def reset():
+            barrier.wait()
+            return client.post(reset_url).status_code
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            assert sorted(pool.map(lambda _: reset(), range(2))) == [204, 409]
+
+        assert client.get(f"{shell}/demo/api/config").raise_for_status().json() == config
+        assert (logs / "shell.log").read_text() == shell_log
+        assert client.get(episode_list, headers=app_headers).raise_for_status().json()["episodes"] == []
+        assert client.get(fixture_control).raise_for_status().json()["realistic_seed"] == 11
+        assert client.get(f"{fixture}/v1/demo/clock").raise_for_status().json()["story_at"] == initial_clock
+        fresh_hub = client.get(f"{hub}/state").raise_for_status().json()
+        assert fresh_hub["plan_history"] == fresh_hub["current_plans"] == fresh_hub["waiting"] == []
+        fresh_world = client.get(f"{sim}/sim/snapshot").raise_for_status().json()
+        assert fresh_world["world_epoch"] != epoch
+        assert datetime.fromisoformat(initial_clock) <= datetime.fromisoformat(fresh_world["now"]) < later
+        assert {device["target"]: device["values"] for device in fresh_world["devices"]} == {
+            device["target"]: device["values"] for device in initial_world["devices"]
+        }
+        clean = client.get(viewer_url).raise_for_status().text
+        assert 'data-signal="package"' not in clean and "data-guest-arrival=" not in clean
+
+
+def test_launcher_reset_in_server_mode_uses_only_local_reset_routes(tmp_path):
+    calls = []
+
+    class Server(BaseHTTPRequestHandler):
+        def respond(self):
+            calls.append((self.command, urlsplit(self.path).path))
+            self.send_response(200 if self.path == "/health" else 404)
+            self.end_headers()
+
+        do_GET = do_POST = do_PUT = do_DELETE = respond
+
+        def log_message(self, *_):
+            pass
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Server) as server:
+        thread = Thread(target=server.serve_forever)
+        thread.start()
+        url = f"http://127.0.0.1:{server.server_port}"
+        try:
+            keys = {"SPIRA_HUB_KEY": "test-hub-key", "SPIRA_APP_TOKEN": "test-app-token"}
+            with local_launcher(tmp_path, "--server", url, "--household", "h_123", env=keys) as (client, urls, logs):
+                shell = urls["shell"]
+                config = client.get(f"{shell}/demo/api/config").raise_for_status().json()
+                assert config["reset"] and not config["fixture"] and config["household_id"] == "h_123"
+                snapshot_url = f"{urls['sim']}/sim/snapshot"
+                before = client.get(snapshot_url).raise_for_status().json()
+                recording_url = f"{shell}/demo/api/recordings/{'a' * 32}"
+                client.post(recording_url, json={
+                    "episode_id": "ep_9031", "household_id": "h_123", "offset": 0,
+                    "entries": [{"kind": "presenter", "data": {"action": "reset"},
+                                 "arrived_at": datetime.now(UTC).isoformat(), "story_at": None}],
+                }).raise_for_status()
+                saved = client.get(recording_url).raise_for_status().json()
+                assert client.post(f"{shell}/demo/api/reset").status_code == 204
+                after = client.get(snapshot_url).raise_for_status().json()
+                assert after["world_epoch"] != before["world_epoch"] and after["household_id"] == "h_123"
+                assert client.get(recording_url).raise_for_status().json() == saved
+                assert not (logs / "fixture.log").exists()
+                # The Hub resumes its ordinary plan polling. The launcher makes its
+                # Server health/clock probes once, at initial startup only.
+                plan_poll = ("GET", "/v1/hub/plans")
+                assert plan_poll in calls
+                assert [call for call in calls if call != plan_poll] == [
+                    ("GET", "/health"), ("GET", "/v1/demo/clock"),
+                ]
+        finally:
+            server.shutdown()
+            thread.join()

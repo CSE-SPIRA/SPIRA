@@ -4,6 +4,7 @@ import json
 from contextlib import contextmanager
 from datetime import datetime
 from html import escape
+from hmac import compare_digest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from math import ceil
 from pathlib import Path
@@ -69,11 +70,13 @@ def render(urls):
         hub=link(urls["hub"], "Hub", "집이 받은 계획과 기기가 움직인 기록을 봐요."),
         shell=(f'<p class="shell"><a href="{escape(urls["shell"])}" target="_blank" rel="noopener">'
                f'{shell_label}</a></p>' if "shell" in urls else ""),
+        reset=("<li>다시 시연할 때는 시연 화면의 <strong>진행자 조작 → 새로 시작</strong>을 눌러요.</li>"
+               if "shell" in urls else ""),
     ).encode()
 
 
 @contextmanager
-def serve_start_page(port, urls, get_window, get_now):
+def serve_start_page(port, urls, get_window, get_now, *, reset=None, reset_token=None):
     document = render(urls)
 
     class StartPage(BaseHTTPRequestHandler):
@@ -103,6 +106,20 @@ def serve_start_page(port, urls, get_window, get_now):
                 self.wfile.write(body)
 
         do_HEAD = do_GET
+
+        def do_POST(self):
+            if self.path != "/reset" or not reset_token:
+                self.send_error(404)
+                return
+            if (self.client_address[0] != "127.0.0.1"
+                    or self.headers.get("Host") != f"127.0.0.1:{self.server.server_port}"
+                    or not compare_digest(self.headers.get("Authorization", "").encode(),
+                                          f"Bearer {reset_token}".encode())):
+                self.send_error(403)
+                return
+            self.send_response(reset())
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
         def log_message(self, *_):
             pass

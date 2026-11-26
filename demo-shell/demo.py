@@ -27,6 +27,7 @@ from recordings import RECORDING_ID, Batch, Label, RecordingStore, directory
 from tagger import TagCache, Tagger
 
 DEMO_UI = Path(__file__).with_name("ui")
+LOOPBACK = {"127.0.0.1", "::1"}
 THREE_MODULE = "three.module.min.js"
 HOUSE_ASSET = re.compile(
     r"(?:fonts/)?[a-zA-Z0-9_.-]+\.(?:css|js|json|svg|jpg|png|woff2|txt)|vendor/three\.module\.min\.js"
@@ -210,9 +211,8 @@ def create_app():
 
     @application.get("/demo/artwork")
     def artwork_preview(request: Request):
-        local = {"127.0.0.1", "::1"}
-        if (request.client is None or request.client.host not in local
-                or request.url.hostname not in local | {"localhost"}):
+        if (request.client is None or request.client.host not in LOOPBACK
+                or request.url.hostname not in LOOPBACK | {"localhost"}):
             raise HTTPException(404, "No such demo page")
         same_origin(request)
         return FileResponse(DEMO_UI.parent / "artwork-preview.html", media_type="text/html", headers={
@@ -326,7 +326,29 @@ def create_app():
         episode = request.headers.get("X-SPIRA-Demo-Episode")
         if episode:
             result["demo_path"] = recordings.latest_path(episode)
+        if os.getenv("DEMO_RESET_URL") and os.getenv("DEMO_RESET_TOKEN"):
+            result["reset"] = True
         return result
+
+    @application.post("/demo/api/reset", status_code=204)
+    async def reset_demo(request: Request):
+        if (request.client is None or request.client.host not in LOOPBACK
+                or request.url.hostname not in LOOPBACK | {"localhost"}):
+            raise HTTPException(403, "Use the demo page on loopback")
+        same_origin(request)
+        url, token = os.getenv("DEMO_RESET_URL"), os.getenv("DEMO_RESET_TOKEN")
+        if not url or not token:
+            raise HTTPException(503, "Launcher reset is unavailable")
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(5, read=180), trust_env=False) as client:
+                upstream = await client.post(url, headers={"Authorization": f"Bearer {token}"})
+        except httpx.RequestError as error:
+            raise HTTPException(503, "Launcher reset is unavailable") from error
+        if upstream.status_code == 409:
+            raise HTTPException(409, "A reset is already in progress")
+        if upstream.status_code != 204:
+            raise HTTPException(503, "Launcher could not restart the local peers")
+        return Response(status_code=204)
 
     @application.get("/demo/api/server/{path:path}")
     async def server_read(path: str, request: Request):

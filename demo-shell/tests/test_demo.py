@@ -50,6 +50,35 @@ def test_page_assets_and_config(client):
     }
 
 
+def test_reset_requires_loopback_and_same_origin_and_forwards_launcher_status(client, monkeypatch):
+    path = "/demo/api/reset"
+    url = "http://127.0.0.1:8729/reset"
+    monkeypatch.setenv("DEMO_RESET_URL", url)
+    monkeypatch.setenv("DEMO_RESET_TOKEN", "test-reset-token")
+    forwarded = []
+    statuses = iter([204, 409, 503])
+
+    async def upstream(self, target, *, headers):
+        forwarded.append((target, headers))
+        return httpx.Response(next(statuses))
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", upstream)
+    with TestClient(client.app, base_url="http://localhost", client=("192.0.2.1", 12345)) as remote:
+        assert remote.post(path, headers={"X-Forwarded-For": "127.0.0.1"}).status_code == 403
+    with TestClient(client.app, base_url="http://localhost", client=("127.0.0.1", 12345)) as local:
+        assert local.get("/demo/api/config").json()["reset"] is True
+        assert "test-reset-token" not in local.get("/demo/api/config").text
+        assert local.post(path, headers={"Origin": "http://elsewhere.test"}).status_code == 403
+        assert local.post(path, headers={"Host": "elsewhere.test"}).status_code == 403
+        assert forwarded == []
+        for status in (204, 409, 503):
+            assert local.post(path, headers={"Origin": "http://localhost"}).status_code == status
+        assert forwarded == [(url, {"Authorization": "Bearer test-reset-token"})] * 3
+        monkeypatch.delenv("DEMO_RESET_URL")
+        assert local.post(path).status_code == 503
+        assert len(forwarded) == 3
+
+
 def test_artwork_preview_is_a_read_only_page_on_the_presenter_loopback(client):
     path = "/demo/artwork"
     assert client.get(path).status_code == 404

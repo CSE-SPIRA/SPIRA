@@ -19,10 +19,13 @@ import sys
 import tempfile
 import time
 import urllib.request
+from concurrent.futures import Future
 from contextlib import ExitStack, suppress
 from datetime import datetime, timedelta
 from ipaddress import IPv4Address
 from pathlib import Path
+from queue import Empty, Queue
+from threading import Lock
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
@@ -245,9 +248,13 @@ def run(args, mosquitto, directory, requests, hub_key, app_token, defines, clock
         logs = Path(tempfile.mkdtemp(prefix="run-", dir=directory))
     sim_host = "0.0.0.0" if args.sim_lan_ip else "127.0.0.1"
     operator_token = secrets.token_urlsafe(18)
+    reset_token = None if args.no_shell else secrets.token_urlsafe(24)
     processes = []
+    peer_names = {"fixture", "mosquitto", "hub", "simulator"}
     start_page = ExitStack()
     stopping = False
+    reset_requests = Queue()
+    resetting = Lock()
 
     def wait(what, probe, seconds=20):
         end = time.monotonic() + seconds
@@ -272,19 +279,31 @@ def run(args, mosquitto, directory, requests, hub_key, app_token, defines, clock
         processes.append((name, proc))
         return proc
 
-    def stop():
-        for _, proc in reversed(processes):
+    def stop(names=None):
+        selected = [(name, proc) for name, proc in processes if names is None or name in names]
+        for _, proc in reversed(selected):
             if proc.poll() is None:
                 with suppress(ProcessLookupError):
                     os.killpg(proc.pid, signal.SIGTERM)
-        for _, proc in processes:
+        for entry in selected:
+            _, proc = entry
             try:
                 proc.wait(5)
             except subprocess.TimeoutExpired:
                 with suppress(ProcessLookupError):
                     os.killpg(proc.pid, signal.SIGKILL)
                 proc.wait()
-        processes.clear()
+            processes.remove(entry)
+
+    def request_reset():
+        if not resetting.acquire(blocking=False):
+            return 409
+        try:
+            result = Future()
+            reset_requests.put(result)
+            return result.result()
+        finally:
+            resetting.release()
 
     def build(command, cwd):
         if args.server:
@@ -310,31 +329,20 @@ def run(args, mosquitto, directory, requests, hub_key, app_token, defines, clock
         nonlocal stopping
         stopping = True
 
-    signal.signal(signal.SIGTERM, request_stop)
-    signal.signal(signal.SIGINT, request_stop)
-    try:
-        web = args.app_web
-        app_message = None
-        if web is None and not args.no_app:
-            web, hit = cached_web(defines, build)
-            if web is None:
-                if args.server:
-                    raise RuntimeError("앱 미리보기에 Flutter가 필요해요. 앱을 생략하려면 --no-app을 쓰세요.")
-                app_message = FLUTTER_REQUIRED
-            else:
-                app_message = "App build: cache hit" if hit else "App build: built"
-        if web:
-            requests.update(proxy=args.proxy_port, app=args.web_port)
-        try:
-            ports = choose_ports(requests, sim_host)
-        except OSError as error:
-            raise RuntimeError(f"could not reserve its ports: {error}") from error
-        urls = {name: origin(port) for name, port in ports.items() if name != "mqtt"}
-        server = args.server or urls["fixture"]
+    def start_peers(keep):
+        initial_clock = None
+        if not keep:
+            state_files = ["hub.db", "world.db"]
+            if not args.server:
+                state_files.extend(["fixture.state", "fixture.tmp"])
+            for name in state_files:
+                (logs / name).unlink(missing_ok=True)
+                if name.endswith(".db"):
+                    for suffix in ("-wal", "-shm", "-journal"):
+                        (logs / f"{name}{suffix}").unlink(missing_ok=True)
         if not args.server:
-            clock_url = f"{server}/v1/demo/clock"
             state = logs / "fixture.state"
-            resume = args.keep and state.exists()
+            resume = keep and state.exists()
             fixture_cmd = [sys.executable, str(Path(__file__).with_name("demo_fixture.py")),
                            "--episode", args.episode, "--port", str(ports["fixture"]),
                            "--state", str(state)]
@@ -347,9 +355,9 @@ def run(args, mosquitto, directory, requests, hub_key, app_token, defines, clock
             if not resume:
                 episode_path = ROOT / "contracts/fixtures" / args.episode / "episode.json"
                 episode = Episode.model_validate_json(episode_path.read_bytes())
-                initial = datetime.fromisoformat(episode.shared_at) - timedelta(seconds=60)
+                initial_clock = datetime.fromisoformat(episode.shared_at) - timedelta(seconds=60)
                 request = urllib.request.Request(
-                    clock_url, data=json.dumps({"set_to": initial.isoformat()}).encode(),
+                    clock_url, data=json.dumps({"set_to": initial_clock.isoformat()}).encode(),
                     headers={"Content-Type": "application/json"},
                 )
                 read_json(request)
@@ -383,14 +391,58 @@ def run(args, mosquitto, directory, requests, hub_key, app_token, defines, clock
                WORLD_HUB_STATE_URL=f"{urls['hub']}/state")
         wait("Simulator", lambda: read_json(urls["sim"] + "/health")["mqtt"]["connected"])
         wait("Hub", lambda: read_json(urls["hub"] + "/health")["device_online"], seconds=30)
+        if initial_clock is not None:
+            def world_clock_ready():
+                now = datetime.fromisoformat(read_json(urls["sim"] + "/sim/snapshot")["now"])
+                return initial_clock <= now < initial_clock + timedelta(minutes=5)
+
+            wait("Simulator fixture clock", world_clock_ready)
+
+    def reset_peers(result):
+        status = 503
+        try:
+            stop(peer_names)
+            start_peers(keep=False)
+            status = 204
+        except (OSError, RuntimeError, ValueError, KeyError) as error:
+            stop(peer_names)
+            print(f"demo-up reset: {error}\nLogs: {logs}", file=sys.stderr, flush=True)
+        finally:
+            result.set_result(status)
+
+    signal.signal(signal.SIGTERM, request_stop)
+    signal.signal(signal.SIGINT, request_stop)
+    try:
+        web = args.app_web
+        app_message = None
+        if web is None and not args.no_app:
+            web, hit = cached_web(defines, build)
+            if web is None:
+                if args.server:
+                    raise RuntimeError("앱 미리보기에 Flutter가 필요해요. 앱을 생략하려면 --no-app을 쓰세요.")
+                app_message = FLUTTER_REQUIRED
+            else:
+                app_message = "App build: cache hit" if hit else "App build: built"
+        if web:
+            requests.update(proxy=args.proxy_port, app=args.web_port)
+        try:
+            ports = choose_ports(requests, sim_host)
+        except OSError as error:
+            raise RuntimeError(f"could not reserve its ports: {error}") from error
+        urls = {name: origin(port) for name, port in ports.items() if name != "mqtt"}
+        server = args.server or urls["fixture"]
+        if not args.server:
+            clock_url = f"{server}/v1/demo/clock"
+        start_peers(args.keep)
         if not args.no_shell:
             shell_env = ({"DEMO_RECORDINGS_DIR": str(logs / "recordings")} if args.server
                          else {"DEMO_FIXTURE_EPISODE": args.episode,
                                "DEMO_NUMBERS_PATH": str(ROOT / "server/config/numbers.yaml")})
             launch("shell", [sys.executable, "-m", "uvicorn", "demo:app", "--host", "127.0.0.1",
-                             "--port", str(ports["shell"]), "--no-access-log"], ROOT / "demo-shell",
+                             "--port", str(ports["shell"]), "--no-access-log", "--no-proxy-headers"], ROOT / "demo-shell",
                    DEMO_SIMULATOR_URL=urls["sim"], DEMO_OPERATOR_TOKEN=operator_token,
                    DEMO_SERVER_URL=server, DEMO_APP_TOKEN=app_token, DEMO_HOUSEHOLD=args.household,
+                   DEMO_RESET_URL=urls["start"] + "/reset", DEMO_RESET_TOKEN=reset_token,
                    DEMO_HUB_URL=urls["hub"], **shell_env,
                    DEMO_TAGGER="off" if args.server else os.getenv("DEMO_TAGGER", "codex" if args.tagger else "off"))
             wait("Demo shell", lambda: reachable(urls["shell"] + "/demo"))
@@ -422,6 +474,7 @@ def run(args, mosquitto, directory, requests, hub_key, app_token, defines, clock
             ports["start"], links, lambda: window,
             lambda: (datetime.fromisoformat(read_json(clock_url)["now"]) if clock_url
                      else datetime.now(ZoneInfo("Asia/Seoul"))),
+            reset=request_reset, reset_token=reset_token,
         ))
         selected = latest.with_suffix(".tmp")
         selected.write_text(logs.name, encoding="utf-8")
@@ -456,17 +509,23 @@ def run(args, mosquitto, directory, requests, hub_key, app_token, defines, clock
                   f"--proxy-port {args.proxy_port} --web-port {args.web_port} --stack-log {url_file}")
         print(f"Logs:      {logs}\nCtrl-C to stop.", flush=True)
         while not stopping:
+            try:
+                result = reset_requests.get(timeout=1)
+            except Empty:
+                result = None
+            if result is not None:
+                window = None
+                reset_peers(result)
             for name, proc in processes:
                 if proc.poll() is not None:
                     raise RuntimeError(f"{name} exited ({proc.returncode}); see {logs / (name + '.log')}")
             with suppress(OSError, ValueError, KeyError):
                 current = guest_window(read_json(urls["hub"] + "/state"))
-                if current and current != window:
-                    window = current
+                previous, window = window, current
+                if current and current != previous:
                     seoul = ZoneInfo("Asia/Seoul")
                     times = "–".join(bound.astimezone(seoul).strftime("%H:%M") for bound in window)
                     print(f"손님 맞이: {times}", flush=True)
-            time.sleep(1)
     except KeyboardInterrupt:
         pass
     except (OSError, RuntimeError) as error:
