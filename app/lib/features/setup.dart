@@ -1,87 +1,155 @@
 // ignore: deprecated_member_use
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app_controller.dart';
-import '../contracts.dart' as wire;
-import '../design_vocabulary.g.dart';
 import '../korean_text.dart';
-import 'labels.dart';
 
-class SetupScreen extends StatefulWidget {
+const devicesConnectionText = '집을 연결하면 기기가 보여요';
+
+class SetupScreen extends StatelessWidget {
   const SetupScreen(this.app, {super.key});
 
   final AppController app;
 
   @override
-  State<SetupScreen> createState() => _SetupScreenState();
+  Widget build(BuildContext context) => ListView(
+    padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
+    children: [
+      if (app.setupError case final error? when app.step != SetupStep.household)
+        StatusMessage(error),
+      switch (app.step) {
+        SetupStep.calendar => _calendar(context),
+        SetupStep.household => HouseholdTypesForm(
+          app,
+          title: '가구 유형',
+          button: '우리 집 만들기',
+          onSave: app.submitHousehold,
+        ),
+        SetupStep.connection => _connection(context),
+        SetupStep.devices => _devices(context),
+        SetupStep.ready => const SizedBox.shrink(),
+      },
+    ],
+  );
+
+  Widget _calendar(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    spacing: 12,
+    children: [
+      KoreanText(
+        'Google 캘린더',
+        style: Theme.of(context).textTheme.headlineMedium,
+      ),
+      const KoreanText('Google 캘린더를 연결하면 향후 14일의 일정을 준비에 참고해요.'),
+      FilledButton(
+        onPressed: app.busy || app.readCalendar == null
+            ? null
+            : () => app.finishCalendar(connect: true),
+        child: const KoreanText('Google 캘린더 연결'),
+      ),
+      TextButton(
+        onPressed: app.busy ? null : () => app.finishCalendar(connect: false),
+        child: const KoreanText('건너뛰기'),
+      ),
+    ],
+  );
+
+  Widget _connection(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    spacing: 12,
+    children: [
+      KoreanText(
+        '집 허브 연결 코드',
+        style: Theme.of(context).textTheme.headlineMedium,
+      ),
+      const KoreanText('이 코드를 집 허브에 입력하세요'),
+      if (app.connectionCode case final code?) ...[
+        SelectableText(code, style: Theme.of(context).textTheme.titleMedium),
+        OutlinedButton.icon(
+          icon: const Icon(Icons.copy_rounded),
+          label: const KoreanText('연결 코드 복사'),
+          onPressed: () async {
+            await Clipboard.setData(ClipboardData(text: code));
+            if (!context.mounted) return;
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: KoreanText('연결 코드를 복사했어요')));
+          },
+        ),
+      ],
+      FilledButton(
+        onPressed: app.busy ? null : app.completeConnection,
+        child: const KoreanText('다음'),
+      ),
+    ],
+  );
+
+  Widget _devices(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    spacing: 12,
+    children: [
+      KoreanText('기기', style: Theme.of(context).textTheme.headlineMedium),
+      const KoreanText(devicesConnectionText),
+      FilledButton(
+        onPressed: app.busy ? null : app.finishDevices,
+        child: const KoreanText('저장'),
+      ),
+    ],
+  );
 }
 
-class _SetupScreenState extends State<SetupScreen> {
+class HouseholdTypesForm extends StatefulWidget {
+  const HouseholdTypesForm(
+    this.app, {
+    super.key,
+    required this.title,
+    required this.button,
+    required this.onSave,
+  });
+
+  final AppController app;
+  final String title;
+  final String button;
+  final Future<void> Function(Set<String>) onSave;
+
+  @override
+  State<HouseholdTypesForm> createState() => _HouseholdTypesFormState();
+}
+
+class _HouseholdTypesFormState extends State<HouseholdTypesForm> {
   static const _groups = {
     '인원': ['1인', '2인', '3~4인', '5인 이상'],
-    '구성': ['부부·커플', ..._children, '부모 + 성인 자녀', '3대 함께', '룸메이트·셰어하우스'],
+    '구성': [
+      '부부·커플',
+      '영유아 자녀',
+      '초등 자녀',
+      '중학생 자녀',
+      '고등학생 자녀',
+      '부모 + 성인 자녀',
+      '3대 함께',
+      '룸메이트·셰어하우스',
+    ],
     '생활 단계': ['대학생', '직장인', '은퇴·노년'],
     '근무 형태': ['맞벌이', '재택근무'],
     '반려동물': ['반려견', '반려묘', '그 밖의 반려동물'],
   };
-  static const _children = ['영유아 자녀', '초등 자녀', '중학생 자녀', '고등학생 자녀'];
   static const _singleChoice = {'인원', '생활 단계'};
 
   late final Set<String> _types = {...widget.app.householdTypes};
-  final _choices = <String, Map<String, DeviceChoice>>{};
-
-  bool get _validTypes {
-    final hasCouple = _types.contains('부부·커플');
-    final hasParents = _types.contains('부모 + 성인 자녀');
-    final hasGenerations = _types.contains('3대 함께');
-    final childCount = _children.where(_types.contains).length;
-    final minPeople = (hasCouple ? 2 : 1) + childCount + (hasParents ? 1 : 0);
-    final maxSize = const {
-      '1인': 1,
-      '2인': 2,
-      '3~4인': 4,
-    }.entries.where((e) => _types.contains(e.key)).firstOrNull?.value;
-    return (maxSize == null ||
-            (maxSize >= minPeople && (!hasGenerations || maxSize >= 3))) &&
-        !(_types.contains('룸메이트·셰어하우스') &&
-            (hasCouple || childCount > 0 || hasParents || hasGenerations)) &&
-        !(_types.contains('맞벌이') && !hasCouple) &&
-        !(_types.contains('은퇴·노년') &&
-            (_types.contains('맞벌이') || _types.contains('재택근무')));
-  }
+  String? _error;
 
   @override
   Widget build(BuildContext context) {
     final app = widget.app;
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
-      children: [
-        if (app.setupError case final error?) StatusMessage(error),
-        switch (app.step) {
-          SetupStep.household => _household(context),
-          SetupStep.calendar => _calendar(context),
-          SetupStep.devices => _devices(context),
-          SetupStep.ready => const SizedBox.shrink(),
-        },
-      ],
-    );
-  }
-
-  Widget _household(BuildContext context) {
-    final app = widget.app;
+    final theme = Theme.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        KoreanText(
-          '우리 집 설정',
-          style: Theme.of(context).textTheme.headlineMedium,
-        ),
-        const SizedBox(height: 8),
-        KoreanText('${stateWords['household_profile']}에 해당하는 항목을 골라 주세요.'),
+        KoreanText(widget.title, style: theme.textTheme.headlineMedium),
         for (final group in _groups.entries) ...[
-          const SizedBox(height: 18),
-          KoreanText(group.key, style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 5),
+          const SizedBox(height: 14),
+          KoreanText(group.key, style: theme.textTheme.titleMedium),
           Wrap(
             spacing: 8,
             runSpacing: 4,
@@ -93,6 +161,7 @@ class _SetupScreenState extends State<SetupScreen> {
                   onSelected: app.busy
                       ? null
                       : (selected) => setState(() {
+                          _error = null;
                           if (selected) {
                             if (_singleChoice.contains(group.key)) {
                               _types.removeAll(group.value);
@@ -106,129 +175,16 @@ class _SetupScreenState extends State<SetupScreen> {
             ],
           ),
         ],
-        if (!_validTypes)
-          StatusMessage(
-            '선택한 ${stateWords['household_profile']} 항목을 함께 사용할 수 없어요.',
-          ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 10),
+        if (_error case final error?) StatusMessage(error),
         FilledButton(
-          onPressed: app.busy || _types.isEmpty || !_validTypes
+          onPressed: app.busy || _types.isEmpty
               ? null
-              : () => app.submitHousehold(_types),
-          child: KoreanText(app.busy ? '저장 중…' : '우리 집 만들기'),
-        ),
-      ],
-    );
-  }
-
-  Widget _calendar(BuildContext context) {
-    final app = widget.app;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        KoreanText('일정 연결', style: Theme.of(context).textTheme.headlineMedium),
-        const SizedBox(height: 8),
-        const KoreanText('Google 캘린더를 연결하면 향후 14일의 일정을 준비에 참고해요.'),
-        if (app.readCalendar == null)
-          const StatusMessage('이 환경에서 Google 캘린더 연결을 사용할 수 없어요.'),
-        const SizedBox(height: 20),
-        FilledButton(
-          onPressed: app.busy || app.readCalendar == null
-              ? null
-              : () => app.finishCalendar(connect: true),
-          child: KoreanText(app.busy ? '연결 중…' : 'Google 캘린더 연결'),
-        ),
-        TextButton(
-          onPressed: app.busy ? null : () => app.finishCalendar(connect: false),
-          child: const KoreanText('건너뛰기'),
-        ),
-      ],
-    );
-  }
-
-  Widget _devices(BuildContext context) {
-    final app = widget.app;
-    final devices = app.discovered?.devices ?? const <wire.DeviceElement>[];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        KoreanText(
-          '기기와 맡길 동작',
-          style: Theme.of(context).textTheme.headlineMedium,
-        ),
-        const SizedBox(height: 8),
-        KoreanText(
-          devices.isEmpty
-              ? '기기 검색 정보를 사용할 수 없어요.'
-              : '발견 목록에서 동작을 선택할 수 있어요. 이 선택은 이 앱에 저장돼요.',
-        ),
-        for (final device in devices)
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  KoreanText(
-                    device.label ?? deviceLabel(device.type),
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  KoreanText(
-                    '${roomLabel(device.room) ?? '공간 미확인'} · ${deviceLabel(device.type)} · '
-                    '${substrateLabel(device.substrate)}',
-                  ),
-                  for (final command in device.commands)
-                    if (!device.never.contains(command.cmd)) ...[
-                      const SizedBox(height: 8),
-                      DropdownButtonFormField<DeviceChoice>(
-                        key: ValueKey('${device.id}/${command.cmd}'),
-                        initialValue:
-                            _choices[device.id]?[command.cmd] ??
-                            DeviceChoice.undecided,
-                        decoration: InputDecoration(
-                          labelText: commandLabel(command.cmd),
-                        ),
-                        isExpanded: true,
-                        items: const [
-                          DropdownMenuItem(
-                            value: DeviceChoice.undecided,
-                            child: KoreanText('미선택'),
-                          ),
-                          DropdownMenuItem(
-                            value: DeviceChoice.delegated,
-                            child: KoreanText('맡기기'),
-                          ),
-                          DropdownMenuItem(
-                            value: DeviceChoice.never,
-                            child: KoreanText('맡기지 않기'),
-                          ),
-                        ],
-                        onChanged: app.busy
-                            ? null
-                            : (choice) {
-                                if (choice == null) return;
-                                final selected = _choices.putIfAbsent(
-                                  device.id,
-                                  () => {},
-                                );
-                                if (choice == DeviceChoice.undecided) {
-                                  selected.remove(command.cmd);
-                                } else {
-                                  selected[command.cmd] = choice;
-                                }
-                              },
-                      ),
-                    ],
-                  for (final command in device.never)
-                    KoreanText('${commandLabel(command)} · 위임 유보'),
-                ],
-              ),
-            ),
-          ),
-        const SizedBox(height: 18),
-        FilledButton(
-          onPressed: app.busy ? null : () => app.finishDevices(_choices),
-          child: KoreanText(app.busy ? '저장 중…' : '설정 완료'),
+              : () async {
+                  await widget.onSave({..._types});
+                  if (mounted) setState(() => _error = app.setupError);
+                },
+          child: KoreanText(widget.button),
         ),
       ],
     );

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -11,11 +10,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api/app_api.dart';
 import 'contracts.dart' as wire;
-import 'design_vocabulary.g.dart';
 import 'platform/android_bridge.dart';
 import 'platform/google_calendar.dart';
-import 'platform/home_hub_onboarding.dart';
-import 'preparation_history.dart';
+import 'platform/gallery.dart';
 
 abstract interface class AppStore {
   Future<String?> read(String key);
@@ -33,14 +30,18 @@ class PreferencesAppStore implements AppStore {
       _preferences.setString(key, value);
 }
 
-enum SetupStep { household, calendar, devices, ready }
-
-enum DeviceChoice { undecided, delegated, never }
+enum SetupStep { calendar, household, connection, devices, ready }
 
 const _idlePollInterval = Duration(seconds: 30);
 const _activePollInterval = Duration(seconds: 3);
-const _closedPreparationDuration = Duration(minutes: 30);
-const _cardHistoryStart = '1970-01-01T00:00:00Z';
+
+typedef MemoryDate = ({String episodeId, String cardId, String startsAt});
+typedef _LineRequest = ({
+  String taskId,
+  String text,
+  bool turningOn,
+  Set<String> previousTasks,
+});
 
 class AppController extends ChangeNotifier {
   AppController({
@@ -49,9 +50,10 @@ class AppController extends ChangeNotifier {
     required this.store,
     required this.fixture,
     this.browserPreview = false,
-    this.homeHub,
     this.readCalendar,
-    this.discovered,
+    this.disconnectCalendar,
+    this.pickImages,
+    this.recoverImages,
     this.configuredHousehold,
   });
 
@@ -60,9 +62,10 @@ class AppController extends ChangeNotifier {
   final AppStore store;
   final bool fixture;
   final bool browserPreview;
-  final HttpHomeHubOnboarding? homeHub;
   final CalendarReader? readCalendar;
-  final wire.Devices? discovered;
+  final Future<void> Function()? disconnectCalendar;
+  final GalleryPicker? pickImages;
+  final GalleryPicker? recoverImages;
   final String? configuredHousehold;
 
   bool get demoPreview => browserPreview && fixture && platform == null;
@@ -76,19 +79,14 @@ class AppController extends ChangeNotifier {
   String get _snapshotKey => 'spira.snapshot.v1.$_scope';
   String get _calendarKey => 'spira.calendar.v1.$_scope';
   String get _serverTokenKey => 'spira.server-token.v1.$_environment';
-  String? get _homeKeySetting {
-    final origin = homeHub?.origin;
-    if (household == null || origin == null) return null;
-    return 'spira.home-key.v1.${jsonEncode([_scope, origin])}';
-  }
+  String get _connectionKey => 'spira.connection.v1.$_environment';
 
   String? household;
-  SetupStep step = SetupStep.household;
+  SetupStep step = SetupStep.calendar;
+  String? connectionCode;
   bool starting = true;
   bool busy = false;
   bool stale = true;
-  bool? paused;
-  bool pausePending = false;
   bool needsToken = false;
   bool refreshed = false;
   bool sharingExample = false;
@@ -103,49 +101,34 @@ class AppController extends ChangeNotifier {
   ({String sourceId, String sharedAt})? _exampleShare;
 
   final householdTypes = <String>{};
-  final deviceChoices = <String, Map<String, DeviceChoice>>{};
   final episodes = <String, wire.Episode>{};
   final cards = <String, wire.Card>{};
   final accepted = <String>{};
-  final _orderCaptures = <String, Queue<List<Uint8List>>>{};
-  // Keep the last shown capture per order for this session only.
-  final _shownCaptures = <String, List<Uint8List>>{};
-  final _recentClosures = <String, DateTime>{};
+  final _episodeHistory = <String, wire.EpisodeListEpisode>{};
+  final _cardStarts = <String, MemoryDate>{};
+  final _captures = <String, List<Uint8List>>{};
+  String? _lastIntake;
   final _startedTasks = <String, Set<String>>{};
   final _pendingStops = <String, Set<String>>{};
   final _uncertainStops = <String>{};
-  final _historyChecked = <String>{};
-  final pendingLines = <String>{};
+  final _pendingLines = <(String, String), _LineRequest>{};
   final controlErrors = <String, String>{};
   final _notifications = <String, List<String>>{};
-  final _rationales =
-      <String, ({Future<wire.Rationale> future, bool loading})>{};
-  final _storedRationales = <String, wire.Rationale>{};
-  final _preparationChanges = <String, List<PreparationChange>>{};
-  final _initialPreparations = <String, wire.Card>{};
-  final _openOrderStories = <String>{};
+  final _memoryReads = <String, Future<void>>{};
+  final _rationales = <String, wire.Rationale>{};
+  bool pickingImages = false;
+  String? galleryError;
+  ({String sourceId, String sharedAt, List<GalleryImage> images})? _gallery;
+  bool get hasPendingSelection => _gallery != null;
 
-  void setOrderStoryOpen(String episodeId, bool open) {
-    if (open) {
-      _openOrderStories.add(episodeId);
-      if (!loadingRationale(episodeId)) _rationales.remove(episodeId);
-    } else {
-      _openOrderStories.remove(episodeId);
-    }
-  }
-
-  Iterable<PreparationChange> preparationChanges(String cardId) =>
-      _preparationChanges[cardId] ?? const [];
-  wire.Card? initialPreparation(String cardId) => _initialPreparations[cardId];
-  wire.Devices? homeInventory;
-  Future<void>? _homeInventoryRefresh;
-  int _homeKeyRevision = 0;
+  wire.Calendar _googleCalendar = wire.Calendar(events: []);
+  wire.Calendar get googleCalendar => _googleCalendar;
+  bool get calendarConnected => _calendarConnected;
+  String? calendarError;
 
   String? _cursor;
   String? get lastServerCheck => _cursor;
   Timer? _timer;
-  Timer? _closureTimer;
-  DateTime? _closureDeadline;
   Duration? _pollInterval;
   bool _foreground = true;
   StreamSubscription<void>? _shareSubscription;
@@ -155,6 +138,8 @@ class AppController extends ChangeNotifier {
   String? _calendarFingerprint;
   bool _calendarFingerprintDirty = false;
   bool _calendarConnected = false;
+  bool _calendarClearPending = false;
+  wire.Calendar? _initialCalendar;
   bool _inboxChanged = false;
   bool _disposed = false;
 
@@ -170,63 +155,28 @@ class AppController extends ChangeNotifier {
         card,
   ];
 
-  wire.Episode? get currentPreparationOrder {
-    final ordered = orderedEpisodes;
-    final candidates = demoPreview ? ordered.take(1) : ordered;
-    for (final episode in candidates) {
-      if (episode.status == wire.EpisodeStatus.CLOSED) continue;
-      if (cardsFor(episode).isNotEmpty) return episode;
-    }
-    return null;
-  }
+  String? get currentOrderId =>
+      _lastIntake ??
+      accepted.lastOrNull ??
+      orderedEpisodes.firstOrNull?.episodeId;
 
   List<Uint8List> orderImages(String episodeId) =>
-      _orderCaptures[episodeId]?.first ?? const [];
+      _captures[episodeId] ?? const [];
 
-  List<Uint8List> sharedOrderImages(String episodeId) =>
-      _orderCaptures[episodeId]?.first ?? _shownCaptures[episodeId] ?? const [];
+  List<wire.Card> get activeCards => [
+    for (final episode in orderedEpisodes)
+      if (episode.status != wire.EpisodeStatus.CLOSED) ...cardsFor(episode),
+  ];
 
-  bool recentlyClosed(String episodeId) =>
-      _recentClosures.containsKey(episodeId);
-
-  void _scheduleClosureExpiry() {
-    final next = _recentClosures.values.fold<DateTime?>(
-      null,
-      (earliest, expiry) =>
-          earliest == null || expiry.isBefore(earliest) ? expiry : earliest,
-    );
-    if (next == _closureDeadline && _closureTimer?.isActive == true) return;
-    _closureTimer?.cancel();
-    _closureDeadline = next;
-    if (next == null || _disposed) return;
-    _closureTimer = Timer(next.difference(DateTime.now()), () {
-      final now = DateTime.now();
-      _recentClosures.removeWhere(
-        (_, expiry) => !expiry.isAfter(next) || !expiry.isAfter(now),
-      );
-      _scheduleClosureExpiry();
-      _change();
-      unawaited(_serialize(_save).catchError((Object _) {}));
-    });
-  }
-
-  void _queueCapture(String episodeId, List<Uint8List> images) {
-    if (images.isEmpty) return;
-    _orderCaptures.putIfAbsent(episodeId, Queue.new).addLast(images);
-  }
-
-  void finishOrderCapture(String episodeId, List<Uint8List> images) {
-    final captures = _orderCaptures[episodeId];
-    if (captures == null || !identical(captures.first, images)) return;
-    _shownCaptures[episodeId] = captures.removeFirst();
-    if (captures.isEmpty) _orderCaptures.remove(episodeId);
-    _change();
-  }
+  List<MemoryDate> get memoryDates => [
+    for (final row in _episodeHistory.values)
+      if (row.status == wire.EpisodeStatus.CLOSED)
+        ?row.cardIds.map((id) => _cardStarts[id]).nonNulls.firstOrNull,
+  ];
 
   bool stopPending(String cardId) => _pendingStops.containsKey(cardId);
   bool stopUncertain(String cardId) => _uncertainStops.contains(cardId);
-  bool get canControl => !stale && !pausePending;
-  bool get canResendCalendar => _calendarConnected && readCalendar != null;
+  bool get canControl => !stale;
 
   Future<void> start() async {
     _shareSubscription = platform?.sharesChanged.listen((_) {
@@ -243,6 +193,10 @@ class AppController extends ChangeNotifier {
     if (step == SetupStep.ready) _requestNotificationPermission();
     _change();
     await Future.wait([resendCalendar(), sync()]);
+    final recover = recoverImages;
+    if (!_disposed && step == SetupStep.ready && recover != null) {
+      await _chooseImages(recover);
+    }
   }
 
   bool get _hasActiveWork =>
@@ -273,27 +227,8 @@ class AppController extends ChangeNotifier {
             const Duration(minutes: 2);
   }
 
-  bool _cardIsActive(wire.Card card) {
-    if (stopPending(card.cardId)) return true;
-    final episode = episodes[card.episodeId];
-    if (episode != null &&
-        (episode.status == wire.EpisodeStatus.CLOSED ||
-            !episode.cardIds.contains(card.cardId))) {
-      return false;
-    }
-    return card.lines.any(
-      (line) => switch (line.state) {
-        wire.LineState.HELD ||
-        wire.LineState.SCHEDULED ||
-        wire.LineState.RUNNING => true,
-        wire.LineState.OFF ||
-        wire.LineState.CANCELLED ||
-        wire.LineState.DROPPED ||
-        wire.LineState.STOPPED => false,
-        _ => line.endState == null,
-      },
-    );
-  }
+  bool _cardIsActive(wire.Card card) =>
+      episodes[card.episodeId]?.status != wire.EpisodeStatus.CLOSED;
 
   void _schedulePoll() {
     if (starting || step != SetupStep.ready) return;
@@ -324,11 +259,14 @@ class AppController extends ChangeNotifier {
       step = SetupStep.values.byName(setup['step'] as String);
       _calendarConnected = setup['calendarConnected'] as bool? ?? false;
       householdTypes.addAll((setup['types'] as List<dynamic>).cast<String>());
-      for (final entry in (setup['choices'] as Map<String, dynamic>).entries) {
-        deviceChoices[entry.key] = (entry.value as Map<String, dynamic>).map(
-          (command, choice) =>
-              MapEntry(command, DeviceChoice.values.byName(choice as String)),
-        );
+      _calendarClearPending = setup['calendarClearPending'] as bool? ?? false;
+      // An older calendar checkpoint already had a household but no code step.
+      if (step == SetupStep.calendar && household != null) {
+        step = SetupStep.household;
+      }
+      if (step == SetupStep.connection || step == SetupStep.household) {
+        connectionCode = await store.read(_connectionKey);
+        if (connectionCode?.isEmpty == true) connectionCode = null;
       }
     } else if (configuredHousehold != null) {
       household = configuredHousehold;
@@ -336,10 +274,6 @@ class AppController extends ChangeNotifier {
     }
     if (!browserPreview) {
       api.token = await store.read(_serverTokenKey) ?? api.token;
-      if (_homeKeySetting case final setting?) {
-        final key = await store.read(setting);
-        if (key != null) homeHub!.useApiKey(key);
-      }
     }
     // The browser preview talks to a fixture that starts fresh each run with the same IDs;
     // a cached snapshot from an earlier run would show its finished cards before the share.
@@ -359,29 +293,24 @@ class AppController extends ChangeNotifier {
       final card = wire.Card.fromJson(data);
       cards[card.cardId] = card;
     }
-    final now = DateTime.now();
-    final closures = value['recentClosures'] as Map<String, dynamic>? ?? {};
-    for (final entry in closures.entries) {
-      final expiry = DateTime.tryParse(entry.value as String);
-      if (expiry != null &&
-          expiry.isAfter(now) &&
-          episodes[entry.key]?.status == wire.EpisodeStatus.CLOSED) {
-        _recentClosures[entry.key] = expiry;
-      }
-    }
-    _scheduleClosureExpiry();
     _cursor = value['cursor'] as String?;
-    if (value['inventory'] case final Map<String, dynamic> inventory) {
-      final manifest = wire.Devices.fromJson(inventory);
-      if (manifest.householdId == household) homeInventory = manifest;
+    for (final entry in (value['cardStarts'] as List<dynamic>? ?? const [])) {
+      final fields = (entry as List<dynamic>).cast<String>();
+      final date = (
+        episodeId: fields[0],
+        cardId: fields[1],
+        startsAt: fields[2],
+      );
+      _cardStarts[date.cardId] = date;
     }
-    for (final data in (value['rationales'] as List<dynamic>? ?? const [])) {
-      final rationale = wire.Rationale.fromJson(data as Map<String, dynamic>);
-      if (episodes.containsKey(rationale.episodeId)) {
-        _storedRationales[rationale.episodeId] = rationale;
-      }
+    // Migrate dates already supplied by the Server in older snapshots.
+    for (final card in cards.values) {
+      _recordStart(card);
     }
-    paused = value['paused'] as bool?;
+    cards.removeWhere(
+      (_, card) =>
+          episodes[card.episodeId]?.status == wire.EpisodeStatus.CLOSED,
+    );
     accepted.addAll((value['accepted'] as List<dynamic>).cast<String>());
     final started = value['started'] as Map<String, dynamic>;
     for (final entry in started.entries) {
@@ -411,12 +340,7 @@ class AppController extends ChangeNotifier {
       'step': step.name,
       'calendarConnected': _calendarConnected,
       'types': householdTypes.toList(),
-      'choices': deviceChoices.map(
-        (key, value) => MapEntry(
-          key,
-          value.map((command, choice) => MapEntry(command, choice.name)),
-        ),
-      ),
+      'calendarClearPending': _calendarClearPending,
     }),
   );
 
@@ -424,17 +348,12 @@ class AppController extends ChangeNotifier {
     _snapshotKey,
     jsonEncode({
       'cursor': _cursor,
-      'paused': paused,
       'accepted': accepted.toList(),
       'episodes': episodes.values.map((episode) => episode.toJson()).toList(),
       'cards': cards.values.map((card) => card.toJson()).toList(),
-      'recentClosures': _recentClosures.map(
-        (id, expiry) => MapEntry(id, expiry.toIso8601String()),
-      ),
-      'rationales': _storedRationales.values
-          .map((value) => value.toJson())
+      'cardStarts': _cardStarts.values
+          .map((date) => [date.episodeId, date.cardId, date.startsAt])
           .toList(),
-      'inventory': homeInventory?.toJson(),
       'started': _startedTasks.map(
         (card, tasks) => MapEntry(card, tasks.toList()),
       ),
@@ -452,25 +371,51 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> submitHousehold(Set<String> types) async {
-    if (busy) return;
+    if (busy || types.isEmpty) return;
     await _setup(() async {
-      householdTypes
-        ..clear()
-        ..addAll(types);
-      await _saveSetup();
       if (household == null) {
         final created = await api.createHousehold(
-          wire.HouseholdCreate(householdTypes: []),
+          wire.HouseholdCreate(householdTypes: types.toList()),
         );
         household = created.householdId;
+        connectionCode = created.hubApiKey;
+        await store.write(_connectionKey, created.hubApiKey);
         await _saveSetup();
-        await useHomeKey(created.hubApiKey);
       }
-      await api.profile(
+      final profile = await api.profile(
         household!,
         wire.Profile(householdTypes: types.toList()),
       );
-      step = SetupStep.calendar;
+      householdTypes
+        ..clear()
+        ..addAll(profile.householdTypes);
+      step = connectionCode == null ? SetupStep.devices : SetupStep.connection;
+      await _saveSetup();
+      unawaited(resendCalendar(selected: _initialCalendar));
+      _initialCalendar = null;
+    });
+  }
+
+  Future<void> completeConnection() async {
+    if (busy) return;
+    await _setup(() async {
+      step = SetupStep.devices;
+      await _saveSetup();
+      await store.write(_connectionKey, '');
+      connectionCode = null;
+    });
+  }
+
+  Future<void> updateHousehold(Set<String> types) async {
+    if (busy || types.isEmpty) return;
+    await _setup(() async {
+      final profile = await api.profile(
+        household!,
+        wire.Profile(householdTypes: types.toList()),
+      );
+      householdTypes
+        ..clear()
+        ..addAll(profile.householdTypes);
       await _saveSetup();
     });
   }
@@ -479,36 +424,74 @@ class AppController extends ChangeNotifier {
     if (busy) return;
     await _setup(() async {
       if (connect) {
-        final reader = readCalendar;
-        if (reader == null) throw StateError('Calendar unavailable');
-        await _sendCalendar(household!, await reader(interactive: true));
+        await _connectCalendar();
+        _initialCalendar = _googleCalendar;
       }
-      _calendarConnected = connect;
-      step = SetupStep.devices;
+      step = SetupStep.household;
       await _saveSetup();
     });
   }
 
-  Future<void> resendCalendar() {
-    final id = household;
-    final reader = readCalendar;
-    if (starting ||
-        _disposed ||
-        !_calendarConnected ||
-        id == null ||
-        reader == null) {
-      return Future<void>.value();
+  Future<void> connectGoogle() async {
+    if (busy || _calendarConnected) return;
+    await _setup(() async {
+      await _connectCalendar();
+      await _saveSetup();
+      await resendCalendar(selected: _googleCalendar);
+    });
+    if (setupError case final error?) {
+      calendarError = error;
+      _change();
     }
-    // Each trigger reads after the previous request completes, so an older
-    // full list can't replace a newer one.
+  }
+
+  Future<void> _connectCalendar() async {
+    final reader = readCalendar;
+    if (reader == null) throw StateError('Calendar unavailable');
+    _googleCalendar = await reader(interactive: true);
+    _calendarConnected = true;
+    _calendarClearPending = false;
+    calendarError = null;
+  }
+
+  Future<void> disconnectGoogle() async {
+    if (busy || !_calendarConnected) return;
+    await _setup(() async {
+      await disconnectCalendar?.call();
+      _calendarConnected = false;
+      _googleCalendar = wire.Calendar(events: []);
+      _calendarClearPending = true;
+      await _saveSetup();
+      await resendCalendar();
+    });
+    if (setupError case final error?) {
+      calendarError = error;
+      _change();
+    }
+  }
+
+  Future<void> resendCalendar({wire.Calendar? selected}) {
+    final id = household;
+    if (starting || _disposed || id == null) return Future<void>.value();
+    // A full replacement must follow any older read already in flight.
     return _calendarQueue = _calendarQueue.then((_) async {
       if (_disposed) return;
       try {
-        final calendar = await reader(interactive: false);
-        if (!_disposed) await _sendCalendar(id, calendar);
+        if (_calendarClearPending) {
+          await _sendCalendar(id, wire.Calendar(events: []));
+          _calendarClearPending = false;
+          await _saveSetup();
+        } else if (readCalendar case final reader? when _calendarConnected) {
+          final calendar = selected ?? await reader(interactive: false);
+          if (_disposed || !_calendarConnected) return;
+          _googleCalendar = calendar;
+          await _sendCalendar(id, calendar);
+        }
+        calendarError = null;
       } catch (_) {
-        // Leave calendar failures silent. The next trigger reads again.
+        calendarError = 'Google 캘린더를 새로 불러오지 못했어요.';
       }
+      _change();
     });
   }
 
@@ -534,14 +517,9 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> finishDevices(
-    Map<String, Map<String, DeviceChoice>> choices,
-  ) async {
+  Future<void> finishDevices() async {
     if (busy) return;
     await _setup(() async {
-      deviceChoices
-        ..clear()
-        ..addAll(choices);
       step = SetupStep.ready;
       await _saveSetup();
     });
@@ -577,18 +555,6 @@ class AppController extends ChangeNotifier {
     _change();
     unawaited(sync());
     if (!browserPreview) await store.write(_serverTokenKey, token);
-  }
-
-  Future<void> useHomeKey(String key) async {
-    final hub = homeHub;
-    if (hub == null) return;
-    hub.useApiKey(key);
-    _homeKeyRevision++;
-    _homeInventoryRefresh = null;
-    if (browserPreview) return;
-    if (_homeKeySetting case final setting?) {
-      await store.write(setting, key);
-    }
   }
 
   Future<void> sync() {
@@ -628,11 +594,11 @@ class AppController extends ChangeNotifier {
         }
         // Persist the receipt before allowing Android to discard the images.
         final episodeId = receipt.accepted.episodeId;
-        if (receipt.isNew) _onNewShare(episodeId);
-        accepted.add(episodeId);
+        final showIntake = receipt.isNew || !episodes.containsKey(episodeId);
+        _recordReceipt(episodeId, const [], showIntake: showIntake);
         await _save();
         final images = <Uint8List>[];
-        if (receipt.isNew) {
+        if (showIntake) {
           for (final image in order.images) {
             try {
               images.add(await image.readAsBytes());
@@ -642,7 +608,7 @@ class AppController extends ChangeNotifier {
           }
         }
         await platform.acknowledge(_scope, order.sourceId, episodeId);
-        _queueCapture(episodeId, images);
+        if (images.isNotEmpty) _captures[episodeId] = images;
         queuedShares--;
         _change();
       }
@@ -678,11 +644,7 @@ class AppController extends ChangeNotifier {
         );
         _exampleShare = null;
         final episodeId = receipt.accepted.episodeId;
-        if (receipt.isNew) {
-          _onNewShare(episodeId);
-          _queueCapture(episodeId, [image]);
-        }
-        accepted.add(episodeId);
+        _recordReceipt(episodeId, [image], showIntake: receipt.isNew);
         _change();
         await _save();
         await _refresh();
@@ -695,10 +657,107 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  void _onNewShare(String episodeId) {
-    _rationales.remove(episodeId);
-    _recentClosures.clear();
-    _scheduleClosureExpiry();
+  Future<void> chooseOrderImages() async {
+    if (pickImages case final pick?) await _chooseImages(pick);
+  }
+
+  Future<void> _chooseImages(GalleryPicker pick) async {
+    if (pickingImages || _gallery != null) return;
+    pickingImages = true;
+    galleryError = null;
+    _change();
+    try {
+      final images = await pick();
+      if (images.isEmpty || _disposed) return;
+      if (images.length > 3) throw const GalleryException('사진을 1~3장 골라 주세요.');
+      final random = Random.secure();
+      _gallery = (
+        sourceId:
+            'gallery_${base64UrlEncode(List.generate(12, (_) => random.nextInt(256)))}',
+        sharedAt: DateTime.now().toUtc().toIso8601String(),
+        images: images,
+      );
+      await _sendSelection();
+    } on GalleryException catch (error) {
+      galleryError = error.message;
+    } catch (_) {
+      galleryError = '선택한 사진을 열 수 없어요. 다시 골라 주세요.';
+    } finally {
+      pickingImages = false;
+      _change();
+    }
+  }
+
+  Future<void> retryGallery() async {
+    if (pickingImages || _gallery == null) return;
+    pickingImages = true;
+    galleryError = null;
+    _change();
+    try {
+      await _sendSelection();
+    } finally {
+      pickingImages = false;
+      _change();
+    }
+  }
+
+  void discardGallery() {
+    if (pickingImages) return;
+    _gallery = null;
+    galleryError = null;
+    _change();
+  }
+
+  Future<void> _sendSelection() => _serialize(() async {
+    final selection = _gallery;
+    if (selection == null) return;
+    try {
+      final receipt = await api.shareGallery(
+        household!,
+        selection.sourceId,
+        selection.sharedAt,
+        selection.images,
+      );
+      _gallery = null;
+      _recordReceipt(
+        receipt.accepted.episodeId,
+        selection.images.map((image) => image.bytes).toList(),
+      );
+      _change();
+      await _save();
+      await _refresh();
+    } catch (error) {
+      if (error is AppApiException &&
+          error.code == wire.ErrorCode.INVALID_IMAGE) {
+        _gallery = null;
+      }
+      galleryError = _error(error, '주문을 보내지 못했어요. 다시 시도해 주세요.');
+    }
+  });
+
+  void _recordReceipt(
+    String episodeId,
+    List<Uint8List> images, {
+    bool showIntake = true,
+  }) {
+    accepted.add(episodeId);
+    if (!showIntake) return;
+    _lastIntake = episodeId;
+    _captures.clear();
+    if (images.isNotEmpty) _captures[episodeId] = images;
+  }
+
+  void _recordStart(wire.Card card) {
+    if (card.startsAt case final startsAt?) {
+      DateTime.parse(startsAt);
+      _cardStarts[card.cardId] = (
+        episodeId: card.episodeId,
+        cardId: card.cardId,
+        startsAt: startsAt,
+      );
+    } else {
+      _cardStarts.remove(card.cardId);
+    }
   }
 
   Future<void> _refresh() async {
@@ -706,176 +765,157 @@ class AppController extends ChangeNotifier {
     try {
       final cursor = _cursor;
       var poll = await api.cards(id, since: cursor);
-      final serverTime = DateTime.parse(poll.serverTime);
       final rewound =
-          cursor != null && serverTime.isBefore(DateTime.parse(cursor));
-      var list = await api.episodes(id);
-      final listed = list.episodes.map((row) => row.episodeId).toSet();
-      final older = {
-        ...episodes.keys,
-        ...cards.values.map((card) => card.episodeId),
-      }..removeAll(listed);
-      // A cached order may have moved beyond the first page of history.
-      while (older.isNotEmpty && list.nextBefore != null) {
-        final before = list.nextBefore!;
-        list = await api.episodes(id, before: before);
-        if (list.nextBefore case final next?
-            when !DateTime.parse(next).isBefore(DateTime.parse(before))) {
+          cursor != null &&
+          DateTime.parse(poll.serverTime).isBefore(DateTime.parse(cursor));
+      final reconcile = cursor != null && (rewound || stale);
+      final open = reconcile ? await api.cards(id) : null;
+      if (rewound) poll = open!;
+      DateTime.parse(poll.serverTime);
+      final returnedOpenIds = open?.cards.map((card) => card.cardId).toSet();
+
+      final listed = <String, wire.EpisodeListEpisode>{};
+      String? before;
+      do {
+        final list = await api.episodes(id, before: before);
+        for (final row in list.episodes) {
+          DateTime.parse(row.sharedAt);
+          listed[row.episodeId] = row;
+        }
+        final next = list.nextBefore;
+        if (next != null &&
+            before != null &&
+            !DateTime.parse(next).isBefore(DateTime.parse(before))) {
           throw const FormatException('Episode history did not advance');
         }
-        for (final row in list.episodes) {
-          if (older.remove(row.episodeId)) listed.add(row.episodeId);
-        }
-      }
-      // Updates since a cursor from a later Server clock can omit current cards.
-      if (rewound && (listed.isNotEmpty || accepted.isNotEmpty)) {
-        poll = await api.cards(id, since: _cardHistoryStart);
-        DateTime.parse(poll.serverTime);
-      }
+        before = next;
+      } while (before != null);
+
+      final latest = listed.values.firstOrNull?.episodeId;
       final details = (await Future.wait(
-        {...listed, ...accepted}.map((episodeId) async {
+        {
+          ?latest,
+          ...accepted,
+          if (_lastIntake != null && listed.containsKey(_lastIntake))
+            _lastIntake!,
+          for (final row in listed.values)
+            if (row.status != wire.EpisodeStatus.CLOSED) row.episodeId,
+        }.map((episodeId) async {
           try {
             final episode = await api.episode(episodeId);
-            if (episode.episodeId != episodeId) {
+            if (episode.episodeId != episodeId || episode.householdId != id) {
               throw const FormatException('Wrong episode');
             }
             return episode;
           } on AppApiException catch (error) {
-            if (error.status == 404 && !listed.contains(episodeId)) return null;
+            if (error.status == 404 && !listed.containsKey(episodeId)) {
+              return null;
+            }
             rethrow;
           }
         }),
       )).whereType<wire.Episode>().toList();
-      for (final episode in details) {
-        if (episode.householdId != id) {
-          throw const FormatException('Wrong household');
-        }
-      }
-      for (final card in poll.cards) {
+      if (_disposed) return;
+      final cardUpdates = rewound
+          ? poll.cards
+          : [...?open?.cards, ...poll.cards];
+      for (final card in cardUpdates) {
         DateTime.parse(card.updatedAt);
+        if (card.startsAt case final start?) DateTime.parse(start);
       }
-      final currentEpisodes = details
-          .map((episode) => episode.episodeId)
-          .toSet();
-      final removedEpisodes = episodes.keys.toSet()..removeAll(currentEpisodes);
+
+      for (final episode in details) {
+        listed[episode.episodeId] = wire.EpisodeListEpisode(
+          episodeId: episode.episodeId,
+          cardIds: episode.cardIds,
+          itemCount: episode.itemCount,
+          sharedAt: episode.sharedAt,
+          status: episode.status,
+        );
+      }
       final currentCards = {
-        for (final episode in details)
-          for (final cardId in episode.cardIds) cardId: episode.episodeId,
+        for (final row in listed.values)
+          for (final cardId in row.cardIds) cardId: row,
       };
-      final updates = poll.cards.where((card) {
-        return !removedEpisodes.contains(card.episodeId) &&
-            (!currentEpisodes.contains(card.episodeId) ||
-                currentCards[card.cardId] == card.episodeId);
-      }).toList();
-      final updatedIds = updates.map((card) => card.cardId).toSet();
-      final removedCards = cards.values
-          .where(
-            (card) =>
-                !updatedIds.contains(card.cardId) &&
-                (rewound || currentCards[card.cardId] != card.episodeId),
-          )
-          .map((card) => card.cardId)
-          .toSet();
-      _dropMissingOrders(removedEpisodes, removedCards);
       if (rewound) {
-        _historyChecked.clear();
-      } else {
-        await _loadMissingHistory(id, details, updates);
+        cards.clear();
+        _cardStarts.clear();
+        _startedTasks.clear();
+        _rationales.clear();
       }
-      final changedRationaleEpisodes = <String>{};
-      for (final card in updates) {
+      for (final card in cardUpdates) {
+        final row = currentCards[card.cardId];
+        if (row == null || row.episodeId != card.episodeId) continue;
         final previous = cards[card.cardId];
-        final olderVersion =
-            previous != null &&
+        if (previous != null &&
             DateTime.parse(card.updatedAt)
-                .isBefore(DateTime.parse(previous.updatedAt));
-        if (olderVersion && !rewound) continue;
-        if (previous == null || previous.updatedAt != card.updatedAt) {
-          changedRationaleEpisodes.add(card.episodeId);
-          if (previous != null && !olderVersion) {
-            final change = PreparationChange.between(previous, card);
-            if (change != null) {
-              _initialPreparations.putIfAbsent(card.cardId, () => previous);
-              _preparationChanges
-                  .putIfAbsent(card.cardId, () => [])
-                  .add(change);
-            }
-          }
+                .isBefore(DateTime.parse(previous.updatedAt))) {
+          continue;
         }
+        _recordStart(card);
+        if (row.status == wire.EpisodeStatus.CLOSED) continue;
         cards[card.cardId] = card;
+        _confirmControls(card);
         if (platform != null && card.notify) {
           _notifications[jsonEncode([card.cardId, card.updatedAt])] = [
             '준비 카드',
             card.text,
           ];
         }
-        for (final line in card.lines) {
-          if (_hasStarted(line.state) || line.endState != null) {
-            _startedTasks.putIfAbsent(card.cardId, () => {}).add(line.taskId);
-          }
-        }
-        final awaiting = _pendingStops[card.cardId];
-        if (card.stopped &&
-            awaiting != null &&
-            awaiting.every(
-              (id) => card.lines.any(
-                (line) => line.taskId == id && line.endState != null,
-              ),
-            )) {
-          _pendingStops.remove(card.cardId);
-          _uncertainStops.remove(card.cardId);
-        }
       }
-      final newOrders = details
-          .where((episode) => !episodes.containsKey(episode.episodeId))
-          .toList();
-      bool superseded(wire.Episode episode) => newOrders.any(
-        (order) =>
-            DateTime.parse(order.sharedAt)
-                .isAfter(DateTime.parse(episode.sharedAt)),
+
+      cards.removeWhere((id, card) {
+        final row = currentCards[id];
+        return row?.episodeId != card.episodeId ||
+            row?.status == wire.EpisodeStatus.CLOSED ||
+            (returnedOpenIds != null &&
+                !returnedOpenIds.contains(id) &&
+                !poll.cards.any((update) => update.cardId == id));
+      });
+      _pendingLines.removeWhere((key, _) => !cards.containsKey(key.$1));
+      _pendingStops.removeWhere((id, _) => !cards.containsKey(id));
+      _uncertainStops.retainAll(cards.keys.toSet());
+      controlErrors.removeWhere((id, _) => !cards.containsKey(id));
+      _startedTasks.removeWhere((id, _) => !cards.containsKey(id));
+      _notifications.removeWhere((key, _) {
+        final pair = jsonDecode(key) as List<dynamic>;
+        return pair.first == 'read_failed'
+            ? !listed.containsKey(pair.last)
+            : !currentCards.containsKey(pair.first);
+      });
+      _cardStarts.removeWhere(
+        (id, date) => currentCards[id]?.episodeId != date.episodeId,
       );
-      _recentClosures.removeWhere((id, _) => superseded(episodes[id]!));
-      var showClosure = false;
+      _rationales.removeWhere(
+        (id, _) =>
+            !listed.containsKey(id) ||
+            listed[id]!.status == wire.EpisodeStatus.CLOSED,
+      );
+      _captures.removeWhere(
+        (id, _) =>
+            id != _lastIntake &&
+            !listed.containsKey(id) &&
+            !accepted.contains(id),
+      );
+      if (!listed.containsKey(_lastIntake) && !accepted.contains(_lastIntake)) {
+        _lastIntake = null;
+      }
+      _episodeHistory
+        ..clear()
+        ..addAll(listed);
+      episodes.clear();
       for (final episode in details) {
-        final previous = episodes[episode.episodeId];
-        if (previous?.status != episode.status ||
-            !listEquals(previous?.cardIds, episode.cardIds) ||
-            changedRationaleEpisodes.contains(episode.episodeId) ||
-            !listEquals(
-              previous?.itemTasks
-                  .map((task) => (task.taskId, task.state, task.text))
-                  .toList(),
-              episode.itemTasks
-                  .map((task) => (task.taskId, task.state, task.text))
-                  .toList(),
-            )) {
-          _rationales.remove(episode.episodeId);
-        }
-        if (episode.status != wire.EpisodeStatus.CLOSED) {
-          _recentClosures.remove(episode.episodeId);
-        } else if (previous != null &&
-            previous.status != wire.EpisodeStatus.CLOSED &&
-            episode.cardIds.isNotEmpty &&
-            !superseded(episode)) {
-          _recentClosures[episode.episodeId] = DateTime.now().add(
-            _closedPreparationDuration,
-          );
-          showClosure = true;
-        }
         episodes[episode.episodeId] = episode;
         accepted.remove(episode.episodeId);
         if (platform != null &&
             episode.status == wire.EpisodeStatus.READ_FAILED) {
           _notifications[jsonEncode(['read_failed', episode.episodeId])] = [
             '주문을 읽지 못했어요',
-            '주문 화면을 캡처해서 다시 공유해 주세요.',
+            '읽지 못했어요. 다시 보내 주세요',
           ];
         }
       }
-      _scheduleClosureExpiry();
-      if (showClosure && homeHub != null && homeInventory == null) {
-        unawaited(refreshHomeInventory().catchError((Object _) {}));
-      }
+
       final previousCursor = _cursor;
       _cursor = poll.serverTime;
       try {
@@ -888,22 +928,10 @@ class AppController extends ChangeNotifier {
       refreshed = true;
       serverUnavailable = false;
       refreshError = null;
-      // Card themes and set-aside items come from the stored rationale.
-      for (final episode in episodes.values) {
-        if (_disposed ||
-            (cardsFor(episode).isEmpty && episode.itemTasks.isEmpty)) {
-          continue;
+      for (final card in activeCards) {
+        if (!isMemory(card)) {
+          unawaited(_loadObservation(card.episodeId));
         }
-        // S7 and device results can arrive on a later poll, even after the
-        // card and episode have closed and stopped changing.
-        if (_openOrderStories.contains(episode.episodeId) &&
-            !loadingRationale(episode.episodeId)) {
-          _rationales.remove(episode.episodeId);
-        }
-        unawaited(
-          rationale(episode.episodeId)
-              .then<void>((_) {}, onError: (Object _) {}),
-        );
       }
     } catch (error) {
       stale = true;
@@ -916,61 +944,38 @@ class AppController extends ChangeNotifier {
     await _deliverNotifications();
   }
 
-  void _dropMissingOrders(Set<String> episodeIds, Set<String> cardIds) {
-    for (final id in episodeIds) {
-      episodes.remove(id);
-      accepted.remove(id);
-      _recentClosures.remove(id);
-      _rationales.remove(id);
-      _storedRationales.remove(id);
-      _orderCaptures.remove(id);
-      _shownCaptures.remove(id);
-    }
-    for (final id in cardIds) {
-      cards.remove(id);
-      _startedTasks.remove(id);
-      _pendingStops.remove(id);
-      _uncertainStops.remove(id);
-      _historyChecked.remove(id);
-      _initialPreparations.remove(id);
-      _preparationChanges.remove(id);
-      controlErrors.remove(id);
-    }
-    if (episodeIds.isEmpty && cardIds.isEmpty) return;
-    _notifications.removeWhere((key, _) {
-      final pair = jsonDecode(key) as List<dynamic>;
-      return pair.first == 'read_failed'
-          ? episodeIds.contains(pair.last)
-          : cardIds.contains(pair.first);
-    });
-  }
-
-  Future<void> _loadMissingHistory(
-    String householdId,
-    List<wire.Episode> details,
-    List<wire.Card> updates,
-  ) async {
-    final available = {...cards.keys, ...updates.map((card) => card.cardId)};
-    final missing = {
-      for (final episode in details)
-        if (episode.status == wire.EpisodeStatus.CLOSED)
-          for (final cardId in episode.cardIds)
-            if (!available.contains(cardId) &&
-                !_historyChecked.contains(cardId))
-              cardId: episode.episodeId,
-    };
-    if (missing.isEmpty) return;
-    try {
-      // The cursorless read only returns open cards. Fetch missing history
-      // without moving the live cursor or sending old notifications.
-      final history = await api.cards(householdId, since: _cardHistoryStart);
-      for (final card in history.cards) {
-        if (missing[card.cardId] == card.episodeId) cards[card.cardId] = card;
+  void _confirmControls(wire.Card card) {
+    for (final line in card.lines) {
+      if (_hasStarted(line.state) || line.endState != null) {
+        _startedTasks.putIfAbsent(card.cardId, () => {}).add(line.taskId);
       }
-      _historyChecked.addAll(missing.keys);
-    } catch (_) {
-      // Keep the live refresh usable and retry missing history next time.
     }
+    final awaiting = _pendingStops[card.cardId];
+    if (card.stopped &&
+        awaiting != null &&
+        awaiting.every(
+          (id) => card.lines.any(
+            (line) => line.taskId == id && line.endState != null,
+          ),
+        )) {
+      _pendingStops.remove(card.cardId);
+      _uncertainStops.remove(card.cardId);
+    }
+    _pendingLines.removeWhere((key, request) {
+      if (key.$1 != card.cardId) return false;
+      if (card.stopped) return true;
+      final line = card.lines
+          .where((line) => line.taskId == request.taskId)
+          .firstOrNull;
+      if (!request.turningOn) return line?.state == wire.LineState.OFF;
+      if (line != null) return line.state != wire.LineState.OFF;
+      return card.lines.any(
+        (replacement) =>
+            replacement.text == request.text &&
+            !request.previousTasks.contains(replacement.taskId) &&
+            replacement.state != wire.LineState.OFF,
+      );
+    });
   }
 
   Future<void> _deliverNotifications() async {
@@ -1009,8 +1014,8 @@ class AppController extends ChangeNotifier {
     _ => false,
   };
 
-  String _taskKey(wire.Card card, wire.LineElement line) =>
-      jsonEncode([card.cardId, line.taskId]);
+  (String, String) _taskKey(wire.Card card, wire.LineElement line) =>
+      (card.cardId, line.taskId);
 
   // Line off works until the line ends (a started line is cancelled with restore);
   // line on only before it starts (contract: line_on after start is 409 line_started).
@@ -1018,6 +1023,7 @@ class AppController extends ChangeNotifier {
       canControl &&
       episodes[card.episodeId]?.status != wire.EpisodeStatus.CLOSED &&
       !card.stopped &&
+      !isMemory(card) &&
       !stopPending(card.cardId) &&
       line.endState == null &&
       switch (line.state) {
@@ -1033,61 +1039,18 @@ class AppController extends ChangeNotifier {
       (_startedTasks[card.cardId]?.contains(line.taskId) ?? false) ||
       // Off and failed can hide a dispatch. A non-blocked execution is
       // either a confirmed start or an uncertain start that forbids line on.
-      (_storedRationales[card.episodeId]?.executions.any(
+      (_rationales[card.episodeId]?.executions.any(
             (result) =>
                 result.taskId == line.taskId &&
                 result.status != wire.ExecutionStatus.BLOCKED,
           ) ??
           false);
 
-  bool canEdit(wire.Episode episode) {
-    if (!canControl ||
-        episode.items.isEmpty ||
-        accepted.contains(episode.episodeId) ||
-        (episode.status != wire.EpisodeStatus.READING &&
-            episode.status != wire.EpisodeStatus.JUDGED &&
-            episode.status != wire.EpisodeStatus.HELD &&
-            episode.status != wire.EpisodeStatus.NOTIFIED)) {
-      return false;
-    }
-    final related = cardsFor(episode);
-    return related.length == episode.cardIds.length &&
-        !related.any((card) => card.stopped || stopPending(card.cardId)) &&
-        !cards.values.any(
-          (card) =>
-              card.episodeId == episode.episodeId &&
-              (_startedTasks[card.cardId]?.isNotEmpty ?? false),
-        ) &&
-        related.every(
-          (card) => card.lines.every(
-            (line) =>
-                line.endState == null &&
-                (line.state == wire.LineState.HELD ||
-                    line.state == wire.LineState.SCHEDULED ||
-                    line.state == wire.LineState.OFF ||
-                    line.state == wire.LineState.CANCELLED ||
-                    line.state == wire.LineState.DROPPED),
-          ),
-        );
-  }
-
-  Future<void> edit(wire.Episode episode, wire.OrderEdit order) async {
-    await _serialize(() async {
-      if (!canEdit(episodes[episode.episodeId] ?? episode)) {
-        throw StateError('Edit unavailable');
-      }
-      final receipt = await api.editOrder(episode.episodeId, order);
-      accepted.add(receipt.episodeId);
-      await _save();
-      _change();
-      await _refresh();
-    });
-  }
-
   Future<void> stop(wire.Card card) async {
     if (!canControl ||
         episodes[card.episodeId]?.status == wire.EpisodeStatus.CLOSED ||
         card.stopped ||
+        isMemory(card) ||
         !card.buttons.contains(wire.CardButton.STOP)) {
       return;
     }
@@ -1138,15 +1101,20 @@ class AppController extends ChangeNotifier {
   }
 
   bool linePending(wire.Card card, wire.LineElement line) =>
-      pendingLines.contains(_taskKey(card, line));
+      _pendingLines.containsKey(_taskKey(card, line));
 
-  Future<bool> switchLine(wire.Card card, wire.LineElement line) async {
+  Future<void> switchLine(wire.Card card, wire.LineElement line) async {
     final key = _taskKey(card, line);
-    if (!canSwitch(card, line) || !pendingLines.add(key)) return false;
+    if (!canSwitch(card, line) || _pendingLines.containsKey(key)) return;
     final turningOn = line.state == wire.LineState.OFF;
+    _pendingLines[key] = (
+      taskId: line.taskId,
+      text: line.text,
+      turningOn: turningOn,
+      previousTasks: card.lines.map((entry) => entry.taskId).toSet(),
+    );
     controlErrors.remove(card.cardId);
     _change();
-    var switched = false;
     await _serialize(() async {
       try {
         final current = cards[card.cardId];
@@ -1157,12 +1125,10 @@ class AppController extends ChangeNotifier {
             matching == null ||
             !canSwitch(current, matching) ||
             (matching.state == wire.LineState.OFF) != turningOn) {
+          _pendingLines.remove(key);
           return;
         }
-        if (_hasStarted(matching.state)) {
-          _startedTasks.putIfAbsent(card.cardId, () => {}).add(line.taskId);
-        }
-        final updated = await api.react(
+        await api.react(
           card.cardId,
           wire.Reaction(
             reaction: turningOn
@@ -1171,122 +1137,67 @@ class AppController extends ChangeNotifier {
             taskId: line.taskId,
           ),
         );
-        switched =
-            turningOn ||
-            updated.lines.any(
-              (entry) =>
-                  entry.taskId == line.taskId &&
-                  entry.state == wire.LineState.OFF,
-            );
       } catch (error) {
         if (error is AppApiException &&
-            error.code == wire.ErrorCode.LINE_STARTED) {
-          _startedTasks.putIfAbsent(card.cardId, () => {}).add(line.taskId);
+            error.status < 500 &&
+            error.status != 408) {
+          _pendingLines.remove(key);
+          if (error.code == wire.ErrorCode.LINE_STARTED) {
+            _startedTasks.putIfAbsent(card.cardId, () => {}).add(line.taskId);
+            await _save();
+          }
         }
         controlErrors[card.cardId] = _error(error, '준비 항목 변경을 확인하지 못했어요.');
       } finally {
         await _refresh();
-        pendingLines.remove(key);
-        _change();
       }
     });
-    return switched;
   }
 
-  Future<void> undoLineOff(String cardId, String taskId) async {
-    final card = cards[cardId];
-    if (card == null) return;
-    final line = card.lines.where((line) => line.taskId == taskId).firstOrNull;
-    if (line != null && line.state == wire.LineState.OFF) {
-      await switchLine(card, line);
-    }
-  }
+  wire.Rationale? rationaleFor(String episodeId) => _rationales[episodeId];
 
-  Future<void> setPaused(bool value) async {
-    if (pausePending) return;
-    pausePending = true;
-    controlErrors.remove('pause');
-    _change();
-    await _serialize(() async {
-      try {
-        paused = null;
-        await _save();
-        final response = await api.pause(household!, wire.Pause(paused: value));
-        if (response.householdId != null && response.householdId != household) {
-          throw const FormatException('Wrong household');
+  bool isMemory(wire.Card card) =>
+      _rationales[card.episodeId]?.observations.any(
+        (observation) =>
+            observation.cardId == card.cardId && observation.verdict != null,
+      ) ??
+      false;
+
+  Future<void> _loadObservation(String id) =>
+      _memoryReads.putIfAbsent(id, () async {
+        try {
+          final result = await api.rationale(id);
+          if (result.episodeId != id) {
+            throw const FormatException('Wrong episode');
+          }
+          if (!_disposed &&
+              episodes[id]?.status != wire.EpisodeStatus.CLOSED &&
+              episodes.containsKey(id)) {
+            _rationales[id] = result;
+            _change();
+          }
+        } catch (_) {
+          // The observation may arrive on a later poll.
+        } finally {
+          _memoryReads.remove(id);
         }
-        paused = response.paused;
-      } catch (error) {
-        paused = null;
-        controlErrors['pause'] = _error(error, '자동 준비 상태를 확인하지 못했어요.');
-      } finally {
-        pausePending = false;
-        await _refresh();
-      }
-    });
-  }
+      });
 
-  wire.Rationale? rationaleFor(String episode) => _storedRationales[episode];
-
-  Future<wire.Rationale> rationale(String episode) {
-    final cached = _storedRationales[episode];
-    if (stale && cached != null) return Future.value(cached);
-    return _rationales.putIfAbsent(episode, () {
-      late final Future<wire.Rationale> request;
-      request = api
-          .rationale(episode)
-          .then((rationale) {
-            if (rationale.episodeId != episode) {
-              throw const FormatException('Wrong episode');
-            }
-            if (identical(_rationales[episode]?.future, request) &&
-                !_disposed) {
-              _rationales[episode] = (future: request, loading: false);
-              _storedRationales[episode] = rationale;
-              _change();
-              unawaited(_serialize(_save).catchError((Object _) {}));
-            }
-            return rationale;
-          })
-          .catchError((Object error, StackTrace stackTrace) {
-            if (identical(_rationales[episode]?.future, request)) {
-              _rationales.remove(episode);
-              _change();
-            }
-            Error.throwWithStackTrace(error, stackTrace);
-          });
-      return (future: request, loading: true);
-    }).future;
-  }
-
-  bool loadingRationale(String episode) =>
-      _rationales[episode]?.loading ?? false;
-
-  Future<void> refreshHomeInventory() {
-    final revision = _homeKeyRevision;
-    return _homeInventoryRefresh ??= _loadHomeInventory(revision)
-        .whenComplete(() {
-          if (revision == _homeKeyRevision) _homeInventoryRefresh = null;
-        });
-  }
-
-  Future<void> _loadHomeInventory(int revision) async {
-    final inventory = await homeHub?.fetchDevices(household!);
-    if (_disposed || revision != _homeKeyRevision || inventory == null) return;
-    homeInventory = inventory;
-    _change();
-    await _serialize(_save).catchError((Object _) {});
-  }
-
-  Future<wire.Memory> memory() async {
-    final result = await api.memory(household!);
-    if (result.householdId != household) {
-      throw const FormatException('Wrong household');
+  Future<({wire.Episode episode, wire.Rationale rationale})> readMemory(
+    String id,
+  ) async {
+    final (episode, rationale) = await (
+      api.episode(id),
+      api.rationale(id),
+    ).wait;
+    if (episode.householdId != household ||
+        episode.episodeId != id ||
+        rationale.episodeId != id ||
+        episode.status != wire.EpisodeStatus.CLOSED) {
+      throw const FormatException('Wrong episode');
     }
-    return result;
+    return (episode: episode, rationale: rationale);
   }
-
-  Future<void> deleteCase(String caseId) => api.deleteCase(household!, caseId);
 
   String _error(Object error, String fallback) {
     if (error is AppApiException) {
@@ -1298,7 +1209,7 @@ class AppController extends ChangeNotifier {
         wire.ErrorCode.LINE_STARTED => '이미 시작된 항목은 바꿀 수 없어요.',
         wire.ErrorCode.INVALID_IMAGE => '서버가 이미지를 읽을 수 없어요. 새 캡처를 공유해 주세요.',
         wire.ErrorCode.HOUSEHOLD_TYPES_INVALID =>
-          '선택한 ${stateWords['household_profile']} 항목을 함께 사용할 수 없어요.',
+          error.reason ?? '선택한 가구 유형을 함께 사용할 수 없어요.',
         _ => fallback,
       };
     }
@@ -1315,9 +1226,7 @@ class AppController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _timer?.cancel();
-    _closureTimer?.cancel();
     unawaited(_shareSubscription?.cancel());
-    homeHub?.close();
     super.dispose();
   }
 }

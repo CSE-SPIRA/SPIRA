@@ -7,16 +7,15 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'api/app_api.dart';
 import 'app_controller.dart';
-import 'contracts.dart' as wire;
+import 'features/calendar.dart';
 import 'features/labels.dart';
 import 'features/our_home.dart';
 import 'features/preparations.dart';
-import 'features/settings.dart';
 import 'features/setup.dart';
 import 'korean_text.dart';
 import 'platform/android_bridge.dart';
 import 'platform/google_calendar.dart';
-import 'platform/home_hub_onboarding.dart';
+import 'platform/gallery.dart';
 import 'theme.dart';
 
 void main() {
@@ -38,47 +37,30 @@ void main() {
     );
     return;
   }
-  const discovery = String.fromEnvironment('SPIRA_DISCOVERY_JSON');
   const calendarClientId = String.fromEnvironment('SPIRA_GOOGLE_CLIENT_ID');
   const household = String.fromEnvironment('SPIRA_HOUSEHOLD_ID');
-  const hubUrl = String.fromEnvironment('SPIRA_HUB_URL');
   const peer = String.fromEnvironment('SPIRA_PEER', defaultValue: 'fixture');
   const buildToken = String.fromEnvironment('SPIRA_FIXTURE_APP_TOKEN');
-  const buildHomeKey = String.fromEnvironment('SPIRA_HOME_KEY');
-  const webFixtureHomeKey = String.fromEnvironment('SPIRA_FIXTURE_HOME_KEY');
-  final homeKey = buildHomeKey.isNotEmpty
-      ? buildHomeKey
-      : kIsWeb && peer == 'fixture'
-      ? webFixtureHomeKey
-      : '';
   final api = AppApi(baseUrl);
   if (buildToken.isNotEmpty) api.token = buildToken;
-  final homeHub = hubUrl.isEmpty ? null : HttpHomeHubOnboarding(hubUrl);
-  if (homeKey.isNotEmpty) homeHub?.useApiKey(homeKey);
-  wire.Devices? discovered;
-  if (discovery.isNotEmpty) {
-    try {
-      discovered = wire.devicesFromJson(discovery);
-    } catch (_) {
-      // Setup displays device discovery as unavailable.
-    }
-  }
   final android = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
   final reader = !android || calendarClientId.isEmpty
       ? null
-      : GoogleCalendarReader(calendarClientId).call;
+      : GoogleCalendarReader(calendarClientId);
+  final gallery = OrderGallery();
   runApp(
     SpiraApp(
       app: AppController(
         api: api,
         platform: android ? AndroidBridge() : null,
         store: PreferencesAppStore(),
-        homeHub: homeHub,
         browserPreview: kIsWeb,
         fixture: peer != 'server',
-        discovered: discovered,
         configuredHousehold: household.isEmpty ? null : household,
-        readCalendar: reader,
+        readCalendar: reader?.call,
+        disconnectCalendar: reader?.disconnect,
+        pickImages: android || kIsWeb ? gallery.pick : null,
+        recoverImages: android ? gallery.recover : null,
       ),
     ),
   );
@@ -116,7 +98,7 @@ class _Home extends StatefulWidget {
 
 class _HomeState extends State<_Home> with WidgetsBindingObserver {
   AppController get app => widget.app;
-  _HomeTab _tab = _HomeTab.preparations;
+  _HomeTab _tab = _HomeTab.main;
 
   @override
   void initState() {
@@ -140,20 +122,17 @@ class _HomeState extends State<_Home> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  Future<void> _token({bool hub = false}) async {
+  Future<void> _token() async {
     final token = await showDialog<String>(
       context: context,
       animationStyle: MediaQuery.disableAnimationsOf(context)
           ? AnimationStyle.noAnimation
           : null,
-      builder: (_) => _TokenDialog(
-        title: hub ? '우리 집 접속 키' : '서버 접속 토큰',
-        label: hub ? '접속 키' : '접속 토큰',
-      ),
+      builder: (_) => const _TokenDialog(title: '서버 접속 토큰', label: '접속 토큰'),
     );
     if (token == null || !mounted) return;
     try {
-      await (hub ? app.useHomeKey(token) : app.useToken(token));
+      await app.useToken(token);
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -172,10 +151,20 @@ class _HomeState extends State<_Home> with WidgetsBindingObserver {
       return Scaffold(
         backgroundColor: surface,
         appBar: AppBar(
-          title: const KoreanText('SPIRA'),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const KoreanText('SPIRA'),
+              if (app.fixture && (!app.demoPreview || _tab != _HomeTab.main))
+                KoreanText(
+                  fixturePreviewLabel,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+            ],
+          ),
           backgroundColor: surface,
           actions: [
-            if (!ready && app.needsToken)
+            if (app.needsToken || (ready && _tab == _HomeTab.ourHome))
               IconButton(
                 tooltip: '서버 접속 토큰 입력',
                 onPressed: _token,
@@ -207,27 +196,11 @@ class _HomeState extends State<_Home> with WidgetsBindingObserver {
                         ),
                       ),
                     Expanded(
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          // Keep the preparation scroll and extraction alive
-                          // while another tab is visible.
-                          Offstage(
-                            offstage: _tab != _HomeTab.preparations,
-                            child: ExcludeFocus(
-                              excluding: _tab != _HomeTab.preparations,
-                              child: Preparations(app),
-                            ),
-                          ),
-                          if (_tab == _HomeTab.ourHome) OurHome(app),
-                          if (_tab == _HomeTab.settings)
-                            SettingsScreen(
-                              app,
-                              onServerToken: _token,
-                              onHomeKey: () => _token(hub: true),
-                            ),
-                        ],
-                      ),
+                      child: switch (_tab) {
+                        _HomeTab.main => Preparations(app),
+                        _HomeTab.calendar => PreparationCalendar(app),
+                        _HomeTab.ourHome => OurHome(app),
+                      },
                     ),
                   ],
                 )
@@ -246,9 +219,9 @@ class _HomeState extends State<_Home> with WidgetsBindingObserver {
 }
 
 enum _HomeTab {
-  preparations('준비', Icons.checklist_rounded),
-  ourHome('우리 집', Icons.home_outlined),
-  settings('설정', Icons.settings_outlined);
+  main('메인', Icons.checklist_rounded),
+  calendar('캘린더', Icons.calendar_month_outlined),
+  ourHome('우리 집', Icons.home_outlined);
 
   const _HomeTab(this.label, this.icon);
 
