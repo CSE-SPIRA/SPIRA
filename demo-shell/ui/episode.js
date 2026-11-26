@@ -89,6 +89,7 @@ export function createEpisodeReader(context, ui) {
           if (state.reader === controller && !$("notice").textContent) notice("녹화를 다시 저장하고 있어요.");
         });
         state.record = recorder.record;
+        state.recordingSaved = recorder.whenSaved;
         state.runId = recorder.id;
         if (share) ui.recording.log("share", share.data, share.at);
       }

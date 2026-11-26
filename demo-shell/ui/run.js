@@ -6,6 +6,7 @@ export function createRecorder(api, config, episodeId, demoPath, onError) {
   let offset = 0;
   let writing = false;
   let closed = false;
+  let saved;
 
   async function flush() {
     if (writing || !queue.length) return;
@@ -24,6 +25,10 @@ export function createRecorder(api, config, episodeId, demoPath, onError) {
       offset = result.offset;
       queue.splice(0, entries.length);
       writing = false;
+      if (!queue.length && saved) {
+        saved.resolve();
+        saved = undefined;
+      }
       void flush();
     } catch {
       onError();
@@ -40,7 +45,13 @@ export function createRecorder(api, config, episodeId, demoPath, onError) {
     queue.push({ kind, data, arrived_at: arrivedAt, story_at: storyAt, read });
     void flush();
   }
-  return { id, record };
+  function whenSaved() {
+    if (!queue.length) return Promise.resolve();
+    saved ??= Promise.withResolvers();
+    return saved.promise;
+  }
+
+  return { id, record, whenSaved };
 }
 
 export function replayFrames(entries, wording) {

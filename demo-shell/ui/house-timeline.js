@@ -196,6 +196,10 @@ export function createHouseTimeline(context, ui) {
 
   async function pollHouse() {
     for (let tick = 0; ; tick += 1) {
+      if (state.resetting) {
+        await sleep(800);
+        continue;
+      }
       const inHouse = state.page === "house";
       if (!REPLAY && state.config.tagger && state.episodeId) void ui.episode.readTags();
       const reads = inHouse ? [ui.surface.refreshSnapshot(), ui.surface.refreshHouseMarkers()] : [];

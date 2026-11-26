@@ -93,7 +93,7 @@ export function createPresenter(context, ui) {
   }
 
   async function moveClockTo(scene, { episodeId, signal } = {}) {
-    if (!await readClock() || signal?.aborted) return;
+    if (state.resetting || !await readClock() || signal?.aborted) return;
     const reader = state.reader;
     const episode = new URLSearchParams({ episode_id: episodeId });
     const moments = await readMoments(episodeId).catch((error) => {
@@ -101,7 +101,7 @@ export function createPresenter(context, ui) {
       throw error;
     });
     if (state.clockMissing) return;
-    if (state.reader !== reader) return;
+    if (state.resetting || state.reader !== reader) return;
     const forQuiet = scene === QUIET_END;
     const moment = forQuiet ? moments.find(({ event }) => event === scene.event)
       : moments.filter(({ at, event }) => event !== QUIET_END.event && Date.parse(at) > clockNow() + 1000)
@@ -321,7 +321,7 @@ export function createPresenter(context, ui) {
     }
     const next = REPLAY ? { id: "replay", label: "다음 →" } : pendingCue ? { wait: pendingCue.wait } : nextCue(moments, index);
     const button = $("next-cue");
-    button.disabled = REPLAY ? $("next").disabled : Boolean(!next.id || state.homeBusy || state.reactionPending);
+    button.disabled = REPLAY ? $("next").disabled : Boolean(!next.id || state.homeBusy || state.reactionPending || state.resetting);
     const label = REPLAY ? next.label : next.label ? `다음: ${next.label}` : next.wait ? `대기 · ${next.wait}` : "시연 완료";
     if (button.textContent !== label) button.textContent = label;
   }
@@ -341,7 +341,7 @@ export function createPresenter(context, ui) {
 
   async function pressNext() {
     if (REPLAY) return move(1);
-    if (pendingCue || state.sharing || state.homeBusy || state.reactionPending) return;
+    if (pendingCue || state.sharing || state.homeBusy || state.reactionPending || state.resetting) return;
     const moments = ui.house.timeline();
     const cue = nextCue(moments, moments.indexOf(ui.house.currentMoment(moments)));
     if (cue.id === "share") {
@@ -389,7 +389,12 @@ export function createPresenter(context, ui) {
 
   function renderControls() {
     const inHouse = state.page === "house";
-    const blocked = state.sharing || state.homeBusy;
+    const blocked = state.sharing || state.homeBusy || state.resetting;
+    for (const id of ["reset-drawer", "reset-notice"]) {
+      $(id).hidden = REPLAY || !state.config.reset;
+      $(id).disabled = blocked || Boolean(state.reactionPending);
+    }
+    $("reset-scope").hidden = $("reset-drawer").hidden || Boolean(state.config.fixture);
     $("phone-map").disabled = blocked || !canUsePhoneMap();
     const moments = ui.house.timeline();
     const index = RECORDING ? state.replayStep : moments.indexOf(ui.house.currentMoment(moments));
@@ -422,8 +427,53 @@ export function createPresenter(context, ui) {
     updateCue(moments, index);
   }
 
+  async function resetDemo() {
+    if ($("reset-drawer").hidden || $("reset-drawer").disabled) return;
+    const message = state.config.fixture
+      ? "집과 판단 기록을 처음 상태로 돌려요. 녹화는 남아요."
+      : "이 컴퓨터의 Hub와 집 상태를 처음으로 돌려요. 서버의 주문과 판단 기록, 녹화는 남아요.";
+    if (!window.confirm(message)) return;
+    state.resetting = true;
+    $("phone-dock").inert = $("right-area").inert = true;
+    $("reset-status").textContent = "처음 상태로 돌리는 중이에요…";
+    renderControls();
+    let reloading = false;
+    try {
+      if (state.record && !state.recordFinished) {
+        ui.recording.log("presenter", { action: "reset" });
+        ui.recording.log("finish", { stage: "reset" });
+        state.recordFinished = true;
+      }
+      state.record = null;
+      if (state.recordingSaved) {
+        const saved = await Promise.race([state.recordingSaved().then(() => true), sleep(15000).then(() => false)]);
+        if (!saved) {
+          $("reset-status").textContent = "녹화를 아직 저장하지 못했어요. 다시 시도해 주세요.";
+          return;
+        }
+      }
+      const { status } = await exchange("/demo/api/reset", { method: "POST" });
+      if (status === 204) {
+        location.replace("/demo");
+        reloading = true;
+        return;
+      }
+      $("reset-status").textContent = status === 409
+        ? "이미 처음 상태로 돌리는 중이에요."
+        : "새로 시작하지 못했어요. 다시 시도해 주세요.";
+    } catch {
+      $("reset-status").textContent = "새로 시작하지 못했어요. 다시 시도해 주세요.";
+    } finally {
+      if (!reloading) {
+        state.resetting = false;
+        $("phone-dock").inert = $("right-area").inert = false;
+        renderControls();
+      }
+    }
+  }
+
   function move(delta) {
-    if (state.sharing || state.homeBusy) return;
+    if (state.sharing || state.homeBusy || state.resetting) return;
     if (delta > 0 && state.page === "reason" && (!state.episodeId || !ui.reasoning.canMoveReasonForward() || state.draft)) return;
     state.auto = null;
     if (state.page === "house" && state.recordRequested) {
@@ -523,9 +573,10 @@ export function createPresenter(context, ui) {
     $("previous").onclick = () => move(-1);
     $("next").onclick = () => move(1);
     $("next-cue").onclick = pressNext;
+    $("reset-drawer").onclick = $("reset-notice").onclick = resetDemo;
     document.addEventListener("keydown", (event) => {
-      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.repeat ||
-        event.target.closest("input, textarea, select")) return;
+      if (state.resetting || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.repeat ||
+        event.target.closest("input, textarea, select, #reset-drawer, #reset-notice")) return;
       if (event.key.toLowerCase() === "r") {
         location.href = "/demo?recordings";
       } else if (event.key === "ArrowLeft") {

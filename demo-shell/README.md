@@ -54,10 +54,15 @@ and intent beats hold for 1.6 seconds each by default. A complete rationale
 received in one response plays in the same order.
 
 The launcher starts with an empty fixture and fresh Hub and World databases.
-If the shell reports earlier house state, press Ctrl-C in the launch terminal
-and start `scripts/demo-up` again.
+To start a fresh take, choose **새로 시작** in **진행자 조작** or in the notice
+about earlier house state. Confirm once and wait for stage 1 to open. The
+launcher restarts the local fixture, Hub, World, and MQTT broker on the same
+ports. The shell ends the active recording and keeps it with earlier takes.
+In `--server` mode, the launcher resets the local Hub and World and the
+Server keeps its order and judgment history.
+For a terminal restart, press Ctrl-C and run `scripts/demo-up` without `--keep`.
 Use `--keep` to resume the last run for this checkout, episode, and Simulator
-port. `--port` sets the Simulator port (default 8730), `--shell-port` sets the
+port. **새로 시작** starts fresh even with `--keep`. `--port` sets the Simulator port (default 8730), `--shell-port` sets the
 shell's port, and `--peer-ports FIXTURE MQTT HUB` selects the other ports.
 Use `--no-shell` to start the live stack by itself. `--realistic [SEED]` starts the
 fixture with the 현실 지연 preset (default seed 7). Press Ctrl-C to stop the stack.

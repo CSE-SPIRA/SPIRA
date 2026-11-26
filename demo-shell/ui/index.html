@@ -80,7 +80,12 @@
   </main>
   <footer class="controls" aria-label="단계 조작">
     <div class="control-notices">
-      <p id="stale-house" role="status" hidden>이전 시연의 집 상태가 남아 있어요. 터미널에서 Ctrl-C 후 scripts/demo-up으로 새로 시작하세요.</p>
+      <div id="stale-house" hidden>
+        <span role="status">이전 시연의 집 상태가 남아 있어요.</span>
+        <button class="button simple helper" type="button" id="reset-notice" hidden>새로 시작</button>
+        <small>터미널에서는 Ctrl-C 후 <code>scripts/demo-up</code>을 실행하세요.</small>
+      </div>
+      <p id="reset-status" role="status"></p>
       <p id="notice" role="status"></p>
     </div>
     <div class="control-right">
@@ -92,6 +97,8 @@
         <div class="presenter-drawer-panel">
           <span id="next-share" hidden>먼저 주문을 공유해 주세요</span>
           <button class="button simple helper" type="button" id="next" aria-describedby="next-share" disabled>다음 단계</button>
+          <button class="button simple helper" type="button" id="reset-drawer" hidden>새로 시작</button>
+          <p id="reset-scope" hidden>이 컴퓨터의 Hub와 집 상태만 초기화해요.</p>
           <div id="presenter-controls" aria-label="집 조작" hidden>
             <button class="button simple helper" type="button" data-presenter="delivery" data-event="package.brought_in">택배 들이기</button>
             <button class="button simple helper" type="button" data-presenter="guests_arrive" data-event="guest_arrived">손님 맞이</button>

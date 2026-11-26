@@ -97,6 +97,8 @@ async function openShell(t, query, reply, withHouse = false) {
   const timers = [];
   const recordings = new Map();
   const recordingPaths = new Map();
+  const confirmations = [];
+  const navigations = [];
   let now = 0;
   let timerId = 0;
   const globals = {
@@ -124,7 +126,11 @@ async function openShell(t, query, reply, withHouse = false) {
       }[selector] ?? []),
       addEventListener(type, listener) { this[`on${type}`] = listener; },
     },
-    window: { addEventListener(event, handler) { if (event === "resize") resize = handler; } }, location: { search: query },
+    window: {
+      addEventListener(event, handler) { if (event === "resize") resize = handler; },
+      confirm(message) { confirmations.push(message); return true; },
+    },
+    location: { search: query, replace(url) { navigations.push(url); } },
     CSS: { supports: () => false },
     DOMParser: class {
       parseFromString(markup) {
@@ -218,7 +224,7 @@ async function openShell(t, query, reply, withHouse = false) {
   await import(`../ui/demo.js?test=${++shellRun}`);
   await settle();
   return {
-    byId, pageButtons, roomButtons, cameraMoves, recordings, recordingPaths, drawn,
+    byId, pageButtons, roomButtons, cameraMoves, recordings, recordingPaths, drawn, confirmations, navigations,
     pressKey(key) {
       const event = { key, target: { closest: () => null }, preventDefault() { this.handled = true; } };
       document.onkeydown(event);
@@ -300,8 +306,69 @@ test("a second share warns before sending when the World still shows guests", as
   await settle();
   assert.deepEqual(checks, [true, false]);
   assert.equal(shell.byId("stale-house").hidden, false);
-  assert.match(shellHtml, /이전 시연의 집 상태가 남아 있어요\. 터미널에서 Ctrl-C 후 scripts\/demo-up으로 새로 시작하세요\./);
+  assert.match(shellHtml, /이전 시연의 집 상태가 남아 있어요\./);
+  assert.match(shellHtml, /id="reset-notice"[^>]*>새로 시작<\/button>/);
+  assert.match(shellHtml, /터미널에서는 Ctrl-C 후 <code>scripts\/demo-up<\/code>을 실행하세요\./);
   assert.equal((shellHtml.match(/id="stale-house"/g) ?? []).length, 1);
+});
+
+for (const control of ["reset-drawer", "reset-notice"]) {
+  test(`${control} confirms, saves the reset entry, and returns to stage 1 after readiness`, async (t) => {
+    const { episode, facts, viewer } = sceneFixture();
+    const guests = facts.filter(({ event }) => event === "guest_arrived");
+    const reset = Promise.withResolvers();
+    const requests = [];
+    const shell = await openShell(t, "?auto=0", (path, options) => {
+      if (path === "/demo/api/config") return Response.json({ server: true, fixture: true, reset: true, household_id: "h_042" });
+      if (path === "/demo/api/sim/viewer") return new Response(viewer(guests));
+      if (path === "/demo/api/order") return Response.json({ episode_id: episode.episode_id });
+      if (path === "/demo/api/reset") {
+        requests.push(options.method);
+        const [entries] = shell.recordings.values();
+        assert.deepEqual(entries.slice(-2).map(({ kind, data }) => [kind, data]), [
+          ["presenter", { action: "reset" }], ["finish", { stage: "reset" }],
+        ]);
+        return reset.promise;
+      }
+      return new Response(null, { status: 404 });
+    });
+    await shell.byId("next-cue").onclick();
+    assert.equal(shell.byId("stale-house").hidden, false);
+    assert.equal(shell.byId(control).hidden, false);
+    const pending = shell.byId(control).onclick();
+    await settle();
+    assert.match(shell.byId("reset-status").textContent, /돌리는 중/);
+    assert.equal(shell.byId("reset-drawer").disabled, true);
+    assert.equal(shell.byId("reset-notice").disabled, true);
+    await shell.byId(control).onclick();
+    assert.deepEqual(shell.confirmations, ["집과 판단 기록을 처음 상태로 돌려요. 녹화는 남아요."]);
+    assert.deepEqual(requests, ["POST"]);
+    assert.deepEqual(shell.navigations, []);
+    reset.resolve(new Response(null, { status: 204 }));
+    await pending;
+    assert.deepEqual(shell.navigations, ["/demo"]);
+  });
+}
+
+test("a failed reset shows the local scope and leaves the current page available", async (t) => {
+  const requests = [];
+  const shell = await openShell(t, "?auto=0", (path, options) => {
+    if (path === "/demo/api/config") return Response.json({ server: true, reset: true });
+    if (path === "/demo/api/reset") {
+      requests.push(options.method);
+      return new Response(null, { status: 503 });
+    }
+    return new Response(null, { status: 404 });
+  });
+  assert.equal(shell.byId("reset-scope").hidden, false);
+  assert.match(shellHtml, /이 컴퓨터의 Hub와 집 상태만 초기화해요\./);
+  await shell.byId("reset-drawer").onclick();
+  assert.match(shell.confirmations[0], /서버의 주문과 판단 기록, 녹화는 남아요/);
+  assert.deepEqual(requests, ["POST"]);
+  assert.match(shell.byId("reset-status").textContent, /새로 시작하지 못했어요/);
+  assert.deepEqual(shell.navigations, []);
+  assert.equal(shell.byId("reset-drawer").disabled, false);
+  assert.equal(shell.byId("phone-dock").inert, false);
 });
 
 test("opening the house detects guest presence from before a story-clock rewind", async (t) => {
