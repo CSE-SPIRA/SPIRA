@@ -10,7 +10,7 @@ from spira_contracts.reaction import Reaction
 from . import api, create_app, replay as replay_module
 from .moments import QUIET_END
 from .replay import JudgmentStage, Replay
-from .scene_support import JUDGMENT_SECONDS, NextOrder, live_replay, server_numbers
+from .scene_support import STAGE_GAPS, NextOrder, live_replay
 from .story_clock import StoryClock
 from .test_fixture_server import (
     EPISODE,
@@ -38,7 +38,7 @@ def upload(client, source, household="h_042"):
 
 def finish_judgment(client):
     now = datetime.fromisoformat(client.get(CLOCK).json()["story_at"])
-    due = now + timedelta(seconds=server_numbers()["quiet_s"] + JUDGMENT_SECONDS[JudgmentStage.PUBLISHED])
+    due = now + timedelta(seconds=sum(STAGE_GAPS.values()))
     assert client.post(CLOCK, json={"set_to": due.isoformat()}).status_code == 200
     return due
 
@@ -152,7 +152,7 @@ def test_live_share_publishes_judgment_in_story_time(episode_id, demo_mode, monk
     quiet_end = next(moment for moment in http.get("/v1/demo/moments").json() if moment["event"] == QUIET_END)
     assert quiet_end["kind"] == "time"
     assert quiet_end["episode_id"] == episode_id
-    assert datetime.fromisoformat(quiet_end["at"]) == shared_at + timedelta(seconds=600)
+    assert datetime.fromisoformat(quiet_end["at"]) == shared_at + timedelta(seconds=4)
     rationale_path = f"{EPISODE}/rationale"
 
     def seek(seconds):
@@ -176,40 +176,37 @@ def test_live_share_publishes_judgment_in_story_time(episode_id, demo_mode, monk
             assert client.pull()["plans"] == []
 
     assert_episode("received")
+    assert client.request("GET", rationale_path, 404)["code"] == "not_found"
     seek(1)
     assert_episode("reading")
-    seek(5.999)
+    seek(3.999)
     assert_episode("reading")
-    seek(6)
+    seek(4)
     assert_episode("reading", items=True)
     assert client.request("GET", rationale_path, 404)["code"] == "not_found"
-    seek(600)
-    assert_episode("reading", items=True)
-    assert client.request("GET", rationale_path, 404)["code"] == "not_found"
-    seek(614.999)
+    seek(5.999)
     assert client.request("GET", rationale_path, 404)["code"] == "not_found"
 
-    seek(615)
+    seek(6)
     assert_episode("reading", items=True)
     assert client.request("GET", rationale_path) == {
         **rationale, "intents": [], "none_reason": None, "unbundled": [],
         "tasks": [], "item_tasks": [], "executions": [], "observations": [],
     }
-    seek(630)
-    assert_episode("reading", items=True)
-    assert client.request("GET", rationale_path) == {
-        **rationale, "tasks": [], "item_tasks": [], "executions": [], "observations": [],
-    }
-    for offset in (645, 659.999):
+    for offset in (9, 12, 14.999):
         seek(offset)
-        assert_episode("judged", items=True, judged=True)
+        assert_episode("reading", items=True)
         assert client.request("GET", rationale_path) == {
-            **rationale, "tasks": [{**task, "state": "scheduled"} for task in rationale["tasks"]],
-            "item_tasks": initial_tasks, "executions": [], "observations": [],
+            **rationale, "intents": [{**intent, "card_id": None} for intent in rationale["intents"]],
+            "tasks": [], "item_tasks": [], "executions": [], "observations": [],
         }
 
-    seek(660)
+    seek(15)
     assert_episode("notified" if recorded["card_ids"] else "judged", items=True, judged=True, published=True)
+    assert client.request("GET", rationale_path) == {
+        **rationale, "tasks": [{**task, "state": "scheduled"} for task in rationale["tasks"]],
+        "item_tasks": initial_tasks, "executions": [], "observations": [],
+    }
     assert [card["card_id"] for card in client.cards()["cards"]] == recorded["card_ids"]
     plan, = client.pull()["plans"]
     assert plan == {**client.fixture("plan.v1.json"), "sent_at": http.get(CLOCK).json()["story_at"]}

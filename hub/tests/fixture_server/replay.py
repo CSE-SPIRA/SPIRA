@@ -229,13 +229,9 @@ class Replay:
             status = EpisodeStatus.RECEIVED
         elif self.read_failure and stage >= JudgmentStage.ITEMS:
             status = EpisodeStatus.READ_FAILED
-        elif stage == JudgmentStage.TASKS:
-            status = EpisodeStatus.JUDGED
-        changes = {"status": status, "card_ids": []}
+        changes = {"status": status, "item_tasks": [], "card_ids": []}
         if stage < JudgmentStage.ITEMS or self.read_failure:
             changes.update(items=[], item_count=0, masked_count=0)
-        if stage < JudgmentStage.TASKS:
-            changes["item_tasks"] = []
         return self.episode.model_copy(update=changes)
 
     def rationale_detail(self):
@@ -249,9 +245,13 @@ class Replay:
             rationale.intents = []
             rationale.none_reason = None
             rationale.unbundled = []
-        if stage < JudgmentStage.TASKS:
+        if stage < JudgmentStage.PUBLISHED:
+            for intent in rationale.intents:
+                intent.card_id = None
             rationale.tasks = []
             rationale.item_tasks = []
+            rationale.executions = []
+            rationale.observations = []
         else:
             states = {line.task_id: line.state for line in self.card.lines} if self.card else {}
             for task in rationale.tasks:

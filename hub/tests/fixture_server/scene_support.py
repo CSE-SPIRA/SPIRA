@@ -24,21 +24,38 @@ def server_numbers():
     return yaml.safe_load((CONTRACTS.parent / "server/config/numbers.yaml").read_text(encoding="utf-8"))
 
 
-JUDGMENT_SECONDS = {
-    JudgmentStage.READING: 1,     # Assumed start after share, no Server measurement.
-    JudgmentStage.ITEMS: 6,       # Assumed read completion after share, no Server measurement.
-    JudgmentStage.EVIDENCE: 15,   # Assumed S2 offset after quiet end, no Server measurement.
-    JudgmentStage.INTENTS: 30,    # Assumed S3 offset after quiet end, no Server measurement.
-    JudgmentStage.TASKS: 45,      # Assumed S4 offset after quiet end, no Server measurement.
-    JudgmentStage.PUBLISHED: 60,  # Assumed S5 offset after quiet end, no Server measurement.
+# Fixture processing gaps in story seconds. The quiet-window presets can
+# insert a wait between S1 and S2 without changing these gaps.
+STAGE_GAPS = {
+    JudgmentStage.READING: 1,
+    JudgmentStage.ITEMS: 3,
+    JudgmentStage.EVIDENCE: 2,
+    JudgmentStage.INTENTS: 3,
+    JudgmentStage.TASKS: 3,
+    JudgmentStage.PUBLISHED: 3,
 }
+
+
+def stage_offsets():
+    offsets = {}
+    elapsed = 0
+    for stage, gap in STAGE_GAPS.items():
+        if stage == JudgmentStage.EVIDENCE:
+            elapsed = 0  # Later offsets are relative to the end of the quiet window.
+        elapsed += gap
+        offsets[stage] = elapsed
+    return offsets
 
 
 def realistic_schedule(seed, sequence):
     rng = Random(f"{seed}:{sequence}")
     quiet = server_numbers()["quiet_s"]
-    offsets = {stage: max(0, seconds + rng.randint(-4, 8)) for stage, seconds in JUDGMENT_SECONDS.items()}
-    offsets[JudgmentStage.ITEMS] = max(offsets[JudgmentStage.READING], offsets[JudgmentStage.ITEMS])
+    offsets = stage_offsets()
+    previous = 0
+    for stage, seconds in offsets.items():
+        if stage == JudgmentStage.EVIDENCE:
+            previous = 0
+        offsets[stage] = previous = max(previous, seconds + rng.randint(-4, 8))
     if rng.randrange(4):
         first, second = rng.choice([
             (JudgmentStage.EVIDENCE, JudgmentStage.INTENTS),
@@ -86,7 +103,8 @@ def live_replay(order: NextOrder, *, clock: StoryClock, sequence: int = 1, pace=
             "card_ids": [identifiers[card_id] for card_id in replay.episode.card_ids],
         })
     shared_at = datetime.fromisoformat(replay.episode.shared_at)
-    quiet_seconds, offsets = pace or (server_numbers()["quiet_s"], JUDGMENT_SECONDS)
+    offsets = stage_offsets()
+    quiet_seconds, offsets = pace or (offsets[JudgmentStage.ITEMS], offsets)
     replay.capture_quiet_seconds = quiet_seconds
     replay.quiet_end, replay.judgment_at = judgment_times(shared_at, quiet_seconds, offsets)
     replay.live = True

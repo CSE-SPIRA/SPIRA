@@ -9,10 +9,10 @@ from .catalogue import CASES, DERIVED_FIELDS, STAGE_NAMES
 from .control_transport import ControlInput
 from .observation import SEOUL
 from .replay import JudgmentStage, wire
-from .scene_support import JUDGMENT_SECONDS, judgment_times, schedule_publication, server_numbers
+from .scene_support import STAGE_GAPS, judgment_times, schedule_publication, server_numbers, stage_offsets
 
 SECONDS = Annotated[int, Field(ge=0, le=86_400)]
-STAGES = {stage.name.lower(): stage for stage in JUDGMENT_SECONDS}
+STAGES = {stage.name.lower(): stage for stage in STAGE_GAPS}
 HOLD_STAGE = Literal["received", "reading", "items", "quiet_window", "evidence", "intents", "tasks", "published"]
 
 
@@ -46,7 +46,7 @@ class Pace(ControlInput):
 
     def schedule(self):
         quiet = server_numbers()["quiet_s"]
-        offsets = JUDGMENT_SECONDS.copy()
+        offsets = stage_offsets()
         if self.preset == "fast":
             quiet = 12
             offsets = {stage: index for index, stage in enumerate(offsets, 1)}
@@ -134,7 +134,7 @@ def extend_quiet_window(replay):
     prior_end = replay.quiet_end
     base = getattr(replay, "capture_quiet_seconds", server_numbers()["quiet_s"])
     replay.quiet_end = max(prior_end, now + timedelta(seconds=base))
-    for stage in JUDGMENT_SECONDS:
+    for stage in STAGE_GAPS:
         if stage >= JudgmentStage.EVIDENCE:
             replay.judgment_at[stage] += replay.quiet_end - prior_end
     schedule_publication(replay)

@@ -57,7 +57,7 @@ def test_next_uses_recorded_events_and_time_preroll():
     assert client.get(CLOCK).json()["story_at"] == "2026-10-15T21:00:08+09:00"
     moments = client.get(MOMENTS).json()
     assert [(entry["kind"], entry["at"], entry["event"]) for entry in moments] == [
-        ("time", "2026-10-15T21:10:08+09:00", QUIET_END),
+        ("time", "2026-10-15T21:00:12+09:00", QUIET_END),
         ("event", "2026-10-16T18:05:10+09:00", "package.brought_in"),
         ("time", "2026-10-17T12:30:00+09:00", None),
         ("time", "2026-10-17T13:30:00+09:00", None),
