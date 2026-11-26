@@ -2,49 +2,50 @@
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from math import ceil
 
 from pydantic import HttpUrl, ValidationError
 
+from .design_vocabulary import DEVICE_NAMES, ROOM_NAMES, STATE_WORDS
 from .profile import Device
 from .world import PEOPLE, SEOUL, World
 
-DEVICE_NAMES = {
-    "cleaner": "청소기",
-    "light": "조명",
-    "display": "TV",
-    "cooktop": "인덕션",
-    "oven": "오븐",
-    "fridge": "냉장고",
-    "smart_plug": "플러그",
-    "speaker": "스피커",
-}
-ROOM_NAMES = {"living_room": "거실", "kitchen": "주방", "bedroom": "침실"}
 SCENES = {
-    "kids_party": "공주 화면",
-    "party": "파티 화면",
-    "calm": "잔잔한 화면",
-    "cinema": "영화 화면",
+    scene: STATE_WORDS[f"scene_{scene}"] for scene in ("kids_party", "party", "calm", "cinema")
 }
 PLAYLISTS = {"calm": "잔잔한 음악", "party": "파티 음악", "family": "가족 모임 음악"}
+PURIFIER_MODES = {"auto": "자동", "turbo": "터보", "sleep": "취침"}
+AIRCON_MODES = {"off": "꺼짐", "cool": "냉방", "heat": "난방", "auto": "자동"}
+STYLER_COURSES = {"standard": "표준", "wool_care": "울케어"}
 COMMAND_NAMES = {
     "clean": "청소",
     "color": "조명 색상 변경",
     "color_temp": "색온도 변경",
     "play_mood": "분위기 화면",
     "off": "끄기",
-    "child_lock": "잠금",
+    "child_lock": STATE_WORDS["locked"],
     "set_cook_standby": "굽기 설정 대기",
-    "show_notice": "안내 표시",
+    "show_notice": STATE_WORDS["notice"],
     "play": "음악 재생",
     "stop": "정지",
+    "mode": "운전 모드 변경",
+    "set_course_standby": "코스 설정 대기",
 }
 TRIGGER_NAMES = {
     "package.brought_in": "택배를 들이면",
     "guest_arrived": "손님 오면",
     "event_end": "행사가 끝나면",
 }
+LIGHT_HUE_RANGES = (
+    (15, "light_pink"),
+    (45, "light_orange"),
+    (70, "light_yellow"),
+    (165, "light_green"),
+    (255, "light_blue"),
+    (315, "light_purple"),
+    (360, "light_pink"),
+)
 RESTORE_NAMES = {
     "restored": "되돌림",
     "not_needed": "되돌릴 값 없음",
@@ -52,6 +53,10 @@ RESTORE_NAMES = {
     "failed": "되돌리기 실패",
     "unknown": "되돌림 확인 불가",
     "withheld_end_not_observed": "종료 미관찰로 잠금·차단 유지",
+}
+SUBSTRATE_NAMES = {
+    "virtual": STATE_WORDS["virtual"],
+    "physical": f'{STATE_WORDS["physical"]} · 미검증',
 }
 OBSERVATION_NAMES = {
     "stale": "오래된 관찰값",
@@ -63,12 +68,19 @@ ENTRANCE_EVENTS = {
     "doorbell.pressed": ("bell", "초인종 울림"),
     "door_lock.opened": ("door", "문 열림 감지"),
     "presence.room_occupied": ("presence", "손님 있음"),
-    "presence.room_empty": ("presence", "손님 나감"),
+    "presence.room_empty": ("empty", "손님 나감"),
 }
-
-ON = "켜짐"
-OFF = "꺼짐"
-
+HOUSE_VISUAL_PROPERTIES = {
+    "cleaner": ("job_status", "in_use"),
+    "light": ("power", "color"),
+    "display": ("play_mood",),
+    "cooktop": ("child_lock", "in_use"),
+    "oven": ("preset", "in_use", "job_status"),
+    "fridge": ("show_notice",),
+    "smart_plug": ("power",),
+    "speaker": ("play",),
+    "air_conditioner": ("mode", "target_temp"),
+}
 
 def peer_viewers(setting: str) -> list[tuple[str, str]]:
     peers = []
@@ -91,22 +103,84 @@ def display_time(at: str | datetime) -> str:
         local = instant.astimezone(SEOUL)
     except ValueError:
         return "시각 확인 불가"
-    return f"{local.month}/{local.day} {'월화수목금토일'[local.weekday()]} {local:%H:%M}"
+    return f"{'월화수목금토일'[local.weekday()]} {local:%H:%M}"
+
+
+def guest_window_text(window: dict) -> str:
+    return "–".join(
+        datetime.fromisoformat(window[bound]).astimezone(SEOUL).strftime("%H:%M")
+        for bound in ("from", "to")
+    )
+
+
+def guest_window_status(world: World, windows: list[dict]) -> dict[str, str]:
+    if not windows:
+        return {"label": "", "detail": ""}
+
+    window = windows[-1]
+    label = f"손님 맞이 {guest_window_text(window)}"
+    closes = datetime.fromisoformat(window["to"])
+    if world.clock() <= closes:
+        return {"label": label, "detail": STATE_WORDS["guest_window_explanation"]}
+
+    opens = datetime.fromisoformat(window["from"])
+    signals = {
+        (signal.target, signal.event_type)
+        for signal in world.profile.home_signals.get("guests_arrive", ())
+    }
+    with world.store.lock:
+        facts = world.store.home_truth(tuple({event_type for _, event_type in signals}))
+    arrived = any(
+        (fact["target"], fact["event_type"]) in signals
+        and opens <= datetime.fromisoformat(fact["occurred_at"]) <= closes
+        for fact in facts
+    )
+    return {"label": label, "detail": "" if arrived else STATE_WORDS["guest_window_passed"]}
+
+
+def home_event_observation(fact: dict) -> dict:
+    occurred_at = fact["occurred_at"]
+    _, observation = ENTRANCE_EVENTS.get(
+        fact["event_type"], (None, "집에서 변화를 감지했어요")
+    )
+    return {"at": display_time(occurred_at), "occurred_at": occurred_at, "observation": observation}
+
+
+def home_event_controls(world: World) -> list[dict]:
+    controls = {}
+    actions_by_signal = defaultdict(list)
+    for action, signals in world.profile.home_signals.items():
+        label = world.profile.home_action_labels.get(action)
+        if label and signals:
+            controls[action] = {"action": action, "label": label}
+            for signal in signals:
+                actions_by_signal[signal.target, signal.event_type].append(action)
+    if not controls:
+        return []
+
+    event_types = tuple({event_type for _, event_type in actions_by_signal})
+    with world.store.lock:
+        facts = world.store.home_truth(event_types)
+    for fact in facts:
+        event_type = fact["event_type"]
+        for action in actions_by_signal.get((fact["target"], event_type), ()):
+            controls[action].update(home_event_observation(fact))
+    return list(controls.values())
 
 
 def device_name(device: Device) -> str:
     if device.label:
-        return {"Kettle plug": "포트 플러그", "Virtual light panel": "조명"}.get(
+        return {"Kettle plug": "포트 플러그", "Virtual light panel": DEVICE_NAMES["light"]}.get(
             device.label, device.label
         )
-    return DEVICE_NAMES.get(device.device_type, device.logical_id)
+    return DEVICE_NAMES.get(device.device_type, "기기")
 
 
 def number_text(value: int | float) -> str:
     return str(value).removesuffix(".0")
 
 
-def household_content(tile: dict) -> str | None:
+def household_content(tile: dict, *, household_light: bool = False) -> str | None:
     values = tile["values"]
     if not values:
         return None
@@ -114,28 +188,26 @@ def household_content(tile: dict) -> str | None:
         case "light":
             color = values.get("color") or {}
             if values.get("power") is False:
-                return OFF
+                return STATE_WORDS["off"]
             if "kelvin" in color:
+                if household_light:
+                    return planned_action("color_temp", color)[0]
                 return f"{number_text(color['kelvin'])}K"
             if all(key in color for key in ("hue", "saturation", "brightness")):
-                hue, saturation, brightness = (
-                    color[key] for key in ("hue", "saturation", "brightness")
-                )
-                name = "분홍" if hue == 330 and saturation else "색상"
-                return f"{name} {number_text(hue)}/{number_text(saturation)}/{number_text(brightness)}"
+                return planned_action(
+                    "color", {key: color[key] for key in ("hue", "saturation", "brightness")}
+                )[0]
         case "display":
             scene = values.get("play_mood")
-            return SCENES.get(scene.get("scene"), "화면 켜짐") if scene else OFF
+            return SCENES.get(scene.get("scene"), "화면 켜짐") if scene else STATE_WORDS["off"]
         case "oven":
             preset = values.get("preset") or {}
             content = [f"{number_text(preset['temp_c'])}°"] if preset else []
             match values.get("job_status"):
                 case "running":
-                    due = tile.get("job_due")
-                    if due:
-                        observed_at = datetime.fromisoformat(tile["observed_at"])
-                        remaining = datetime.fromisoformat(due) - observed_at
-                        minutes = max(0, ceil(remaining.total_seconds() / 60))
+                    remaining = tile.get("job_remaining_seconds")
+                    if remaining is not None:
+                        minutes = max(0, ceil(remaining / 60))
                         content.append(f"{minutes}분 남음")
                     return " · ".join([*content, "굽는 중"])
                 case "completed":
@@ -144,29 +216,43 @@ def household_content(tile: dict) -> str | None:
                     return "굽기 중지"
             if content:
                 return " · ".join([*content, f"{number_text(preset['minutes'])}분", "대기"])
-            return OFF
+            return STATE_WORDS["off"]
         case "fridge":
             notice = values.get("show_notice")
-            return notice if notice is not None else "평소 화면"
+            return notice if notice is not None else STATE_WORDS["normal_screen"]
         case "cleaner":
             return {
-                "running": "청소 중",
-                "completed": "청소 끝",
-                "stopped": "청소 중지",
-                "idle": "대기 중",
+                "running": STATE_WORDS["cleaning"],
+                "completed": STATE_WORDS["cleaned"],
+                "stopped": STATE_WORDS["cleaning_stopped"],
+                "idle": STATE_WORDS["idle"],
             }.get(values.get("job_status"))
         case "cooktop":
             if values.get("in_use"):
                 return "사용 중"
             if "child_lock" in values:
-                return "잠금" if values["child_lock"] else "잠금 해제"
+                return STATE_WORDS["locked"] if values["child_lock"] else STATE_WORDS["unlocked"]
         case "speaker":
             play = values.get("play")
             if play:
                 return f"{PLAYLISTS.get(play['playlist'], '음악 재생')} · 볼륨 {number_text(play['volume'])}"
             return "재생 안 함"
+        case "purifier":
+            return PURIFIER_MODES.get(values.get("mode"))
+        case "air_conditioner":
+            mode = AIRCON_MODES.get(values.get("mode"))
+            if values.get("mode") in (None, "off"):
+                return mode
+            temp = values.get("target_temp")
+            return f"{mode} · {number_text(temp)}℃" if temp is not None else mode
+        case "styler":
+            preset = values.get("course_standby")
+            if preset:
+                course = STYLER_COURSES.get(preset.get("course"), "")
+                return f"{course} 코스 대기".strip()
+            return "대기 설정 없음"
     if "power" in values:
-        return ON if values["power"] else OFF
+        return STATE_WORDS["on"] if values["power"] else STATE_WORDS["off"]
     return None
 
 
@@ -184,7 +270,9 @@ def latest_change(fact: dict) -> tuple[str, str] | None:
     return "unknown", "누가 바꿨는지 모름"
 
 
-def tiles(world: World, snapshot: dict, changes: dict | None = None) -> list[dict]:
+def tiles(
+    world: World, snapshot: dict, changes: dict | None = None, *, household_light: bool = False
+) -> list[dict]:
     result = []
     for report in snapshot["devices"]:
         target = report["target"]
@@ -195,11 +283,11 @@ def tiles(world: World, snapshot: dict, changes: dict | None = None) -> list[dic
                 "id": device.logical_id,
                 "name": device_name(device),
                 "room": device.room,
-                "content": household_content(report),
+                "content": household_content(report, household_light=household_light),
                 "observation": status,
                 "observation_label": OBSERVATION_NAMES.get(status),
                 "observed_at": display_time(report["observed_at"]),
-                "substrate": "가상" if device.substrate == "virtual" else "실물",
+                "substrate": STATE_WORDS[device.substrate],
                 "physical": device.substrate == "physical",
                 "class_a": device.local_operation_reporting,
                 "assumption": device.assumption,
@@ -213,78 +301,184 @@ def tiles(world: World, snapshot: dict, changes: dict | None = None) -> list[dic
     return result
 
 
+PERSON_ACTION_DURATION = timedelta(seconds=6)
+
+
+def guest_presence(
+    facts: list[dict], arrivals: set[tuple[str, str]], departures: set[tuple[str, str]],
+) -> dict | None:
+    guests = None
+    for fact in facts:
+        signal = (fact["target"], fact["event_type"])
+        if signal in departures or fact["event_type"] == "presence.room_empty":
+            guests = None
+        elif signal in arrivals:
+            at = fact["occurred_at"]
+            if guests is None or guests["at"] != at:
+                guests = {"at": at, "count": 3}
+            payload = fact["after"]
+            count = payload.get("count", payload.get("guest_count"))
+            if type(count) is int and count >= 0:
+                guests["count"] = count
+    return guests
+
+
 def viewer_world(world: World) -> dict:
+    home_signals = world.profile.home_signals
+    arrivals = {(fact.target, fact.event_type) for fact in home_signals.get("guests_arrive", ())}
+    departures = {
+        (fact.target, fact.event_type)
+        for action in ("event_end", "guests_depart")
+        for fact in home_signals.get(action, ())
+    }
+    home_types = set(ENTRANCE_EVENTS) | {kind for _, kind in arrivals | departures}
+    children = {person.name for person in world.profile.demo_people if person.role == "child"}
     with world.store.lock:
         now = world.clock()
         snapshot = world.snapshot(for_display=True)
-        truth = world.store.latest_truth()
-    changes = {
-        fact["target"]: latest_change(fact)
-        for fact in truth
-        if fact["logical_id"] is not None
-    }
-    entrance = {}
-    for fact in truth:
-        event = ENTRANCE_EVENTS.get(fact["event_type"])
-        if fact["logical_id"] is None and event:
-            sensor, label = event
-            entrance[sensor] = {"label": label, "at": display_time(fact["occurred_at"])}
+        changes = {}
+        change_times = {}
+        person_actions = {}
+        for fact in world.store.latest_truth():
+            target = fact["target"]
+            change_times[target] = fact["occurred_at"]
+            if fact["actor"] == "device_self" and fact["event_type"].endswith(".completed"):
+                fact = world.store.job_start(target, fact["job_id"]) or fact
+            change = changes[target] = latest_change(fact)
+            if change and change[0] == "person":
+                occurred_at = fact["occurred_at"]
+                if timedelta(0) <= now - datetime.fromisoformat(occurred_at) < PERSON_ACTION_DURATION:
+                    kind = "child" if fact["actor"] == "child" and fact["actor_name"] in children else "adult"
+                    person_actions[target] = {"at": occurred_at, "figure": kind}
+        home_truth = world.store.home_truth(tuple(home_types))
+        notices = {
+            report["target"]: world.store.fridge_notices(report["target"])
+            for report in snapshot["devices"]
+            if report["observation"] == "current" and report["values"].get("show_notice")
+        }
+    entrance = []
+    for fact in home_truth:
+        if fact["event_type"] not in ENTRANCE_EVENTS:
+            continue
+        sensor, label = ENTRANCE_EVENTS[fact["event_type"]]
+        occurred_at = fact["occurred_at"]
+        entrance.append(
+            {
+                "signal": sensor,
+                "label": label,
+                "at": display_time(occurred_at),
+                "occurred_at": occurred_at,
+            }
+        )
+    devices = tiles(world, snapshot, changes, household_light=True)
+    for device, report in zip(devices, snapshot["devices"], strict=True):
+        configured = world.devices[report["target"]]
+        device["changed"] = report["target"] in changes or any(
+            key in report["values"] and report["values"][key] != prop.initial
+            for key, prop in configured.properties.items()
+        )
+        device["visual_values"] = {
+            key: report["values"][key]
+            for key in HOUSE_VISUAL_PROPERTIES.get(report["device_type"], ())
+            if key in report["values"]
+        }
+        if report["observation"] == "current":
+            device["change_at"] = change_times.get(report["target"])
+            device["person_action"] = person_actions.get(report["target"])
+        notice = report["values"].get("show_notice")
+        if notice:
+            device["notices"] = notices.get(report["target"]) or [notice]
     return {
+        "world_epoch": snapshot["world_epoch"],
+        "world_revision": snapshot["world_revision"],
         "clock": display_time(now),
         "clock_at": now.isoformat(),
-        "tiles": tiles(world, snapshot, changes),
-        "entrance": list(entrance.values()),
+        "tiles": devices,
+        "entrance": entrance,
+        "guests": guest_presence(home_truth, arrivals, departures),
     }
 
 
-def planned_value(command: str, value) -> str | None:
-    """The target of a planned action, in household words (device-level only)."""
-    if not isinstance(value, dict):
-        return None
-    match command:
-        case "play_mood":
-            return SCENES.get(value.get("scene"))
-        case "color" if all(k in value for k in ("hue", "saturation", "brightness")):
-            name = "분홍" if value["hue"] == 330 and value["saturation"] else "색상"
-            return f"{name} {number_text(value['hue'])}/{number_text(value['saturation'])}/{number_text(value['brightness'])}"
-        case "color_temp" if "kelvin" in value:
-            return f"{number_text(value['kelvin'])}K"
-        case "set_cook_standby" if "temp_c" in value:
+def planned_action(command: str, value) -> tuple[str, str | None]:
+    """Describe the target in household words, with optional light settings."""
+    match command, value:
+        case "clean", {"room": str(room)}:
+            room_name = ROOM_NAMES.get(room, room if room in ROOM_NAMES.values() else None)
+            if room_name:
+                return f"{room_name} 청소", None
+        case "play_mood", {"scene": str(scene)}:
+            return SCENES.get(scene, COMMAND_NAMES[command]), None
+        case "color", {
+            "hue": (int() | float()) as hue,
+            "saturation": (int() | float()) as saturation,
+            "brightness": (int() | float()) as brightness,
+        }:
+            angle = hue % 360
+            name = "light_white" if saturation == 0 else next(
+                key for upper, key in LIGHT_HUE_RANGES if angle < upper
+            )
+            detail = (
+                f"색조 {number_text(hue)}° · 채도 {number_text(saturation)}%"
+                f" · 밝기 {number_text(brightness)}%"
+            )
+            return STATE_WORDS[name], detail
+        case "color_temp", {"kelvin": (int() | float()) as kelvin}:
+            name = "light_warm" if kelvin < 4000 else "light_white"
+            return STATE_WORDS[name], f"{number_text(kelvin)}K"
+        case "set_cook_standby", {"temp_c": (int() | float()) as degrees}:
             minutes = value.get("minutes")
-            return f"{number_text(value['temp_c'])}°" + (f" {number_text(minutes)}분" if minutes else "")
-        case "play" if value.get("playlist"):
-            return PLAYLISTS.get(value["playlist"], "음악 재생")
-    return None
+            time = f" {number_text(minutes)}분" if isinstance(minutes, (int, float)) else ""
+            return f"{number_text(degrees)}°{time} 굽기 대기", None
+        case "play", {"playlist": str(playlist_code)}:
+            playlist = PLAYLISTS.get(playlist_code, "음악 재생")
+            volume = value.get("volume")
+            if isinstance(volume, (int, float)):
+                return f"{playlist} · 볼륨 {number_text(volume)}", None
+            return playlist, None
+        case "mode", {"mode": str(mode)}:
+            if mode in PURIFIER_MODES:
+                return f"{PURIFIER_MODES[mode]} 모드", None
+        case "set_course_standby", {"course": str(course)}:
+            if course in STYLER_COURSES:
+                return f"{STYLER_COURSES[course]} 코스 대기", None
+    return COMMAND_NAMES.get(command, "기기 동작"), None
 
 
 def viewer_plan(data: dict, device_names: dict) -> tuple[dict, list[dict]]:
-    planned = defaultdict(list)
+    planned = defaultdict(dict)
     for row in data["preparation"] + data["notices"]:
         wait = row["wait"]
-        planned[row["device"]].append(
+        action, detail = planned_action(row["command"], row.get("target_value"))
+        label = TRIGGER_NAMES.get(wait) or display_time(wait)
+        timed = wait not in TRIGGER_NAMES
+        if window := row.get("window"):
+            label = f"{label} · {guest_window_text(window)}"
+        missed = row.get("missed", False)
+        entry = planned[row["device"]].setdefault(
+            (action, label, timed, missed),
             {
-                "action": " ".join(
-                    part for part in (
-                        COMMAND_NAMES.get(row["command"], row["command"]),
-                        planned_value(row["command"], row.get("target_value")),
-                    ) if part
-                ),
-                "wait": TRIGGER_NAMES.get(wait) or display_time(wait),
-            }
+                "action": action,
+                "wait": label,
+                "timed": timed,
+                "missed": missed,
+                "details": [],
+                "window_note": STATE_WORDS["guest_window_explanation"] if window else None,
+            },
         )
+        if detail and detail not in entry["details"]:
+            entry["details"].append(detail)
     restores = [
         {
-            "device": device_names.get(row["device"], row["device"]),
+            "device": device_names.get(row["device"], "기기"),
             "outcome": RESTORE_NAMES[row["status"]],
-            "substrate": {"virtual": "가상", "physical": "실물 · 미검증"}.get(
-                row["substrate"], "기기 유형 미확인"
-            ),
+            "substrate": SUBSTRATE_NAMES["physical"] if row["substrate"] == "physical" else None,
             "at": display_time(row["at"]),
+            "occurred_at": row["at"],
             "pending": row.get("delivery") == "not_delivered",
         }
-        for row in data["restores"]
+        for row in sorted(data["restores"], key=lambda row: datetime.fromisoformat(row["at"]), reverse=True)
     ]
-    return planned, restores
+    return {device: list(entries.values()) for device, entries in planned.items()}, restores
 
 
 @dataclass(frozen=True)
@@ -301,6 +495,14 @@ def device_controls(device: Device, *, appliance: bool) -> list[Control]:
         return []
     commands = set(device.commands)
     controls = []
+    if "color" in commands:
+        controls.extend(
+            Control(
+                f"color_{name}", f"조명 색 바꾸기 · {STATE_WORDS[f'light_{name}']}",
+                {"color": {"hue": hue, "saturation": 60, "brightness": 70}},
+            )
+            for name, hue in (("pink", 330), ("yellow", 55))
+        )
     if "color_temp" in commands:
         controls.extend(
             Control(
@@ -310,7 +512,10 @@ def device_controls(device: Device, *, appliance: bool) -> list[Control]:
         )
     if "play_mood" in commands:
         controls.extend(
-            Control(scene, f"{label} 켜기", {"play_mood": {"scene": scene}})
+            Control(
+                scene, f"음악 바꾸기 · {PLAYLISTS['calm']}" if scene == "calm" else f"{label} 켜기",
+                {"play_mood": {"scene": scene}},
+            )
             for scene, label in SCENES.items()
         )
     if "off" in commands and device.device_type == "display":
@@ -326,7 +531,7 @@ def device_controls(device: Device, *, appliance: bool) -> list[Control]:
         controls.extend(
             (
                 Control("lock", "잠그기", {"child_lock": True}),
-                Control("unlock", "잠금 해제", {"child_lock": False}),
+                Control("unlock", STATE_WORDS["unlocked"], {"child_lock": False}),
             )
         )
     if "clean" in commands:
@@ -337,19 +542,31 @@ def device_controls(device: Device, *, appliance: bool) -> list[Control]:
                     "청소 시작",
                     {"clean": {"room": ROOM_NAMES.get(device.room, device.room)}},
                 ),
-                Control("stop_clean", "청소 중지", {"clean": None}),
+                Control("stop_clean", STATE_WORDS["cleaning_stopped"], {"clean": None}),
             )
         )
     if "play" in commands:
-        controls.append(
-            Control(
-                "play",
-                "가족 모임 음악 재생",
-                {"play": {"playlist": "family", "volume": 30}},
+        controls.extend(
+            (
+                Control("play", "가족 모임 음악 재생", {"play": {"playlist": "family", "volume": 30}}),
+                Control("music_calm", f"음악 바꾸기 · {PLAYLISTS['calm']}", {"play": {"playlist": "calm", "volume": 30}}),
             )
         )
     if "stop" in commands:
         controls.append(Control("stop", "음악 정지", {"play": None}))
+    if device.device_type == "purifier" and "mode" in commands:
+        controls.extend(
+            Control(mode, label, {"mode": mode})
+            for mode, label in PURIFIER_MODES.items()
+        )
+    if device.device_type == "air_conditioner" and "mode" in commands:
+        controls.extend(Control(mode, f"에어컨 {label}", {"mode": mode}) for mode, label in AIRCON_MODES.items())
+    if device.device_type == "styler" and "set_course_standby" in commands:
+        controls.extend(
+            Control(course, f"{label} 코스 대기", {"course_standby": {"course": course}})
+            for course, label in STYLER_COURSES.items()
+        )
+        controls.append(Control("clear_course", "대기 설정 해제", {"course_standby": None}))
     if (
         device.device_type == "oven"
         and device.job

@@ -1,20 +1,21 @@
-"""Run the Hub on wall time with independent Server and MQTT peers."""
+"""Run the Hub with independent Server and MQTT peers."""
 
 import argparse
 import asyncio
 import fcntl
 import os
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
 import httpx2 as httpx
 import uvicorn
 
-from .contracts import Server, identity
+from .contracts import Server, identity, wall_time
 from .dashboard import create_app
 from .device import MQTTDevice
 from .runtime import PULL_INTERVAL, Runtime
 from .store import Store
+from .story_clock import ClockState, story_now
 
 
 async def repeat(interval, action):
@@ -23,11 +24,32 @@ async def repeat(interval, action):
         await asyncio.sleep(interval)
 
 
+class DemoClock:
+    def __init__(self, url, http, device):
+        self.url, self.http, self.device = url, http, device
+        self.state = None
+
+    def now(self):
+        real_now = wall_time()
+        return story_now(self.state, real_now) if self.state is not None else real_now
+
+    async def poll(self):
+        try:
+            response = await self.http.get(self.url, timeout=1)
+            response.raise_for_status()
+            self.state = ClockState.model_validate(response.json())
+        except (httpx.HTTPError, ValueError):
+            pass
+        if self.state is not None:
+            await self.device.publish_clock(self.state)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--installation", required=True, type=Path)
     parser.add_argument("--db", default=Path("hub.sqlite3"), type=Path)
     parser.add_argument("--port", default=8088, type=int)
+    parser.add_argument("--home-name", default="우리 집", help="Household name for the ledger")
     args = parser.parse_args()
     required = ("SPIRA_SERVER_URL", "SPIRA_HOUSEHOLD", "SPIRA_HUB_KEY")
     if missing := [name for name in required if not os.environ.get(name)]:
@@ -43,6 +65,7 @@ def main():
 
 def run(args):
     household = os.environ["SPIRA_HOUSEHOLD"]
+    hub_key = os.environ["SPIRA_HUB_KEY"]
     store = Store(args.db, household)
     with store.db:
         hub_id = store.get("hub_id") or identity("hub")
@@ -57,13 +80,19 @@ def run(args):
     )
     http = httpx.AsyncClient(
         base_url=os.environ["SPIRA_SERVER_URL"], timeout=5,
-        headers={"X-API-Key": os.environ["SPIRA_HUB_KEY"], "Content-Type": "application/json"},
+        headers={"X-API-Key": hub_key, "Content-Type": "application/json"},
     )
-    runtime = Runtime(store, Server(http, household), device, args.installation)
+    demo_url = os.environ.get("SPIRA_DEMO_CLOCK_URL")
+    demo_clock = DemoClock(demo_url, httpx.AsyncClient(), device) if demo_url else None
+    clock = demo_clock.now if demo_clock else wall_time
+    runtime = Runtime(store, Server(http, household, clock=clock), device, args.installation, clock=clock)
 
     @asynccontextmanager
     async def lifespan(_app):
-        async with http, asyncio.TaskGroup() as workers:
+        async with http, AsyncExitStack() as clients, asyncio.TaskGroup() as workers:
+            if demo_clock:
+                await clients.enter_async_context(demo_clock.http)
+                await demo_clock.poll()
             tasks = [
                 workers.create_task(device.listen()),
                 workers.create_task(repeat(2, runtime.discover)),
@@ -71,6 +100,8 @@ def run(args):
                 workers.create_task(repeat(0.25, runtime.step)),
                 workers.create_task(repeat(1, runtime.flush)),
             ]
+            if demo_clock:
+                tasks.append(workers.create_task(repeat(1, demo_clock.poll)))
             try:
                 yield
             finally:
@@ -78,8 +109,8 @@ def run(args):
                     task.cancel()
 
     try:
-        uvicorn.run(create_app(runtime, lifespan=lifespan), host="127.0.0.1",
-                    port=args.port, access_log=False)
+        uvicorn.run(create_app(runtime, lifespan=lifespan, home_name=args.home_name),
+                    host="127.0.0.1", port=args.port, access_log=False)
     finally:
         store.db.close()
 

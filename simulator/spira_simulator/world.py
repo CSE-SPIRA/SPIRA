@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from .profile import Device, Profile
 from .storage import WorldStorage, identity
+from .story_clock import ClockState, story_now
 
 DEVICE_SCHEMA = "spira.device.v1"
 SEOUL = ZoneInfo("Asia/Seoul")
@@ -32,7 +33,8 @@ class World:
     ):
         self.profile = profile
         self.devices = {device.target: device for device in profile.devices}
-        self.clock = clock
+        self._wall_time = clock
+        self.story_clock: ClockState | None = None
         self.command_faults: dict[str, str] = {}
         self.read_faults: dict[str, tuple[str, dict]] = {}
         self.store = WorldStorage(path)
@@ -173,6 +175,14 @@ class World:
         with self.store.lock:
             return self._observation(target)[0]
 
+    def clock(self) -> datetime:
+        state = self.story_clock
+        now = self._wall_time()
+        return story_now(state, now).astimezone(SEOUL) if state is not None else now
+
+    def _job_time(self, observed_at: datetime) -> datetime:
+        return self._wall_time() if self.story_clock is not None else observed_at
+
     def snapshot(
         self, *, include_operator_actions: bool = False, for_display: bool = False
     ) -> dict:
@@ -209,12 +219,16 @@ class World:
                     observed_state = (
                         self.read_faults[target][1] if freshness == "stale" else state
                     )
-                    tile["job_due"] = observed_state["due"]
+                    if observed_state["due"]:
+                        due = datetime.fromisoformat(observed_state["due"])
+                        job_time = self._job_time(datetime.fromisoformat(report["observed_at"]))
+                        tile["job_remaining_seconds"] = (due - job_time).total_seconds()
                 devices.append(tile)
             return {
                 "household_id": self.profile.household_id,
                 "world_epoch": self.epoch,
                 "world_revision": self.store.revision,
+                "now": self.clock().isoformat(),
                 "devices": devices,
             }
 
@@ -326,7 +340,7 @@ class World:
             )
             receipt = {"status": status, "operation_id": operation_id, "job_id": job_id}
             self.store.save_receipt(operation_id, receipt)
-            return receipt, signals
+        return receipt, signals
 
     def mark_commands(self) -> dict:
         with self.store.transaction():
@@ -431,7 +445,7 @@ class World:
                     duration = preset["minutes"] * 60
             job_fields = {
                 "job_id": job_id,
-                "due": (at + timedelta(seconds=duration)).isoformat(),
+                "due": (self._job_time(at) + timedelta(seconds=duration)).isoformat(),
             }
             updates = {**updates, "in_use": True, "job_status": "running"}
             event_type = f"{device.device_type}.started"
@@ -483,9 +497,10 @@ class World:
             status = self._validation(device, values, local=True) if not start else None
             if status:
                 raise InvalidMutation(status)
-            return self._effect(
+            _, signals = self._effect(
                 device, state, values, actor, start=start, operator_action=action
-            )[1]
+            )
+        return signals
 
     def home_event(self, action: str) -> list[dict]:
         facts = self.profile.home_signals.get(action)
@@ -522,6 +537,7 @@ class World:
     def complete_due(self) -> list[dict]:
         with self.store.transaction():
             now = self.clock()
+            job_time = self._job_time(now)
             signals = []
             for device in self.devices.values():
                 if device.job is None or device.substrate != "virtual":
@@ -531,7 +547,7 @@ class World:
                     current["job_id"]
                     and current["values"]["job_status"] == "running"
                     and current["due"]
-                    and datetime.fromisoformat(current["due"]) <= now
+                    and datetime.fromisoformat(current["due"]) <= job_time
                 ):
                     # The due time belongs to the current job row, overwritten on replacement.
                     _, pushed = self._change(

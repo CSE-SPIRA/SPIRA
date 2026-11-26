@@ -7,25 +7,60 @@ polling, version handling, and state meanings remain authoritative in
 [`simulator/protocol.md`](../simulator/protocol.md); this document consumes that
 protocol and does not redefine it. Non-normative implementation guidance is in
 [`design-notes.md`](design-notes.md).
+The [screen reference](screens.md) describes the ledger and its engineering detail.
 
 ## 1. Purpose and boundaries
 
-The Hub turns the Server's versioned plans into effects at the specified home
-and time, observes what actually happened, preserves person-made changes, and
-reports evidence that the Server can use for household memory. It runs
-independently of the App and Simulator process, so closing the App does not stop
-waiting work. (PC-4, PC-5, PC-6)
+The Hub is an adapter that carries out the Server's judgments in the home
+without making its own. It executes versioned plans at the specified time,
+preserves person-made changes, and reports observations and execution results
+to the Server. It retains waiting work independently of the App and Simulator
+processes. (PC-4, PC-5, PC-6)
 
 The Hub does not infer purchase intent, create preparation work, choose a
 different target or value, judge household preference, or implement Server
 plan-time policy such as quiet hours or room suitability. The Server owns those
-judgments and S7 memory. The Hub communicates with the Server only by the pull,
-acknowledgement, event, and result routes in `contracts/openapi/hub.yaml`; the
-Server never calls the Hub or Simulator. (PC-1, PC-2, PC-4, PC-6)
+judgments and S7 memory. The Hub MUST initiate communication with the Server
+through the device registration, plan pull and acknowledgement, event, and
+execution routes in `contracts/openapi/hub.yaml`. The Server never calls the
+Hub or Simulator. The Hub MUST NOT communicate directly with the App. The
+local dashboard serves engineering diagnostics. (PC-1, PC-2, PC-4, PC-6)
+
+### Server routes this part relies on
+
+Current availability follows the [Hub OpenAPI file](../contracts/openapi/hub.yaml),
+the real Server's [Hub router](../server/spira_server/api/hub_routes.py), and its
+[readiness route](../server/spira_server/main.py). The Hub behavior below comes
+from [the HTTP client](spira_hub/contracts.py) and
+[`Runtime.refresh`, `Runtime.register`, and `Runtime.flush`](spira_hub/runtime.py).
+
+| Server route | Served by the real Server on this branch | Hub behavior if absent |
+| --- | --- | --- |
+| `GET /health` | Yes | The Hub runtime does not call Server readiness. Its own `/health` reflects successful plan reconciliation and MQTT availability. |
+| `PUT /v1/hub/households/{household_id}/devices` | Yes | Registration stays unconfirmed and is retried on later refreshes. A successful plan pull can still reconcile. |
+| `GET /v1/hub/plans?household={household_id}` | Yes | The Hub records a pull error, retains the saved snapshot, and retries. Before any new effect, a failed recheck blocks execution as `plan_unconfirmed`. |
+| `POST /v1/hub/plans/{plan_id}/ack` | Yes, returns 204 | A 404 leaves the acknowledgement queued with `HTTP 404`. Later flushes retry the stored packet. |
+| `POST /v1/hub/events` | No | A 404 leaves the C-3 packet pending with `HTTP 404`. Later flushes retry the same packet, and a failed delivery yields no `plans_changed` response. Normal plan polling continues. |
+| `POST /v1/hub/executions` | No | A 404 leaves the C-4 run or restore packet pending with `HTTP 404`. Later flushes retry the same packet. The dashboard still shows the local outcome and its outstanding delivery. |
+
+For replay, the Hub optionally reads the demo clock from
+`SPIRA_DEMO_CLOCK_URL`. It uses wall time until the first valid clock response
+and retains the last valid clock anchors through read failures. The Hub
+publishes configured demo-clock state to the Simulator on MQTT `P/clock`.
+The real Server has no demo-clock route on this branch. With the variable unset,
+the Hub uses wall time. See [Hub startup](spira_hub/__main__.py),
+[MQTT clock publication](spira_hub/device.py), and the
+[real Server demo routes](../server/spira_server/api/demo_routes.py).
 
 ## 2. Requirements
 
 ### H1. Installation identity
+
+**HUB-14.** The Server creates the Hub API key in response to
+`POST /v1/households`. The App displays it as a connection code. A person
+MUST enter the key in the Hub's local setup. The demo launcher provides it
+through `SPIRA_HUB_KEY`. The App MUST NOT send the key to the Hub over the
+network.
 
 **H1-R3.** A replacement native device MUST NOT inherit an earlier device's
 temporary-property ownership or restoration authority merely because it has the
@@ -33,15 +68,20 @@ same logical device ID, room, or label. (PC-5)
 
 ### H2. Delegation and capabilities
 
-**H2-R1.** The Hub MUST publish only admitted devices and explicitly delegated
-commands/value schemas in C-2, including `never` prohibitions and the current
-devices revision. It MUST NOT execute a command that is no longer delegated.
-(PC-3, PC-5)
+**H2-R1.** The Hub MUST publish admitted devices in C-2 with the installed
+device type and room, the user's delegated `commands` and their value schemas,
+any `never` prohibitions, and the current devices revision. It MUST NOT execute
+a command that is no longer delegated. (PC-3, PC-5)
 
 **H2-R2.** Discovery or order sharing MUST NOT grant delegation. A valid,
 previously unseen device type MUST remain usable as data when its declared
 capabilities satisfy the contract; virtual success MUST NOT be presented as
 physical-device qualification. (PC-3, PC-4)
+
+**H2-R3.** Delegation MUST come from the user. Until the Server provides a path
+for the user's delegation settings, the Hub MUST read `commands` and `never`
+from the installation file. The installation records device types and rooms as
+facts about the home.
 
 ### H3. Plans, admission, and versions
 
@@ -96,9 +136,11 @@ clock. (PC-4)
 
 **H5-R1.** Immediately before a new effect, after awaited device reads, the Hub
 MUST pull the current Server snapshot and recheck the current plan, line,
-card-Stop cancellation, household pause, and delegation. If that pull fails, it
-MUST start no new effect and report `blocked: plan_unconfirmed`; lifecycle and
-restoration of effects already started continue. (PC-4, PC-5)
+card-Stop cancellation, household pause, and the latest user delegation,
+regardless of its source. While delegation comes from the installation, the
+Hub MUST reload that file for this check. If the pull fails, it MUST start no
+new effect and report `blocked: plan_unconfirmed`; lifecycle and restoration
+of effects already started continue. (PC-4, PC-5)
 
 **H5-R2.** At execution time the Hub MUST check the active target binding,
 delegated capability and value schema, fresh availability, and
@@ -177,20 +219,23 @@ uncertainty, and restoration outcome. It MUST NOT claim a ground-truth actor,
 preference, or successful physical qualification that it did not observe.
 (PC-4, PC-6)
 
-**H8-R3.** The Hub dashboard MUST put these four views first: waiting work and
+**H8-R3.** The engineering detail MUST put these four views first: waiting work and
 its trigger; command acknowledgement versus read-back; person actions with the
 Hub-computed `by` and the C-3 payload sent to the Server; and restoration versus
 skip outcomes. It MUST identify each device as virtual or physical and visibly
 mark the class-A local-operation assumption. (PC-4, PC-5, PC-6)
 
-**H8-R4.** The dashboard's first screen MUST read as "what this home saw": a
-time-ordered list of what the Hub admitted, did and observed, one row per
-happening, with the time, the device (or home event), what happened in household
-words, who by (SPIRA, a person, unknown, or the home event), and what was sent to
-the Server for it (ack, C-3 event, C-4 run or restore result, with its delivery
-state). A header MUST name the household, the current plan version and its task
-count. The engineering detail of H8-R3 MUST remain available below or on a
-second view. (PC-4, PC-6)
+**H8-R4.** The first screen MUST group the ledger by preparation (plan ID),
+with the newest preparation kept open and older preparations collapsed on arrival.
+Each group shows its first receipt time and the latest available counts for
+situation tasks and item notices. Rows from all versions appear newest first,
+with version changes shown as subdued rows.
+Rows show local wall time, the device or home event, household wording, and a
+source marker explained in the legend. Outstanding deliveries show a pending
+or failed mark. The ledger MUST include unverified runs and restoration outcomes.
+The header names the household. At 1100 px and above, the read-only installed
+device list appears beside the ledger. The detail link MUST open H8-R3 and give
+access to individual report types and delivery records. (PC-4, PC-6)
 
 ### H9. Restart and reconciliation
 
@@ -223,6 +268,11 @@ internals is not acceptance evidence.
 
 | ID | Initial state and input | Required external observation | PCs | Requirements |
 | --- | --- | --- | --- | --- |
+| HB-AT-1 | The Hub discovers ten Simulator devices | The Server receives a C-2 registration for all ten devices. No plan targets a device while it has no delegation | PC-3 | H2-R1, H2-R2 |
+| HB-AT-2 | The user changes delegation in the App after a Server path is available | The Hub learns the change only through the Server. The App sends zero requests to the Hub | PC-3, PC-5 | H2-R3, H5-R1 |
+| HB-AT-3 | A delegated task reaches its scheduled time | The Hub runs it and reports completion only for effects confirmed by read-back | PC-4, PC-5 | H5-R1, H6-R1 |
+| HB-AT-4 | A person changes a light in the Simulator | The Hub posts `light.changed` with `by: user` and leaves that property at the person's value when restoring the task | PC-5, PC-6 | H4-R1, H4-R2, H7-R1, H8-R1 |
+| HB-AT-5 | The user turns off a running line in the App | The Hub receives a newer Server plan version and restores only eligible effects it still owns | PC-4, PC-5 | H3-R3, H3-R4, H7-R1, H7-R2 |
 | HUB-AT01 | A plan is accepted; the same version with identical or changed content and then a lower version are pulled | No additional device command or work appears; the held version never regresses; a later higher version is the only replacement | PC-4 | H3-R3, H5-R3 |
 | HUB-AT02 | One plan contains a valid delegated line, a malformed/unsupported sibling, an offline valid line, and a valid previously unseen device type | Ack admits valid lines and rejects only the malformed sibling with a contract reason; admission performs no device effect; offline is decided only at execution | PC-3, PC-4, PC-5 | H2-R1, H2-R2, H3-R1, H3-R2 |
 | HUB-AT03 | A temporary effect exists on a native device; the logical device is rebound before end | No restore command is sent to the replacement; the old effect/uncertainty remains attributed to the old binding | PC-5 | H1-R3, H7-R3 |
@@ -235,10 +285,10 @@ internals is not acceptance evidence.
 | HUB-AT12 | Two cards have waiting/running work; Stop is posted for one card through the fixture Server while a person has changed one property and started one job | Only that card's unstarted work is cancelled; its still-owned eligible mood property restores; the person change/job, the other card, and item notices remain; no Hub Stop All or direct stop endpoint exists | PC-5, PC-6 | H3-R4, H7-R1, H7-R2, H7-R4 |
 | HUB-AT15 | Five device effects occur: matching echoed operation, class-A local operation, class-B person change, external automation, and unmatched device transition; door/presence signals surround the changes | Fixture Server records `spira`, `user`, `unknown`, `unknown`, `unknown` respectively; removing door/presence signals does not change the outputs | PC-6 | H4-R1, H8-R1, H8-R2 |
 | HUB-AT16 | `ep_9031` with protective (child lock, kettle off) and mood actions active, in two runs: (a) an observed `event_end` arrives before `or_time`; (b) wall time passes `or_time` without `event_end` | (a) still-owned protective properties are released and mood properties restored. (b) no protective release command is sent and those items are reported `withheld_end_not_observed`; still-owned mood properties are restored. Under the interim rule, (b) sends no restore command at all and reports `unknown` | PC-5 | H4-R3, H7-R2 |
-| HUB-AT17 | Waiting, accepted-but-unverified, attributed person change, Server event delivery, restored, and skipped cases are present | The dashboard's first views show the four H8-R3 groups, including exact `by`, sent C-3 content, virtual/physical labels, and assumption badge | PC-4, PC-5, PC-6 | H8-R2, H8-R3 |
+| HUB-AT17 | Waiting, accepted-but-unverified, attributed person change, Server event delivery, restored, and skipped cases are present | The detail opens with the four H8-R3 groups, including exact `by`, sent C-3 content, virtual/physical labels, and assumption badge | PC-4, PC-5, PC-6 | H8-R2, H8-R3 |
 | HUB-AT18 | The three demo surfaces run with Server `DEMO_MODE` off and on | All timestamps advance on wall time; only Server-supplied absolute/duration values shorten in demo mode; Hub exposes no separate demo-clock control | PC-4 | H4-R4 |
 | HUB-AT19 | App and Hub clients replay all three contract episodes, including card reactions, C-3 events, and C-4 results | The fixture answers every App/Hub OpenAPI route with schema-valid responses; the Simulator judge reads `by` from the fixture's received C-3 records; surfaces label the peer as a fixture with no inference claim | PC-1, PC-2, PC-3, PC-4, PC-5, PC-6 | H10-R1 |
-| HUB-AT20 | Run the ep_9031 birthday scene against the fixture and open the dashboard | The first screen lists, in time order, plan admission and ack, the safety commands, guest arrival, mood commands, the oven start by a person, the light change, the end and each restore or skip, each with who and what was sent to the Server and whether it was delivered; H8-R3 detail is still reachable | PC-4, PC-6 | H8-R4 |
+| HUB-AT20 | Run the ep_9031 birthday scene against the fixture and open the dashboard | The ledger groups happenings by plan receipt, newest first. The source legend identifies the row markers and outstanding deliveries are marked. Report types and H8-R3 diagnostics are available through the detail link | PC-4, PC-6 | H8-R4 |
 
 ## 4. Open items
 
@@ -261,6 +311,6 @@ internals is not acceptance evidence.
 - **Agreed Server rule:** shared-display text (fridge, TV) carries item guidance
   only, never intent, event names, guests or themes. The Hub displays
   Server-supplied values and does not judge text content.
-- **SP-14 — Server:** the real Server at gate G0 exposes only `/health`; core
-  schema and App/Hub contract routes remain Server work. Passing H10-R1 is not
-  real-Server interoperability evidence.
+- **SP-14 — Server:** the Server exposes device registration, plan pull, and
+  plan acknowledgement. C-3 event and C-4 execution receipt routes remain
+  Server work. H10-R1 verifies delivery against the fixture Server.

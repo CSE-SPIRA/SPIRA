@@ -90,4 +90,4 @@ Every 4xx / 5xx body is `{"code", "message", "details"?}` (`schemas/error.json`)
 
 ## Secrets (COM-07)
 
-No connection URLs or keys in this repository. The hub API key is created by `POST /v1/households`, passed once by the app to the hub's local setup route, and kept in the hub's local secret store (HUB-14).
+No connection URLs or keys in this repository. `POST /v1/households` creates the Hub API key. The App displays it as a connection code, and a person enters it in the Hub's local setup. In the demo, the launcher supplies the key through `SPIRA_HUB_KEY`. The App never sends the key to the Hub over the network (HUB-14).

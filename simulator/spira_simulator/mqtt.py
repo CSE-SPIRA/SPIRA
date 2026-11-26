@@ -10,6 +10,7 @@ import paho.mqtt.client as mqtt
 from paho.mqtt.subscribeoptions import SubscribeOptions
 
 from .storage import encode
+from .story_clock import ClockState
 from .world import DEVICE_SCHEMA, World
 
 log = logging.getLogger(__name__)
@@ -32,8 +33,10 @@ class DeviceProtocol:
 
     def dispatch(self, action: Callable, *args, **kwargs):
         with self.lock:
-            for signal in action(*args, **kwargs):
+            signals = action(*args, **kwargs)
+            for signal in signals:
                 self.send("events", signal)
+            return signals
 
     def _reply_suffix(self, request_id, reply_to) -> str | None:
         if not isinstance(request_id, str) or not TOPIC_COMPONENT.fullmatch(request_id):
@@ -51,9 +54,19 @@ class DeviceProtocol:
         return f"reply/{parts[0]}/{request_id}"
 
     def receive(self, topic: str, payload: bytes, *, qos: int, retained: bool):
-        if qos != 1 or retained or not topic.startswith(f"{self.prefix}/"):
+        if qos != 1 or not topic.startswith(f"{self.prefix}/"):
             return
         request_kind = topic[len(self.prefix) + 1 :]
+        if request_kind == "clock" and retained:
+            try:
+                state = ClockState.model_validate_json(payload) if payload else None
+            except ValueError:
+                return
+            with self.lock:
+                self.world.story_clock = state
+            return
+        if retained:
+            return
         try:
             body = json.loads(payload)
         except (ValueError, RecursionError):
@@ -159,6 +172,9 @@ class Broker:
                 )
                 for kind in ("discover", "read", "command")
             ]
+            subscriptions.append((
+                f"{self.protocol.prefix}/clock", SubscribeOptions(qos=1, retainAsPublished=True),
+            ))
             client.subscribe(subscriptions)
             self.protocol.send(
                 "availability", self._availability("online"), retain=True

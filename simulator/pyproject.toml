@@ -14,6 +14,7 @@ dependencies = [
   "paho-mqtt>=2.1,<3",
   "pydantic>=2.10,<3",
   "python-multipart>=0.0.18,<1",
+  "pyyaml>=6,<7",
   "spira-contracts==0.1.0",
   "uvicorn>=0.34,<1",
 ]
@@ -26,7 +27,7 @@ where = ["."]
 include = ["spira_simulator*"]
 
 [tool.setuptools.package-data]
-spira_simulator = ["profiles/*.json", "ui/*"]
+spira_simulator = ["profiles/*.json", "ui/*", "ui/house/*", "ui/house/fonts/*", "ui/house/vendor/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

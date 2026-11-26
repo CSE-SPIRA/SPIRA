@@ -82,6 +82,7 @@ class MQTTDevice:
         self.hub_id = hub_id
         self.timeout = timeout
         self.client = None
+        self.published_clock = None
         self.pending = {}
         self.online = None
         self.world_epoch = None
@@ -110,9 +111,21 @@ class MQTTDevice:
                 pass
             finally:
                 self.client = None
+                self.published_clock = None
                 self.online = None
                 self.gap()
             await asyncio.sleep(1)
+
+    async def publish_clock(self, state):
+        client = self.client
+        if client is None or state == self.published_clock:
+            return
+        try:
+            await client.publish(f"{self.prefix}/clock", state.model_dump_json(), qos=1, retain=True)
+        except aiomqtt.MqttError:
+            return
+        if self.client is client:
+            self.published_clock = state
 
     def receive(self, message):
         topic = str(message.topic)

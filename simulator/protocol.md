@@ -49,11 +49,18 @@ Let `P` be the configured isolated MQTT prefix.
 | `P/reply/{hub_id}/{request_id}` | Simulator → Hub | discovery/read response or command acknowledgement |
 | `P/events` | Simulator → Hub | `state_report` or `event_signal` |
 | `P/availability` | Simulator → Hub | retained World process availability |
+| `P/clock` | Hub → Simulator | retained demo clock state, published when `SPIRA_DEMO_CLOCK_URL` is configured |
 
 Requests and events MUST use QoS 1 and `retained=false`.
-`P/availability` MUST use QoS 1 and `retained=true`. The device protocol has no
-demo-clock control; product and demo operation use wall time and Server
-`DEMO_MODE` under COM-15.
+`P/availability` and `P/clock` MUST use QoS 1 and `retained=true`.
+
+`P/clock` is demo-only and carries the fixture Server's clock state with
+`version`, `real_at`, `story_at`, `rate`, and nullable `ramp_until`. It has no
+device schema or request ID. The Hub and Simulator calculate story time by
+scaling real elapsed time from `real_at` by `rate` and adding it to `story_at`.
+After `ramp_until`, story time advances at 1× from the time reached at that
+deadline. The Simulator uses wall time when there is no clock state and keeps
+device job durations on real time. Use an isolated MQTT prefix for each demo.
 
 Requests use unique `request_id`; commands additionally use unique
 `operation_id`; pushed signals use unique `signal_id`. Receivers MUST tolerate
@@ -63,8 +70,8 @@ missing events were reconstructed.
 ## 3. Common message rules
 
 - JSON messages MUST contain `"schema": "spira.device.v1"`.
-- Times MUST be ISO 8601 with an offset, using the same wall clock as the rest of
-  the demo.
+- Times MUST be ISO 8601 with an offset. Device observations use the shared
+  story time when the demo clock is present and wall time otherwise.
 - `target` is the native target bound by the Hub. It is not assumed to equal the
   logical device ID sent to the Server.
 - `world_revision` is a monotonic transition order. Property `revisions` are
@@ -313,11 +320,11 @@ feed its verdict to Hub execution, C-3 creation, or Server memory.
 ## 11. Default `h_042` profile
 
 In the [default profile](spira_simulator/profiles/ep_9031.json), the Hub MUST bind
-each logical device to `mqtt:<logical_id>` and use these mappings when sending
-fixture commands as desired properties on `P/command`. Use the fresh read's
+each delegated logical device to `mqtt:<logical_id>` and use these mappings when
+sending commands as desired properties on `P/command`. Use the fresh read's
 property witnesses for conditional writes.
 
-| Logical device | Fixture command | Desired properties |
+| Logical device | Command | Desired properties |
 | --- | --- | --- |
 | `cleaner_01` | `clean` | `clean: {room}` starts a job. `clean: null` with the current `clean` witness stops a running job. |
 | `light_01` | `color`, `color_temp` | `color: {hue, saturation, brightness}` or `color: {kelvin}`. Both modes share the same witness. |
@@ -326,6 +333,8 @@ property witnesses for conditional writes.
 | `oven_01` | `set_cook_standby` | `preset: {temp_c, minutes}`. Actual cooking starts with a local device action. |
 | `fridge_01` | `show_notice` | `show_notice: <text>`. The display slot holds the latest notice. Opening the door emits `fridge.door_opened`. |
 | `plug_kettle` | `off` | `power: false`. |
+| `purifier_01` | `mode` | `mode: auto`, `turbo`, or `sleep`. |
+| `styler_01` | `set_course_standby` | `course_standby: {course}` stores `standard` or `wool_care` as a preset. The initial value is `null`. |
 
 The default profile's operator controls MUST emit these raw observations as
 `event_signal` messages.
