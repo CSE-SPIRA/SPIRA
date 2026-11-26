@@ -233,6 +233,11 @@ async function start() {
   enterGuests();
   const lightStatus = document.querySelector("#sample-light-status");
   const controls = document.querySelector("#replay");
+  function showLightChange(status) {
+    lightStatus.textContent = status;
+    house.focus();
+    house.showChangeMarkers(["light_01"], () => ({ observed: status }));
+  }
   for (const slot of slots.filter(({ kind }) => kind === "motion")) {
     const button = document.createElement("button");
     button.type = "button";
@@ -244,7 +249,7 @@ async function start() {
       }
       if (slot.id === "light_spread") {
         house.setSampleReading("light_01", pinkLightReading);
-        lightStatus.textContent = "켜짐 · 분홍색";
+        showLightChange("켜짐 · 분홍색");
       }
       showSample({ slot: slot.id, anchor: slot.anchors[0], params: {} });
     });
@@ -252,11 +257,14 @@ async function start() {
   }
   document.querySelector("#sample-light-off").addEventListener("click", () => {
     house.setSampleReading("light_01", birthdayReadings.light_01);
-    lightStatus.textContent = "꺼짐";
+    showLightChange("꺼짐");
     showSample();
   });
   house.focus();
   const cameras = [...document.querySelectorAll("#cameras button")];
+  house.onMarker((id) => {
+    for (const choice of cameras) choice.setAttribute("aria-pressed", String(!id && choice.dataset.camera === "overview"));
+  });
   for (const button of cameras) {
     button.addEventListener("click", () => {
       house.focus(birthdayCameraViews[button.dataset.camera], { instant: true });

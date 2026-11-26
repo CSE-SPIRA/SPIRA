@@ -13,7 +13,7 @@
 {% endmacro %}
 {% macro device_marker(device) %}
   {% set full = device.changed or device.planned %}
-  <div class="viewer-marker" data-device="{{ device.id }}" data-values="{{ device.visual_values | tojson | forceescape }}"{% if device.person_action %} data-person-at="{{ device.person_action.at }}" data-person-figure="{{ device.person_action.figure }}"{% endif %}{% if device.changed %} data-changed=""{% endif %}{% if not full %} data-resting=""{% endif %}{% if full or device.observation_label or device.physical %} data-required=""{% endif %}>
+  <div class="viewer-marker" data-device="{{ device.id }}" data-device-name="{{ device.name }}" data-values="{{ device.visual_values | tojson | forceescape }}"{% if device.change_at %} data-change-at="{{ device.change_at }}"{% endif %}{% if device.person_action %} data-person-at="{{ device.person_action.at }}" data-person-figure="{{ device.person_action.figure }}"{% endif %}{% if device.changed %} data-changed=""{% endif %}{% if not full %} data-resting=""{% endif %}{% if full or device.observation_label or device.physical %} data-required=""{% endif %}>
     <article class="home-device" data-observation="{{ device.observation }}"{% if device.change %} data-change="{{ device.change[0] }}"{% endif %}>
       <h3{% if not full and device.content is not none %} title="{{ device.content }}"{% endif %}>{{ device.name }}
         {% if device.change and device.change[0] == "spira" %}<span class="spira-dot" role="img" aria-label="SPIRA가 설정했어요"></span>{% endif %}
@@ -54,7 +54,7 @@
   <div class="house-layout">
     {% if not fragment %}
     <figure id="viewer-house" class="house-view" aria-label="현관, 거실, 주방의 입체 모형">
-      <div id="viewer-world" class="house-world" aria-hidden="true"></div>
+      <div id="viewer-world" class="house-world"></div>
       <div class="room-key">
         {% for room in ["entrance", "living_room", "kitchen"] %}
         <span>{{ room_names[room] }}</span>

@@ -4,6 +4,50 @@ import { createFridgePanel, createLivingLight, entrancePresentation, fitViewerCa
 import { MeshStandardMaterial, OrthographicCamera, PointLight, SRGBColorSpace, Vector3 } from "../spira_simulator/ui/house/vendor/three.module.min.js";
 import { houseHarness } from "./house-fixture.mjs";
 
+test("change markers stay together until selected and toggle the close-up by click or Escape", (t) => {
+  const width = 920, height = 560;
+  const view = houseHarness(t, { width, height });
+  const { house, stage, rendererCanvas } = view;
+  const layer = stage.children.find(({ className }) => className === "house-change-markers");
+  const detail = stage.children.find(({ className }) => className === "house-change-detail");
+  house.showChangeMarkers(["display_01", "light_01", "unknown"], id =>
+    id === "light_01" ? { observed: "노란 빛" } : {});
+  view.draw(100);
+  const overview = view.camera.position.toArray();
+  const [display, light] = layer.children;
+  assert.equal(layer.children.length, 2);
+  assert.ok(layer.children.every(marker => marker.type === "button" && !marker.hidden));
+  assert.match(light.getAttribute("aria-label"), /거실 조명 · 변경 보기/);
+  assert.notDeepEqual([display.style.left, display.style.top], [light.style.left, light.style.top]);
+  assert.ok(detail.hidden);
+
+  light.onclick();
+  view.draw(2000);
+  assert.ok(display.hidden);
+  assert.equal(light.getAttribute("aria-expanded"), "true");
+  assert.equal(detail.textContent, "거실 조명 · 노란 빛");
+  assert.notDeepEqual(view.camera.position.toArray(), overview);
+  light.onclick();
+  view.draw(4000);
+  assert.ok(detail.hidden);
+  assert.deepEqual(view.camera.position.toArray(), overview);
+
+  view.scene.updateMatrixWorld(true);
+  const point = new Vector3(-.70, 1.52, -3.419).project(view.camera);
+  rendererCanvas.onclick({ clientX: (point.x + 1) * width / 2, clientY: (1 - point.y) * height / 2 });
+  assert.equal(display.getAttribute("aria-expanded"), "true");
+  assert.equal(detail.hidden, false);
+  document.onkeydown({ key: "Escape", preventDefault() {} });
+  assert.equal(document.activeElement, display);
+  assert.ok(detail.hidden);
+  assert.ok(layer.children.every(marker => !marker.hidden));
+
+  light.onclick();
+  house.clearChangeMarkers();
+  assert.ok(detail.hidden);
+  assert.deepEqual(layer.children, []);
+});
+
 test("observed light values drive the pendant, point light, and room glow", () => {
   const lamp = new PointLight("#ffffff", 0);
   const material = new MeshStandardMaterial();

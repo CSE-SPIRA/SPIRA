@@ -336,9 +336,11 @@ def viewer_world(world: World) -> dict:
         now = world.clock()
         snapshot = world.snapshot(for_display=True)
         changes = {}
+        change_times = {}
         person_actions = {}
         for fact in world.store.latest_truth():
             target = fact["target"]
+            change_times[target] = fact["occurred_at"]
             if fact["actor"] == "device_self" and fact["event_type"].endswith(".completed"):
                 fact = world.store.job_start(target, fact["job_id"]) or fact
             change = changes[target] = latest_change(fact)
@@ -380,6 +382,7 @@ def viewer_world(world: World) -> dict:
             if key in report["values"]
         }
         if report["observation"] == "current":
+            device["change_at"] = change_times.get(report["target"])
             device["person_action"] = person_actions.get(report["target"])
         notice = report["values"].get("show_notice")
         if notice:

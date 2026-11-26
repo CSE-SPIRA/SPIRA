@@ -19,10 +19,25 @@ export function houseHarness(t, { width = 680, height = 450, ...options } = {}) 
   const canvases = [], images = [], timers = new Map();
   const noop = () => {};
   const gradient = () => ({ stops: [], addColorStop(at, color) { this.stops.push([at, color]); } });
-  const element = () => ({ append: noop, setAttribute: noop, hasAttribute: () => false,
-    classList: { toggle: noop }, style: { setProperty: noop } });
+  const element = () => {
+    const attributes = new Map();
+    return {
+      children: [],
+      append(...children) { this.children.push(...children); for (const child of children) child.parent = this; },
+      addEventListener(type, callback) { this[`on${type}`] = callback; },
+      focus() { document.activeElement = this; },
+      remove() { this.parent.children = this.parent.children.filter(child => child !== this); },
+      setAttribute(key, value) { attributes.set(key, value); },
+      getAttribute: key => attributes.get(key),
+      hasAttribute: key => attributes.has(key),
+      classList: { toggle: noop },
+      style: { setProperty: noop },
+    };
+  };
   const globals = {
     document: {
+      addEventListener(type, listener) { this[`on${type}`] = listener; },
+      removeEventListener(type) { delete this[`on${type}`]; },
       fonts: { load: () => new Promise(noop) },
       createElement(tag) {
         if (tag !== "canvas") return element();
@@ -52,17 +67,19 @@ export function houseHarness(t, { width = 680, height = 450, ...options } = {}) 
     Object.defineProperty(globalThis, key, { value, configurable: true });
     t.after(() => descriptor ? Object.defineProperty(globalThis, key, descriptor) : delete globalThis[key]);
   }
-  const stage = { clientWidth: width, clientHeight: height, append: noop, getBoundingClientRect: () => ({ width }) };
+  const rect = () => ({ left: 0, top: 0, width, height });
+  const canvas = { ...element(), getBoundingClientRect: rect };
+  const stage = { ...element(), ownerDocument: document, clientWidth: width, clientHeight: height, getBoundingClientRect: rect };
   const house = createHouse(stage, {
     createRenderer: () => ({
-      shadowMap: {}, capabilities: { getMaxAnisotropy: () => 1 }, getPixelRatio: () => 1,
+      domElement: canvas, shadowMap: {}, capabilities: { getMaxAnisotropy: () => 1 }, getPixelRatio: () => 1,
       setPixelRatio: noop, setSize: noop, render(value, view) { scene = value; camera = view; },
     }),
     ...options,
   });
   house.focus(undefined, { instant: true });
   return {
-    house, images,
+    house, images, stage, rendererCanvas: canvas,
     get scene() { return scene; },
     get camera() { return camera; },
     canvas: width => canvases.find(canvas => canvas.width === width).calls,

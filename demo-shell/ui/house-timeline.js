@@ -4,6 +4,19 @@ import { esc, rows } from "./markup.js";
 import { withSceneArtwork } from "./artwork/scene.js";
 import { buildMoments, closeView, momentScene, sendScene } from "./scene-rules.js";
 
+function changedDevices(moment, moments, hub, episodeId) {
+  if (moment.kind === "person") return moment.focusDevices;
+  const guest = moment.kind === "guests" ? moment.id : moment.follows;
+  const related = guest ? moments.filter(({ id, follows }) => id === guest || follows === guest) : [moment];
+  const observed = related.flatMap(({ lines }) =>
+    lines?.flatMap(({ observed }) => observed.map(({ device }) => device)) ?? []);
+  const restored = moment.kind === "end" ? (hub?.restoration ?? []).flatMap(({ packet }) =>
+    packet.plan_id === episodeId && Date.parse(packet.at) >= Date.parse(moment.at)
+      ? packet.items.filter(({ status }) => status === "restored").map(({ device }) => device)
+      : []) : [];
+  return [...new Set([...observed, ...restored])];
+}
+
 export function createHouseTimeline(context, ui) {
   const { state, RECORDING, $, notice, REPLAY, observe, sleep } = context;
 
@@ -32,7 +45,11 @@ export function createHouseTimeline(context, ui) {
 
   function selectHouseMoment(moment) {
     state.homeId = moment.id;
-    ui.recording.log("house", { moment: ui.recording.recordedMoment(moment) });
+    ui.recording.log("house", { moment: recordedHouseMoment(moment) });
+  }
+
+  function recordedHouseMoment(moment) {
+    return { ...ui.recording.recordedMoment(moment), follows: moment.follows };
   }
 
   function updateHousePresentation(moment) {
@@ -59,7 +76,7 @@ export function createHouseTimeline(context, ui) {
     const stable = JSON.stringify({ ...scene, artwork, slots: scene.slots.slice(0, scene.slots.length - motions.length) });
     if (state.appliedScene === stable && !motions.length) return;
     if (sendScene(state.house, state.validateScene, withSceneArtwork(scene, artwork), () =>
-      ui.recording.log("scene", { moment: ui.recording.recordedMoment(moment), scene, artwork }))) {
+      ui.recording.log("scene", { moment: recordedHouseMoment(moment), scene, artwork }))) {
       state.appliedScene = stable;
       for (const line of motions) state.playedMotion.add(motionKey(line));
     }
@@ -81,7 +98,7 @@ export function createHouseTimeline(context, ui) {
     }
     updateHousePresentation(current);
     updateScene(current, moments);
-    directHouse(current, instant);
+    directHouse(current, instant, moments);
     $("home-time").textContent = current.story;
     $("home-title").textContent = current.title;
     $("home-caption").textContent = current.lead ?? "";
@@ -112,9 +129,6 @@ export function createHouseTimeline(context, ui) {
     }
   }
 
-  const CLOSEUP_MS = 6000;
-  let closeupTimer = 0;
-
   function roomCamera(room) {
     // Older offline recordings may have cached a renderer without room presets.
     const cameras = state.houseModule?.HOUSE_ROOM_VIEWS ?? {};
@@ -128,29 +142,25 @@ export function createHouseTimeline(context, ui) {
     }
   }
 
-  function directHouse(moment, instant = false) {
+  function directHouse(moment, instant = false, moments = timeline()) {
     if (!state.house) return;
     state.house.setEntrance({ signal: moment.signal ?? "", packagePresent: moment.signal === "package" });
-    if (state.roomCameraMoment === moment.id) return;
-    state.roomCameraMoment = null;
-    const close = closeView(moment, state.chain.devices);
-    const key = JSON.stringify([moment.id, moment.room, close]);
-    if (!instant && key === state.cameraMoment) return;
-    state.cameraMoment = key;
-    clearTimeout(closeupTimer);
-    const room = roomCamera(moment.room) ?? roomCamera("overview");
-    const closeup = !instant && close;
-    $("view").toggleAttribute("data-closeup", Boolean(closeup));
-    selectRoomCamera(closeup ? null : moment.room);
-    state.house.focus(closeup || room, { instant });
-    if (closeup) {
-      closeupTimer = setTimeout(() => {
-        if (state.cameraMoment !== key || state.page !== "house") return;
-        $("view").removeAttribute("data-closeup");
-        selectRoomCamera(moment.room);
-        state.house.focus(room);
-      }, CLOSEUP_MS);
+    if (instant || state.cameraMoment !== moment.id) {
+      state.cameraMoment = moment.id;
+      $("view").removeAttribute("data-closeup");
+      selectRoomCamera(null);
+      state.house.focus(undefined, { instant });
     }
+    // Older saved runs can carry a renderer from before the marker controls.
+    state.house.onMarker?.((id) => {
+      $("view").toggleAttribute("data-closeup", Boolean(id));
+      selectRoomCamera(null);
+    });
+    state.house.showChangeMarkers?.(changedDevices(moment, moments, state.hub, state.episodeId), (id) => {
+      const device = state.chain.devices.find(({ logicalId }) => logicalId === id);
+      const view = closeView({ ...moment, focusDevices: [id] }, state.chain.devices) ?? roomCamera(device?.room);
+      return { view };
+    });
   }
 
   function goHouse(index, { followGuest = false } = {}) {
@@ -242,6 +252,7 @@ export function createHouseTimeline(context, ui) {
 
   function openRecord() {
     if (!canEnterHouse()) return;
+    state.house?.focus();
     state.recordOpen = state.recordRequested = true;
     state.mapOpen = false;
     $("phone-content").scrollTop = 0;
@@ -261,11 +272,8 @@ export function createHouseTimeline(context, ui) {
       button.addEventListener("click", () => {
         const moment = currentMoment();
         if (!state.house || !moment) return;
-        clearTimeout(closeupTimer);
-        state.roomCameraMoment = moment.id;
-        $("view").removeAttribute("data-closeup");
-        selectRoomCamera(room);
         state.house.focus(roomCamera(room));
+        selectRoomCamera(room);
       });
     }
   }

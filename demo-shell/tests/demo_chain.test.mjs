@@ -89,6 +89,7 @@ async function openShell(t, query, reply, withHouse = false) {
   const roomButtons = [...shellHtml.matchAll(/<button[^>]+data-room="([^"]+)"/g)]
     .map(([, room]) => Object.assign(element(), { dataset: { room } }));
   const cameraMoves = [];
+  let markerIds = [], markerDescriptions, markerListener, selectedMarker;
   const drawn = [];
   if (withHouse) byId("world").hasChildNodes = () => byId("world").children.length > 0;
   const frameDimensions = Object.fromEntries([...shellCss.matchAll(/--stage-(width|height): (\d+)px/g)]
@@ -105,7 +106,15 @@ async function openShell(t, query, reply, withHouse = false) {
     sceneRenderer: withHouse ? (stage) => {
       stage.append({});
       return {
-        resize() {}, focus(view) { cameraMoves.push(view); }, setMarkers() {}, setEntrance() {}, setPresentation() {}, clearScene() {},
+        resize() {},
+        focus(view) {
+          cameraMoves.push(view);
+          if (selectedMarker) markerListener(null);
+          selectedMarker = null;
+        },
+        setMarkers() {}, setEntrance() {}, setPresentation() {}, clearScene() {},
+        onMarker(callback) { markerListener = callback; },
+        showChangeMarkers(ids, describe) { markerIds = ids; markerDescriptions = describe; },
         setScene(scene) { drawn.push(scene); return { ok: true }; },
       };
     } : undefined,
@@ -225,6 +234,13 @@ async function openShell(t, query, reply, withHouse = false) {
   await settle();
   return {
     byId, pageButtons, roomButtons, cameraMoves, recordings, recordingPaths, drawn, confirmations, navigations,
+    get changeMarkers() { return markerIds; },
+    selectMarker(id) {
+      assert.ok(markerIds.includes(id));
+      selectedMarker = id;
+      cameraMoves.push(markerDescriptions(id).view);
+      markerListener(id);
+    },
     pressKey(key) {
       const event = { key, target: { closest: () => null }, preventDefault() { this.handled = true; } };
       document.onkeydown(event);
@@ -1276,7 +1292,7 @@ test("read-only rehearsal crosses the observed house moments without posting act
   assert.deepEqual(writes, []);
 });
 
-test("a live guest moment follows the verified mood change without a room-button press", async (t) => {
+test("a live guest moment marks verified changes together and keeps the overview until selected", async (t) => {
   const input = sceneFixture();
   const { episode, rationale, card, hub, facts, viewer, devices, relations } = input;
   const guest = facts.find(({ event }) => event === "guest_arrived");
@@ -1303,7 +1319,8 @@ test("a live guest moment follows the verified mood change without a room-button
   }) } });
   await settle();
   assert.equal(shell.byId("home-title").textContent, "손님 도착");
-  assert.deepEqual(shell.cameraMoves.at(-1), HOUSE_ROOM_VIEWS.entrance);
+  assert.equal(shell.cameraMoves.at(-1), undefined);
+  assert.deepEqual(shell.changeMarkers, []);
   await shell.runTimer(800);
   assert.equal(shell.byId("home-title").textContent, "손님 도착");
 
@@ -1313,17 +1330,26 @@ test("a live guest moment follows the verified mood change without a room-button
   const moment = buildMoments({ ...input, chain, wording }).find(({ id }) => id === "line:t_mood#3");
   assert.equal(shell.byId("home-title").textContent, moment.title);
   assert.match(moment.title, /^TV · .*조명$/);
-  assert.equal(shell.byId("view").getAttribute("data-closeup"), "");
-  assert.deepEqual(shell.cameraMoves.at(-1), closeView(moment, chain.devices));
+  assert.equal(shell.byId("view").getAttribute("data-closeup"), undefined);
+  assert.equal(shell.cameraMoves.at(-1), undefined);
+  assert.deepEqual(shell.changeMarkers, [readBack[0].device]);
   const moves = shell.cameraMoves.length;
   moodLine.observed = readBack;
   await shell.runTimer(800);
   assert.equal(shell.cameraMoves.length, moves);
+  assert.deepEqual(shell.changeMarkers, ["display_01", "light_01"]);
+  assert.match(shell.byId("phone-content").innerHTML, /app-card/);
+  shell.selectMarker("light_01");
+  assert.equal(shell.byId("view").getAttribute("data-closeup"), "");
+  const mood = buildMoments({ ...input, chain, wording }).find(({ id }) => id === moment.id);
+  assert.deepEqual(shell.cameraMoves.at(-1), closeView({ ...mood, focusDevices: ["light_01"] }, chain.devices));
+  assert.match(shell.byId("phone-content").innerHTML, /app-card/);
 
   shell.byId("previous").onclick();
   await shell.runTimer(800);
   assert.equal(shell.byId("home-title").textContent, "손님 도착");
-  assert.deepEqual(shell.cameraMoves.at(-1), HOUSE_ROOM_VIEWS.entrance);
+  assert.equal(shell.cameraMoves.at(-1), undefined);
+  assert.equal(shell.byId("view").getAttribute("data-closeup"), undefined);
 });
 
 test("the presenter alone contacts the operator and each scene sent is recorded", async (t) => {
@@ -1403,7 +1429,8 @@ test("each shell room button selects its Simulator camera and holds it through o
     return new Response(null, { status: 404 });
   }, true);
   shell.byId("next").onclick();
-  assert.equal(shell.byId("view").getAttribute("data-closeup"), "");
+  assert.equal(shell.byId("view").getAttribute("data-closeup"), undefined);
+  assert.equal(shell.cameraMoves.at(-1), undefined);
   assert.deepEqual(shell.roomButtons.map(({ textContent }) => textContent), ["현관", "거실", "주방"]);
   for (const button of shell.roomButtons) {
     button.onclick();
@@ -1415,7 +1442,8 @@ test("each shell room button selects its Simulator camera and holds it through o
   await shell.runTimer(800);
   assert.equal(shell.cameraMoves.length, moves);
   shell.byId("next").onclick();
-  assert.equal(shell.byId("view").getAttribute("data-closeup"), "");
+  assert.equal(shell.byId("view").getAttribute("data-closeup"), undefined);
+  assert.equal(shell.cameraMoves.at(-1), undefined);
 });
 
 test("a saved run replays the judgment, scene snapshots and ending with upstream fetch blocked", async (t) => {

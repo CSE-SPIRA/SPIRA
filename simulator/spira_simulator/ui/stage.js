@@ -5,6 +5,7 @@ let house;
 let replaceMarkers;
 let entrancePresentation;
 let roomViews;
+let previousChanges;
 
 function selectRoom() {
   let selected;
@@ -31,7 +32,20 @@ function renderHouse() {
 
   house.setEntrance(entrancePresentation(signals));
   house.setPresentation(presentation);
-  house.setMarkers(markers);
+  house.setMarkers(markers, { placeDevices: false });
+  const changes = new Map(devices.filter(({ dataset }) => dataset.changeAt)
+    .map(({ dataset }) => [dataset.device, JSON.stringify([dataset.changeAt, dataset.values])]));
+  if (previousChanges) {
+    const changed = [...changes].filter(([id, observation]) => observation !== previousChanges.get(id))
+      .map(([id]) => id);
+    if (changed.length) {
+      house.focus();
+      house.showChangeMarkers(changed);
+    }
+    for (const [id, observation] of changes) previousChanges.set(id, observation);
+  } else {
+    previousChanges = changes;
+  }
 }
 
 async function openHouse() {
