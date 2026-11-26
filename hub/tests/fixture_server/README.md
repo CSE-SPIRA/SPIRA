@@ -35,12 +35,14 @@ through `next-order`. After that upload, the default applies again.
 
 Each upload sets the story clock to the recorded episode's `shared_at`.
 The plan's triggers, lifecycle times, linked calendar and wording come from
-the episode fixtures. The quiet window uses the Server's normal `quiet_s`
-from the share. The fixture releases items and then evidence, intents, tasks,
-and the card and plan on the story clock. The other offsets are assumptions
-in [`JUDGMENT_SECONDS`](scene_support.py). An evidence-only rationale has
-`intents: []` and `none_reason: null`. A completed no-intent result carries
-the recorded reason. Fixed-date replays serve the committed snapshots.
+the episode fixtures. With default pacing, S1 stores items 4 story seconds
+after the share. S2 follows 2 seconds later and S3, S4 and S5 follow at
+3-second intervals. These gaps are defined in [`STAGE_GAPS`](scene_support.py).
+The episode is readable from acceptance. Rationale begins at S2 with
+evidence, `intents: []` and `none_reason: null`. S3 fills the intents or a
+recorded no-intent reason. S5 publishes plans, cards, task lists and card IDs.
+The family scene has no committed rationale, and fixed-date replays serve
+their committed snapshots. See the [fixture specification](spec.md).
 
 The demo launcher starts the clock one minute before the selected episode's
 share time. A standalone live fixture starts on wall time until a share or a
@@ -92,8 +94,9 @@ They are available when live scenes are enabled and use no App or Hub key.
   recorded moment. Moment controls use the same lead-in as the demo clock.
   Sharing a new recording anchors the clock at its recorded share time at 1×.
 - **판단 속도** adjusts the current episode's unfinished stages or the next
-  new share. The server preset uses the normal `quiet_s` and the existing
-  assumed offsets. Fast and slow are rehearsal assumptions. A hold keeps
+  new share. The Server pace and second-capture case use the normal `quiet_s`.
+  Fast and slow are rehearsal assumptions. For immediate publication on the
+  next share, set the custom quiet time and all stage offsets to zero. A hold keeps
   the selected stage pending. Holding at receipt leaves the episode in
   `received`. Release makes the remaining judgment available immediately.
   Task trigger and end times stay on the recorded schedule.
@@ -167,18 +170,18 @@ and the [Server spec](../../../server/spec.md).
 | `unclassified` | 분류되지 않은 의도 | common.json#ReservedIntent · server/spec.md:729 | No. Needs recorded unclassified rationale, card and plan. |
 | `two-cards` | 한 주문에 카드 두 장 | contracts/rules.md:11 | No. Needs recorded rationale, two cards and their matching plan. |
 | `judgment-failed` | 읽기 이후 판단 실패 | server/spec.md:421 · contracts/schemas/episode.json | No. Needs public S2–S4 failure response and an agreed client-visible signal. |
-| `server-pace` | 서버 기본 숫자 | server/config/numbers.yaml · fixture JUDGMENT_SECONDS (assumed) | Yes |
-| `fast` | 빠른 리허설 | fixture JUDGMENT_SECONDS (assumed) | Yes |
-| `slow` | 느린 LLM | fixture JUDGMENT_SECONDS × 4 (assumed) | Yes |
-| `stuck-received` | 공유 접수 단계에서 멈춤 | fixture JUDGMENT_SECONDS (assumed) | Yes |
-| `stuck-reading` | 읽기 시작 단계에서 멈춤 | fixture JUDGMENT_SECONDS (assumed) | Yes |
-| `stuck-items` | 상품 읽기 완료 단계에서 멈춤 | fixture JUDGMENT_SECONDS (assumed) | Yes |
-| `stuck-quiet_window` | 조용한 시간 종료 단계에서 멈춤 | fixture JUDGMENT_SECONDS (assumed) | Yes |
-| `stuck-evidence` | 근거 단계에서 멈춤 | fixture JUDGMENT_SECONDS (assumed) | Yes |
-| `stuck-intents` | 의도 단계에서 멈춤 | fixture JUDGMENT_SECONDS (assumed) | Yes |
-| `stuck-tasks` | 작업 단계에서 멈춤 | fixture JUDGMENT_SECONDS (assumed) | Yes |
-| `stuck-published` | 카드·계획 공개 단계에서 멈춤 | fixture JUDGMENT_SECONDS (assumed) | Yes |
-| `release-now` | 판단 지금 끝내기 | fixture JUDGMENT_SECONDS (assumed) | Yes |
+| `server-pace` | 서버 기본 숫자 | server/config/numbers.yaml · fixture STAGE_GAPS (assumed) | Yes |
+| `fast` | 빠른 리허설 | fixture STAGE_GAPS (assumed) | Yes |
+| `slow` | 느린 LLM | fixture STAGE_GAPS × 4 (assumed) | Yes |
+| `stuck-received` | 공유 접수 단계에서 멈춤 | fixture STAGE_GAPS (assumed) | Yes |
+| `stuck-reading` | 읽기 시작 단계에서 멈춤 | fixture STAGE_GAPS (assumed) | Yes |
+| `stuck-items` | 상품 읽기 완료 단계에서 멈춤 | fixture STAGE_GAPS (assumed) | Yes |
+| `stuck-quiet_window` | 조용한 시간 종료 단계에서 멈춤 | fixture STAGE_GAPS (assumed) | Yes |
+| `stuck-evidence` | 근거 단계에서 멈춤 | fixture STAGE_GAPS (assumed) | Yes |
+| `stuck-intents` | 의도 단계에서 멈춤 | fixture STAGE_GAPS (assumed) | Yes |
+| `stuck-tasks` | 작업 단계에서 멈춤 | fixture STAGE_GAPS (assumed) | Yes |
+| `stuck-published` | 카드·계획 공개 단계에서 멈춤 | fixture STAGE_GAPS (assumed) | Yes |
+| `release-now` | 판단 지금 끝내기 | fixture STAGE_GAPS (assumed) | Yes |
 | `partial-rationale` | 중간 근거만 보기 | ep_9031/rationale.json · live projection | Yes (h_042) |
 | `package` | 택배 들이기 · 계획 새 버전 | ep_9031/events.json · contracts/rules.md:35,39 | Yes (h_042) |
 | `equal-plan` | 같은 계획 버전 재전송 | contracts/rules.md:36 · recorded plan | Yes |

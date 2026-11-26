@@ -140,7 +140,7 @@ def test_clock_actions_and_countdown(client):
     assert 0 < resumed["seconds_until_next_stage"] <= .25
     moment = resumed["moments"][0]
     ramp = action(client, "clock", action="advance", moment=moment["id"], over_seconds=10)["clock"]
-    assert ramp["ramp_active"] and ramp["rate"] > 1
+    assert ramp["ramp_active"] and 0 < ramp["rate"] < 1
     error(client.post(f"{CONTROL}/clock", json={"action": "advance", "at": SHARE}), 409, "invalid_request")
     jump(client, SHARE)
     assert action(client, "clock", action="next")["clock"]["ramp_active"]
@@ -326,6 +326,22 @@ def test_partial_rationale(client):
     finished = action(client, "judgment", preset="release", scope="current")
     assert finished["cards"][0]["episode_id"] == "ep_9031"
     assert body(client.get(EPISODE + "/rationale"), schema="rationale")["intents"] == recorded("rationale")["intents"]
+
+
+def test_zero_judgment_gaps_publish_on_acceptance(client):
+    offsets = dict.fromkeys((stage for stage in STAGE_NAMES if stage not in ("received", "quiet_window")), 0)
+    action(client, "judgment", preset="custom", quiet_seconds=0, offsets=offsets)
+    accepted = accept(client)
+    snapshot = state(client)
+    assert snapshot["episode"]["id"] == accepted["episode_id"]
+    assert all(step["done"] and step["at"] == snapshot["episode"]["shared_at"] for step in snapshot["timeline"])
+    episode = body(client.get(EPISODE), schema="episode")
+    assert episode["items"] == recorded("episode")["items"]
+    assert episode["item_tasks"] and episode["card_ids"] == ["nc_331"]
+    rationale = body(client.get(EPISODE + "/rationale"), schema="rationale")
+    assert rationale["intents"] == recorded("rationale")["intents"]
+    assert rationale["item_tasks"] == episode["item_tasks"]
+    assert snapshot["cards"][0]["card_id"] == "nc_331"
 
 
 def test_cannot_retime_a_stage_already_passed(client):
@@ -541,7 +557,7 @@ def test_realistic_preset_jitters_and_bursts_and_injects_one_retryable_503(clien
     timeline = stages(state(client))
     assert datetime.fromisoformat(timeline["items"]["at"]) - datetime.fromisoformat(
         timeline["received"]["at"]
-    ) == timedelta(seconds=13)
+    ) == timedelta(seconds=11)
     assert timeline["tasks"]["at"] == timeline["published"]["at"]
     jump(client, timeline["intents"]["at"])
     path = f"{EPISODE}/rationale"

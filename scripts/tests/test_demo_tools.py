@@ -106,21 +106,26 @@ def test_demo_fixture_keeps_clock_state_on_restart(tmp_path):
     assert datetime.fromisoformat(cards["server_time"]) >= datetime.fromisoformat(after["now"])
 
 
-def test_real_launcher_requires_environment_keys(monkeypatch, capsys):
+@pytest.mark.parametrize("missing", ["SPIRA_HOUSEHOLD_ID", "SPIRA_HUB_KEY", "SPIRA_APP_TOKEN"])
+def test_real_launcher_requires_environment_keys(monkeypatch, capsys, missing):
     from scripts import demo_up
 
-    monkeypatch.delenv("SPIRA_HUB_KEY", raising=False)
-    monkeypatch.delenv("SPIRA_APP_TOKEN", raising=False)
+    for name, value in {"SPIRA_HOUSEHOLD_ID": "h_123", "SPIRA_HUB_KEY": "test-hub-key",
+                        "SPIRA_APP_TOKEN": "test-app-token"}.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv(missing)
     monkeypatch.setattr(sys, "argv", ["demo-up", "--server", "http://127.0.0.1:1"])
     assert demo_up.main() == 1
-    guide = capsys.readouterr().err
-    for word in ("POST /v1/households", "APP_DEMO_TOKEN", "SPIRA_APP_TOKEN", "hub_api_key", "SPIRA_HUB_KEY"):
-        assert word in guide
+    assert capsys.readouterr().err.splitlines() == [
+        "Server mode requires SPIRA_HOUSEHOLD_ID, SPIRA_HUB_KEY, SPIRA_APP_TOKEN.",
+        "Run server/scripts/demo_home.py, then run `source server/out/demo.env`.",
+    ]
 
 
 def test_real_launcher_checks_reachability_before_running(monkeypatch, capsys):
     from scripts import demo_up
 
+    monkeypatch.setenv("SPIRA_HOUSEHOLD_ID", "h_123")
     monkeypatch.setenv("SPIRA_HUB_KEY", "test-hub-key")
     monkeypatch.setenv("SPIRA_APP_TOKEN", "test-app-token")
     with socket.socket() as reserved:
@@ -158,6 +163,29 @@ def test_real_app_proxy_uses_backend_credentials(monkeypatch):
         ("http://server.test/v1/households/h_123/cards",
          {"Accept": "application/json", "Authorization": "Bearer test-app-token"}, {"since": "2026-10-15"}),
     ]
+
+
+def test_real_app_proxy_forwards_phone_calendar_with_backend_credentials(monkeypatch):
+    for name, value in {
+        "SPIRA_SERVER_URL": "http://server.test", "SPIRA_HOUSEHOLD": "h_123",
+        "SPIRA_WEB_ORIGIN": "", "SPIRA_PHONE_TOKEN": "demo", "SPIRA_APP_TOKEN": "test-app-token",
+    }.items():
+        monkeypatch.setenv(name, value)
+    calls = []
+
+    async def upstream(self, method, url, **kwargs):
+        calls.append((method, url, kwargs["headers"]["Authorization"], json.loads(kwargs["content"])))
+        return httpx.Response(202)
+
+    monkeypatch.setattr(httpx.AsyncClient, "request", upstream)
+    path = "/v1/households/h_123/calendar"
+    calendar = {"events": []}
+    with TestClient(create_app()) as client:
+        assert client.put(path, json=calendar).status_code == 403
+        phone = {"Authorization": "Bearer demo"}
+        assert client.put(path, headers={**phone, "Origin": "http://other.test"}, json=calendar).status_code == 403
+        assert client.put(path, headers=phone, json=calendar).status_code == 202
+    assert calls == [("PUT", f"http://server.test{path}", "Bearer test-app-token", calendar)]
 
 
 def test_stack_starts_without_flutter(tmp_path):
@@ -240,13 +268,14 @@ def wait_for(probe, seconds=30):
 
 
 @contextmanager
-def local_launcher(tmp_path, *options, env=None, app_web=None):
+def local_launcher(tmp_path, *options, env=None, app_web=None, build_web=False):
     if shutil.which("mosquitto") is None:
         pytest.skip("Mosquitto is required for the live launcher test")
     ports = choose_ports(dict.fromkeys(("sim", "fixture", "mqtt", "hub", "shell", "start", "proxy", "app"), 0), "127.0.0.1")
+    app_options = ["--app-web", str(app_web)] if app_web is not None else ([] if build_web else ["--no-app"])
     command = [
         sys.executable, str(ROOT / "scripts/demo_up.py"),
-        *(["--no-app"] if app_web is None else ["--app-web", str(app_web)]),
+        *app_options,
         "--proxy-port", str(ports["proxy"]), "--web-port", str(ports["app"]),
         "--port", str(ports["sim"]), "--shell-port", str(ports["shell"]),
         "--start-port", str(ports["start"]), "--peer-ports",
@@ -396,13 +425,12 @@ def test_launcher_reset_in_server_mode_uses_only_local_reset_routes(tmp_path, wi
         thread.start()
         url = f"http://127.0.0.1:{server.server_port}"
         try:
-            keys = {"SPIRA_HUB_KEY": "test-hub-key", "SPIRA_APP_TOKEN": "test-app-token"}
+            keys = {"SPIRA_HOUSEHOLD_ID": "h_123", "SPIRA_HUB_KEY": "test-hub-key", "SPIRA_APP_TOKEN": "test-app-token"}
             app_web = tmp_path / "web" if with_app else None
             if app_web is not None:
                 app_web.mkdir()
                 (app_web / "index.html").write_text("Server App")
-            with local_launcher(tmp_path, "--server", url, "--household", "h_123",
-                                env=keys, app_web=app_web) as (client, urls, logs):
+            with local_launcher(tmp_path, "--server", url, env=keys, app_web=app_web) as (client, urls, logs):
                 shell = urls["shell"]
                 config = client.get(f"{shell}/demo/api/config").raise_for_status().json()
                 assert config["reset"] and not config["fixture"] and config["household_id"] == "h_123"
@@ -427,11 +455,13 @@ def test_launcher_reset_in_server_mode_uses_only_local_reset_routes(tmp_path, wi
                 assert after["world_epoch"] != before["world_epoch"] and after["household_id"] == "h_123"
                 assert client.get(recording_url).raise_for_status().json() == saved
                 assert not (logs / "fixture.log").exists()
-                # The Hub resumes its ordinary plan polling. The launcher makes its
-                # Server health/clock probes once, at initial startup only.
+                startup = (tmp_path / "launcher.log").read_text()
+                assert "The birthday runs in real minutes on the Server's clock under DEMO_MODE." in startup
+                assert ("PUT", "/v1/households/h_123/calendar") not in calls
+                # The Hub resumes its ordinary plan polling after the local reset.
                 plan_poll = ("GET", "/v1/hub/plans")
                 assert plan_poll in calls
-                initial = [("GET", "/health"), ("GET", "/v1/demo/clock")]
+                initial = [("GET", "/health")]
                 if with_app:
                     initial.extend([("GET", "/health"), ("GET", episode_feed), ("GET", episode_feed)])
                 assert [call for call in calls if call != plan_poll] == initial
