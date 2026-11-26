@@ -14,6 +14,8 @@ class HttpHomeHubOnboarding {
   final http.Client _client;
   String? _apiKey;
 
+  String? get origin => _uri?.origin;
+
   void useApiKey(String key) => _apiKey = key;
 
   static Uri? _devicesUri(String origin) {

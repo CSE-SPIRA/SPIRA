@@ -148,10 +148,13 @@ class _HomeState extends State<_Home> with WidgetsBindingObserver {
       ),
     );
     if (token == null || !mounted) return;
-    if (hub) {
-      app.homeHub?.useApiKey(token);
-    } else {
-      app.useToken(token);
+    try {
+      await (hub ? app.useHomeKey(token) : app.useToken(token));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: KoreanText('접속 정보를 저장하지 못했어요.')));
     }
   }
 
@@ -335,6 +338,11 @@ class _TokenDialog extends StatefulWidget {
 class _TokenDialogState extends State<_TokenDialog> {
   final _text = TextEditingController();
 
+  void _submit(String value) {
+    final token = value.trim();
+    if (token.isNotEmpty) Navigator.pop(context, token);
+  }
+
   @override
   void dispose() {
     _text.dispose();
@@ -349,6 +357,8 @@ class _TokenDialogState extends State<_TokenDialog> {
       obscureText: true,
       autocorrect: false,
       enableSuggestions: false,
+      textInputAction: TextInputAction.done,
+      onSubmitted: _submit,
       decoration: InputDecoration(labelText: widget.label),
     ),
     actions: [
@@ -357,10 +367,7 @@ class _TokenDialogState extends State<_TokenDialog> {
         child: const KoreanText('취소'),
       ),
       FilledButton(
-        onPressed: () {
-          final token = _text.text.trim();
-          if (token.isNotEmpty) Navigator.pop(context, token);
-        },
+        onPressed: () => _submit(_text.text),
         child: const KoreanText('연결'),
       ),
     ],

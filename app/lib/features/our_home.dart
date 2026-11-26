@@ -40,8 +40,11 @@ class _OurHomeState extends State<OurHome> {
   }
 
   Future<void> _refresh() async {
-    setState(() => _inventory = app.refreshHomeInventory());
-    await Future.wait([app.sync(), _inventory]);
+    final inventory = app.refreshHomeInventory();
+    setState(() {
+      _inventory = inventory;
+    });
+    await Future.wait([app.sync(), inventory]);
   }
 
   Map<String, ({wire.Device device, Set<String> times})> _selectedDevices(

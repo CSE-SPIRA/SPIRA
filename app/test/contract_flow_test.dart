@@ -2221,6 +2221,152 @@ void main() {
     expect(peer.rationaleReads, 3);
   });
 
+  for (final submitFromKeyboard in [false, true]) {
+    testWidgets(
+      'Android home key from ${submitFromKeyboard ? 'keyboard Done' : 'Connect'} '
+      'authenticates Our Home refreshes after restart',
+      (tester) async {
+        final peer = Peer()
+          ..episodes['ep_9031'] = (fixture('episode.json')
+            ..['status'] = 'notified')
+          ..cards = [fixture('card.v1.json')];
+        final store = TestStore();
+        final inventory = fixture('devices.json');
+        (inventory['devices'] as List).addAll([
+          for (final (id, type) in [
+            ('purifier_01', 'purifier'),
+            ('styler_01', 'styler'),
+            ('aircon_01', 'aircon'),
+          ])
+            {
+              'id': id,
+              'type': type,
+              'room': '현관',
+              'substrate': 'virtual',
+              'commands': [],
+              'events': [],
+              'never': [],
+              'noisy': false,
+            },
+        ]);
+        final hubRequests = <http.Request>[];
+        AppController open() => AppController(
+          api: AppApi(
+            Uri.parse('http://127.0.0.1:58137'),
+            client: MockClient((request) async {
+              if (request.headers['authorization'] != 'Bearer test-app-token') {
+                return Peer.response({
+                  'code': 'unauthorized',
+                  'message': 'App token required',
+                }, 401);
+              }
+              return peer.handle(request);
+            }),
+          ),
+          platform: TestPlatform(),
+          store: store,
+          fixture: true,
+          configuredHousehold: 'h_042',
+          homeHub: HttpHomeHubOnboarding(
+            'http://127.0.0.1:58139',
+            client: MockClient((request) async {
+              hubRequests.add(request);
+              return Peer.response(inventory);
+            }),
+          ),
+        );
+
+        await openApp(tester, open(), size: const Size(412, 820));
+        await settings(tester);
+        await tapText(tester, '서버 접속 토큰 입력');
+        await tester.enterText(find.byType(TextField), 'test-app-token');
+        await tapText(tester, '연결');
+        await tapTab(tester, '우리 집');
+        expect(find.text('확인한 기기 7대'), findsOneWidget);
+        expect(find.textContaining('집 기기 목록을 받지 못해'), findsOneWidget);
+        expect(hubRequests, isEmpty);
+        await settings(tester);
+        await tapText(tester, '우리 집 접속 키 입력');
+        await tester.enterText(find.byType(TextField), 'test-home-key');
+        if (submitFromKeyboard) {
+          await tester.testTextInput.receiveAction(TextInputAction.done);
+          await tester.pumpAndSettle();
+        } else {
+          await tapText(tester, '연결');
+        }
+        expect(find.byType(AlertDialog), findsNothing);
+
+        await tapTab(tester, '우리 집');
+        expect(find.text('확인한 기기 10대'), findsOneWidget);
+        expect(find.textContaining('집 기기 목록을 받지 못해'), findsNothing);
+        expect(hubRequests, hasLength(1));
+        await tester.drag(find.byType(RefreshIndicator), const Offset(0, 400));
+        await tester.pumpAndSettle();
+        expect(hubRequests, hasLength(2));
+
+        final previousPollCount = peer.pollCount;
+        await tester.pumpWidget(const SizedBox.shrink());
+        await openApp(tester, open(), size: const Size(412, 820));
+        expect(peer.pollCount, greaterThan(previousPollCount));
+        await tapTab(tester, '우리 집');
+        expect(find.text('확인한 기기 10대'), findsOneWidget);
+        expect(hubRequests, hasLength(3));
+        for (final request in hubRequests) {
+          expect(request.method, 'GET');
+          expect(
+            request.url.toString(),
+            'http://127.0.0.1:58139/home/onboarding/devices',
+          );
+          expect(request.headers['x-api-key'], 'test-home-key');
+          expect(request.headers['authorization'], isNull);
+          expect(request.followRedirects, isFalse);
+        }
+      },
+      variant: const TargetPlatformVariant({TargetPlatform.android}),
+    );
+  }
+
+  test('a pending Hub response cannot block or overwrite a new key', () async {
+    final firstRequest = Completer<void>();
+    final firstResponse = Completer<http.Response>();
+    final app = controller(
+      Peer(),
+      homeHub: HttpHomeHubOnboarding(
+        'http://hub.test',
+        client: MockClient((request) async {
+          if (request.headers['x-api-key'] == 'old-home-key') {
+            firstRequest.complete();
+            return firstResponse.future;
+          }
+          expect(request.headers['x-api-key'], 'new-home-key');
+          return Peer.response(fixture('devices.json')..['revision'] = 2);
+        }),
+      ),
+    );
+    addTearDown(() {
+      if (!firstResponse.isCompleted) {
+        firstResponse.complete(http.Response('', 401));
+      }
+      app.dispose();
+    });
+    await app.start();
+    await app.useHomeKey('old-home-key');
+    final first = app.refreshHomeInventory();
+    await firstRequest.future;
+
+    await app.useHomeKey('new-home-key');
+    final second = app.refreshHomeInventory();
+    expect(second, isNot(same(first)));
+    await second;
+    expect(app.homeInventory?.revision, 2);
+
+    firstResponse.complete(
+      Peer.response(fixture('devices.json')..['revision'] = 1),
+    );
+    await first;
+    expect(app.homeInventory?.revision, 2);
+  });
+
   testWidgets('our home shows only selected devices when the Hub is offline', (
     tester,
   ) async {

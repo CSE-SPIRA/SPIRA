@@ -74,6 +74,12 @@ class AppController extends ChangeNotifier {
   String get _setupKey => 'spira.setup.v1.$_environment';
   String get _snapshotKey => 'spira.snapshot.v1.$_scope';
   String get _calendarKey => 'spira.calendar.v1.$_scope';
+  String get _serverTokenKey => 'spira.server-token.v1.$_environment';
+  String? get _homeKeySetting {
+    final origin = homeHub?.origin;
+    if (household == null || origin == null) return null;
+    return 'spira.home-key.v1.${jsonEncode([_scope, origin])}';
+  }
 
   String? household;
   SetupStep step = SetupStep.household;
@@ -132,6 +138,7 @@ class AppController extends ChangeNotifier {
   wire.Card? initialPreparation(String cardId) => _initialPreparations[cardId];
   wire.Devices? homeInventory;
   Future<void>? _homeInventoryRefresh;
+  int _homeKeyRevision = 0;
 
   String? _cursor;
   String? get lastServerCheck => _cursor;
@@ -326,6 +333,13 @@ class AppController extends ChangeNotifier {
       household = configuredHousehold;
       step = SetupStep.ready;
     }
+    if (!browserPreview) {
+      api.token = await store.read(_serverTokenKey) ?? api.token;
+      if (_homeKeySetting case final setting?) {
+        final key = await store.read(setting);
+        if (key != null) homeHub!.useApiKey(key);
+      }
+    }
     // The browser preview talks to a fixture that starts fresh each run with the same IDs;
     // a cached snapshot from an earlier run would show its finished cards before the share.
     if (household == null || demoPreview) return;
@@ -448,8 +462,8 @@ class AppController extends ChangeNotifier {
           wire.HouseholdCreate(householdTypes: []),
         );
         household = created.householdId;
-        homeHub?.useApiKey(created.hubApiKey);
         await _saveSetup();
+        await useHomeKey(created.hubApiKey);
       }
       await api.profile(
         household!,
@@ -556,11 +570,24 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  void useToken(String token) {
+  Future<void> useToken(String token) async {
     api.token = token;
     needsToken = false;
     _change();
     unawaited(sync());
+    if (!browserPreview) await store.write(_serverTokenKey, token);
+  }
+
+  Future<void> useHomeKey(String key) async {
+    final hub = homeHub;
+    if (hub == null) return;
+    hub.useApiKey(key);
+    _homeKeyRevision++;
+    _homeInventoryRefresh = null;
+    if (browserPreview) return;
+    if (_homeKeySetting case final setting?) {
+      await store.write(setting, key);
+    }
   }
 
   Future<void> sync() {
@@ -1161,12 +1188,17 @@ class AppController extends ChangeNotifier {
   bool loadingRationale(String episode) =>
       _rationales[episode]?.loading ?? false;
 
-  Future<void> refreshHomeInventory() => _homeInventoryRefresh ??=
-      _loadHomeInventory().whenComplete(() => _homeInventoryRefresh = null);
+  Future<void> refreshHomeInventory() {
+    final revision = _homeKeyRevision;
+    return _homeInventoryRefresh ??= _loadHomeInventory(revision)
+        .whenComplete(() {
+          if (revision == _homeKeyRevision) _homeInventoryRefresh = null;
+        });
+  }
 
-  Future<void> _loadHomeInventory() async {
+  Future<void> _loadHomeInventory(int revision) async {
     final inventory = await homeHub?.fetchDevices(household!);
-    if (_disposed || inventory == null) return;
+    if (_disposed || revision != _homeKeyRevision || inventory == null) return;
     homeInventory = inventory;
     _change();
     await _serialize(_save).catchError((Object _) {});
