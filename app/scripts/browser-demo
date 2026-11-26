@@ -13,12 +13,11 @@ import subprocess
 import sys
 import tempfile
 import time
-from urllib.error import HTTPError
 from urllib.request import ProxyHandler, Request, build_opener
 
 from browser_demo_web import (
     APP, APP_TOKEN, EPISODE, FLUTTER_REQUIRED, LOOPBACK, cached_web, define_flags,
-    fixture_defines, origin, proxy_command, temporary_root, web_command,
+    fixture_defines, origin, server_proxy_command, temporary_root, web_command,
 )
 
 CLIENT = build_opener(ProxyHandler({}))
@@ -63,7 +62,7 @@ def get_json(url, **headers):
         return json.load(response)
 
 
-def check_stack(urls, household, key):
+def check_stack(urls, household):
     try:
         get_json(
             f"{urls['Fixture'].removesuffix('/health')}/v1/households/{household}/cards",
@@ -72,18 +71,6 @@ def check_stack(urls, household, key):
     except (OSError, ValueError, KeyError) as error:
         raise RuntimeError(f"Could not verify the fixture household: {error}") from error
 
-    route = f"{urls['Hub'].rstrip('/')}/home/onboarding/devices"
-    try:
-        inventory = get_json(route, **{"X-API-Key": key})
-    except HTTPError as error:
-        if error.code in (404, 405):
-            raise RuntimeError(
-                "The Hub devices route GET /home/onboarding/devices is missing. "
-                "Use a checkout containing demo-up and the Hub devices route."
-            ) from error
-        raise RuntimeError(f"The Hub devices route returned HTTP {error.code}.") from error
-    if inventory.get("household_id") != household or "devices" not in inventory:
-        raise RuntimeError("The Hub devices route did not return the demo household inventory.")
 
 
 def running_urls(args, temp_root, prefix):
@@ -160,7 +147,7 @@ def run(args):
             raise RuntimeError(f"Port {number} is already in use. Choose a free --{name}-port.")
 
     fixture = json.loads((APP.parent / "contracts/fixtures" / EPISODE / "household.created.json").read_text())
-    household, key = fixture["household_id"], fixture["hub_api_key"]
+    household = fixture["household_id"]
     temp_root = temporary_root()
     prefix = f"spira-browser-demo-{os.getuid()}-{args.demo_port}-"
     with ExitStack() as stack:
@@ -173,9 +160,9 @@ def run(args):
             demo, urls = start_demo(stack, args, temporary / "demo-up.log")
         for name in ("Fixture", "Hub", "Viewer"):
             print(f"{name}: {urls[name]}", flush=True)
-        check_stack(urls, household, key)
+        check_stack(urls, household)
 
-        proxy = start(stack, proxy_command(urls["Fixture"], urls["Hub"], args.proxy_port, args.web_port))
+        proxy = start(stack, server_proxy_command(urls["Fixture"], args.proxy_port, args.web_port))
         proxy_url = origin(args.proxy_port)
         web_url = origin(args.web_port)
 
@@ -187,7 +174,7 @@ def run(args):
                 return None
 
         wait_for(proxy_ready, "the browser proxy", timeout=10)
-        defines = fixture_defines(args.proxy_port, household, key)
+        defines = fixture_defines(args.proxy_port, household)
 
         def supervise(process):
             while process.poll() is None:

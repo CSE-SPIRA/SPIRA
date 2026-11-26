@@ -25,14 +25,13 @@ def origin(port):
     return f"http://{LOOPBACK}:{port}"
 
 
-def fixture_defines(proxy_port, household, key):
+def fixture_defines(proxy_port, household, _key=None):
+    # The stack launcher also uses this helper for its existing call signature.
     return {
         "SPIRA_BASE_URL": origin(proxy_port),
-        "SPIRA_HUB_URL": origin(proxy_port),
         "SPIRA_HOUSEHOLD_ID": household,
         "SPIRA_PEER": "fixture",
         "SPIRA_FIXTURE_APP_TOKEN": APP_TOKEN,
-        "SPIRA_FIXTURE_HOME_KEY": key,
     }
 
 
@@ -40,11 +39,16 @@ def define_flags(defines):
     return [f"--dart-define={name}={value}" for name, value in defines.items()]
 
 
-def proxy_command(fixture, hub, proxy_port, web_port):
+def server_proxy_command(fixture, proxy_port, web_port):
     return [
         sys.executable, str(APP / "scripts/browser_demo_proxy.py"),
-        f"--fixture={fixture}", f"--hub={hub}", f"--port={proxy_port}", f"--web-port={web_port}",
+        f"--fixture={fixture}", f"--port={proxy_port}", f"--web-port={web_port}",
     ]
+
+
+def proxy_command(fixture, _hub, proxy_port, web_port):
+    # Keep the stack launcher's existing call signature.
+    return server_proxy_command(fixture, proxy_port, web_port)
 
 
 def web_command(web, port):
