@@ -43,14 +43,18 @@ void main() {
   const household = String.fromEnvironment('SPIRA_HOUSEHOLD_ID');
   const hubUrl = String.fromEnvironment('SPIRA_HUB_URL');
   const peer = String.fromEnvironment('SPIRA_PEER', defaultValue: 'fixture');
+  const buildToken = String.fromEnvironment('SPIRA_FIXTURE_APP_TOKEN');
+  const buildHomeKey = String.fromEnvironment('SPIRA_HOME_KEY');
+  const webFixtureHomeKey = String.fromEnvironment('SPIRA_FIXTURE_HOME_KEY');
+  final homeKey = buildHomeKey.isNotEmpty
+      ? buildHomeKey
+      : kIsWeb && peer == 'fixture'
+      ? webFixtureHomeKey
+      : '';
   final api = AppApi(baseUrl);
+  if (buildToken.isNotEmpty) api.token = buildToken;
   final homeHub = hubUrl.isEmpty ? null : HttpHomeHubOnboarding(hubUrl);
-  if (kIsWeb && peer == 'fixture') {
-    const demoToken = String.fromEnvironment('SPIRA_FIXTURE_APP_TOKEN');
-    const demoHomeKey = String.fromEnvironment('SPIRA_FIXTURE_HOME_KEY');
-    if (demoToken.isNotEmpty) api.token = demoToken;
-    if (demoHomeKey.isNotEmpty) homeHub?.useApiKey(demoHomeKey);
-  }
+  if (homeKey.isNotEmpty) homeHub?.useApiKey(homeKey);
   wire.Devices? discovered;
   if (discovery.isNotEmpty) {
     try {

@@ -23,8 +23,9 @@ flutter run -d <android-device-id> --dart-define-from-file=.env
 ```
 
 If the peer returns 401, choose **서버 접속 토큰 입력** in **설정** and enter the
-App's bearer token for that session. During initial setup, use the key button
-in the toolbar. The token stays in memory. Keep tokens out of the Dart defines.
+App's bearer token. During initial setup, use the key button in the toolbar.
+Android saves the server token and home key in the app's local settings.
+Clearing the app's storage removes both saved values.
 Use Android's share menu to send one to three JPG or PNG screenshots to SPIRA.
 
 Optional Dart defines:
@@ -35,7 +36,7 @@ Optional Dart defines:
   actions in setup. Setup selections stay on this device.
 - `SPIRA_HUB_URL` supplies the Hub's HTTP(S) origin. Enter the home key from
   **우리 집 접속 키 입력** in **설정**. The App also uses the key returned
-  when it creates a new home in the current session. The key stays in memory.
+  when it creates a new home.
   **우리 집** reads the Hub's devices by room and marks those used by the card
   and the order's item tasks. If the Hub list is unavailable, it shows the
   identified devices with a note.
@@ -52,15 +53,35 @@ Optional Dart defines:
 
 ### Run the live demo on Android
 
-Start `scripts/demo-up --no-shell` from the repository root. Use the port from
-the printed **Fixture** URL. For a USB-connected Android phone, forward that port
-with `adb reverse tcp:<fixture-port> tcp:<fixture-port>` and set
-`SPIRA_BASE_URL=http://127.0.0.1:<fixture-port>` in `app/.env`. On the Android
-emulator, use `http://10.0.2.2:<fixture-port>`. Also set `SPIRA_PEER=fixture`
-and `SPIRA_HOUSEHOLD_ID=h_042`, then run the Android command above. Enter the
-fixture App token `demo` if prompted. Sharing an order starts the birthday
-replay. For **우리 집**, forward the printed Hub port the same way, set
-`SPIRA_HUB_URL` to its Android-accessible origin, and enter the fixture home key.
+From the repository root, start the fixture and Hub on fixed ports.
+
+```sh
+scripts/demo-up --no-shell --no-app --peer-ports 58137 58138 58139
+```
+
+Connect the Android phone over USB. From `app/`, forward both ports and build
+the debug APK with the fixture credentials.
+
+```sh
+adb reverse tcp:58137 tcp:58137
+adb reverse tcp:58139 tcp:58139
+fixture_app_token="$(python3 -B -c 'from scripts.browser_demo_web import APP_TOKEN; print(APP_TOKEN)')"
+fixture_home_key="$(python3 -c 'import json; print(json.load(open("../contracts/fixtures/ep_9031/household.created.json"))["hub_api_key"])')"
+flutter build apk --debug \
+  --dart-define=SPIRA_BASE_URL=http://127.0.0.1:58137 \
+  --dart-define=SPIRA_HUB_URL=http://127.0.0.1:58139 \
+  --dart-define=SPIRA_PEER=fixture \
+  --dart-define=SPIRA_HOUSEHOLD_ID=h_042 \
+  --dart-define=SPIRA_FIXTURE_APP_TOKEN="$fixture_app_token" \
+  --dart-define=SPIRA_HOME_KEY="$fixture_home_key"
+adb install -r build/app/outputs/flutter-apk/app-debug.apk
+```
+
+Use the printed **Fixture** and **Hub** ports if reusing a stack on different
+ports. Sharing an order starts the birthday replay. **우리 집** reads the Hub
+inventory using the home key. Saved Android credentials take precedence over
+build-time defaults. A `SPIRA_PEER=server` build includes credentials only
+when explicitly supplied through the defines.
 
 ### Run in the browser
 
