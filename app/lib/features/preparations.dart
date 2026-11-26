@@ -1,11 +1,17 @@
+import 'dart:typed_data';
+
 // ignore: deprecated_member_use
 import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
 import '../contracts.dart' as wire;
+import '../design_tokens.g.dart';
+import '../korean_text.dart';
+import '../theme.dart';
 import 'labels.dart';
-import 'rationale.dart';
-import 'setup.dart';
+import 'order_extraction.dart';
+import 'memory_sheet.dart';
+import 'status_badge.dart';
 
 class Preparations extends StatelessWidget {
   const Preparations(this.app, {super.key});
@@ -14,17 +20,21 @@ class Preparations extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final known = app.orderedEpisodes.toList();
-    return RefreshIndicator(
+    final orderId = app.currentOrderId;
+    final cards = app.activeCards;
+    final memory = app.mainMemory;
+    final main = RefreshIndicator(
       onRefresh: app.sync,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+        padding: const EdgeInsets.fromLTRB(
+          DesignTokens.space20,
+          DesignTokens.space12,
+          DesignTokens.space20,
+          DesignTokens.space32,
+        ),
         children: [
-          Text('우리 집 준비', style: Theme.of(context).textTheme.headlineMedium),
           if (app.refreshError case final error?) StatusMessage(error),
-          if (app.stale && known.isNotEmpty)
-            const StatusMessage('마지막으로 확인한 정보예요. 현재 상태를 확인하는 중이에요.'),
           if (app.uploadError case final error?) StatusMessage(error),
           if (app.shareIssue case final issue?)
             StatusMessage(switch (issue) {
@@ -34,97 +44,284 @@ class Preparations extends StatelessWidget {
               'rejected' => '서버가 이미지를 읽을 수 없어요. 새 캡처를 공유해 주세요.',
               _ => '공유한 이미지를 열 수 없어요. 주문 화면을 다시 공유해 주세요.',
             }),
-          if (app.queuedShares > 0) const StatusMessage('공유한 주문을 보내는 중이에요…'),
+          if (app.uploadDeferred)
+            const StatusMessage('연결되면 공유한 주문을 보낼게요.')
+          else if (app.queuedShares > 0 && app.uploadError == null)
+            const StatusMessage('공유한 주문을 보내는 중이에요…'),
           if ((app.refreshError != null || app.uploadError != null) &&
               !app.needsToken)
             Align(
               alignment: Alignment.centerLeft,
               child: OutlinedButton(
                 onPressed: app.sync,
-                child: const Text('다시 시도'),
+                child: const KoreanText('다시 시도'),
               ),
             ),
-          if (!app.refreshed &&
-              app.refreshError == null &&
-              app.accepted.isEmpty)
-            const StatusMessage('준비를 불러오는 중이에요…'),
-          if (known.isEmpty &&
-              app.refreshed &&
-              app.accepted.isEmpty &&
-              app.queuedShares == 0)
-            const StatusMessage('주문 화면을 캡처한 뒤 안드로이드 공유 메뉴에서 SPIRA를 선택해 주세요.'),
-          for (final _ in app.accepted)
-            const StatusMessage('주문을 받았어요. 읽기 결과를 기다리는 중이에요.'),
-          for (final episode in known)
-            _OrderSection(app: app, episode: episode),
+          _OrderPanel(
+            key: ValueKey(orderId),
+            app: app,
+            orderId: orderId,
+            collapsible:
+                orderId != null &&
+                (memory?.episodeId == orderId ||
+                    cards.any((card) => card.episodeId == orderId)),
+          ),
+          const SizedBox(height: 18),
+          Column(
+            key: const ValueKey('main-preparations'),
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (memory != null)
+                MemorySheet(
+                  key: ValueKey('memory-${app.mainMemoryCardIds.first}'),
+                  rationale: app.rationaleFor(memory.episodeId),
+                  episode: memory,
+                  startsAt: app.memoryStart(
+                    memory.episodeId,
+                    app.mainMemoryCardIds,
+                  ),
+                  cardIds: app.mainMemoryCardIds,
+                  onAcknowledge: app.acknowledgeMemory,
+                ),
+              for (final (index, card) in cards.indexed)
+                if (app.isMemory(card))
+                  MemorySheet(
+                    key: ValueKey('memory-${card.cardId}'),
+                    rationale: app.rationaleFor(card.episodeId),
+                    episode: app.episodes[card.episodeId],
+                    startsAt: card.startsAt,
+                    cardIds: [card.cardId],
+                  )
+                else
+                  _PreparationCard(app: app, card: card, hero: index == 0),
+            ],
+          ),
         ],
+      ),
+    );
+    if (!app.demoPreview) return main;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(child: main),
+        _PreviewStrip(app: app),
+      ],
+    );
+  }
+}
+
+class _OrderPanel extends StatefulWidget {
+  const _OrderPanel({
+    super.key,
+    required this.app,
+    required this.orderId,
+    required this.collapsible,
+  });
+
+  final AppController app;
+  final String? orderId;
+  final bool collapsible;
+
+  @override
+  State<_OrderPanel> createState() => _OrderPanelState();
+}
+
+class _OrderPanelState extends State<_OrderPanel> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final app = widget.app;
+    final orderId = widget.orderId;
+    final order = app.episodes[orderId];
+    final images = orderId == null
+        ? const <Uint8List>[]
+        : app.orderImages(orderId);
+    final theme = Theme.of(context);
+    return Column(
+      key: const ValueKey('main-order'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: DesignTokens.space8,
+      children: [
+        if (widget.collapsible)
+          _OrderSummary(
+            order: order,
+            thumbnail: images.firstOrNull,
+            expanded: _expanded,
+            onTap: () => setState(() => _expanded = !_expanded),
+          ),
+        if (!widget.collapsible || _expanded) ...[
+          if (!widget.collapsible)
+            KoreanText('주문', style: theme.textTheme.headlineMedium),
+          if (app.pickImages != null)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: _galleryButton(app, secondary: widget.collapsible),
+            ),
+          if (app.galleryError case final error?) StatusMessage(error),
+          if (app.hasPendingSelection && !app.pickingImages)
+            Wrap(
+              spacing: 8,
+              children: [
+                OutlinedButton(
+                  onPressed: app.retryGallery,
+                  child: const KoreanText('다시 보내기'),
+                ),
+                TextButton(
+                  onPressed: app.discardGallery,
+                  child: const KoreanText('선택 취소'),
+                ),
+              ],
+            ),
+          if (orderId != null)
+            OrderExtraction(
+              key: ValueKey(orderId),
+              episode: order,
+              images: images,
+              rationale: app.rationaleFor(orderId),
+              // An order shared elsewhere (another device or the presenter)
+              // shows the same staged wait while the Server reads it.
+              processing:
+                  !widget.collapsible &&
+                  (app.isSharedOrder(orderId) ||
+                      order?.status == wire.EpisodeStatus.RECEIVED ||
+                      order?.status == wire.EpisodeStatus.READING),
+              received:
+                  app.accepted.contains(orderId) ||
+                  app.orderImages(orderId).isNotEmpty,
+            )
+          else if (app.platform != null) ...[
+            const KoreanText('쇼핑 앱에서 주문 화면을 공유하면, 그 주문에 맞춰 집을 준비해요.'),
+            const KoreanText('주문 화면을 캡처하고 공유 메뉴에서 SPIRA를 선택해 주세요.'),
+          ] else
+            const KoreanText('주문 화면을 보내면 필요한 준비를 찾아드려요.'),
+        ],
+      ],
+    );
+  }
+
+  Widget _galleryButton(AppController app, {required bool secondary}) {
+    final select = app.pickingImages || app.hasPendingSelection
+        ? null
+        : app.chooseOrderImages;
+    const icon = Icon(Icons.photo_library_outlined);
+    const label = KoreanText('주문 분석하기');
+    return secondary
+        ? OutlinedButton.icon(onPressed: select, icon: icon, label: label)
+        : FilledButton.icon(onPressed: select, icon: icon, label: label);
+  }
+}
+
+class _OrderSummary extends StatelessWidget {
+  const _OrderSummary({
+    required this.order,
+    required this.thumbnail,
+    required this.expanded,
+    required this.onTap,
+  });
+
+  final wire.Episode? order;
+  final Uint8List? thumbnail;
+  final bool expanded;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final count = order?.itemCount ?? 0;
+    final first = order?.items.firstOrNull?.name;
+    final summary = [
+      '주문 $count개',
+      if (first != null) '$first${count > 1 ? ' 외 ${count - 1}개' : ''}',
+      if (first == null && (order?.maskedCount ?? 0) > 0)
+        '가린 품목 ${order!.maskedCount}개',
+    ].join(' · ');
+    final colors = Theme.of(context).colorScheme;
+    return Material(
+      color: colors.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(DesignTokens.radius12),
+      clipBehavior: Clip.antiAlias,
+      child: Semantics(
+        expanded: expanded,
+        child: InkWell(
+          key: const ValueKey('order-scan-line'),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(DesignTokens.space8),
+            child: Row(
+              spacing: DesignTokens.space8,
+              children: [
+                SizedBox.square(
+                  dimension: DesignTokens.space32,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(DesignTokens.radius6),
+                    child: thumbnail == null
+                        ? const Icon(Icons.receipt_long_outlined, size: 20)
+                        : Image.memory(
+                            thumbnail!,
+                            fit: BoxFit.cover,
+                            cacheWidth: 96,
+                            semanticLabel: '주문 사진',
+                            errorBuilder: (_, _, _) => const Icon(
+                              Icons.receipt_long_outlined,
+                              size: 20,
+                            ),
+                          ),
+                  ),
+                ),
+                Expanded(
+                  child: KoreanText(
+                    summary,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+                Icon(
+                  expanded ? Icons.expand_less : Icons.expand_more,
+                  color: colors.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
 }
 
-class _OrderSection extends StatelessWidget {
-  const _OrderSection({required this.app, required this.episode});
+class _PreviewStrip extends StatelessWidget {
+  const _PreviewStrip({required this.app});
 
   final AppController app;
-  final wire.Episode episode;
 
   @override
   Widget build(BuildContext context) {
-    final cards = app.cardsFor(episode);
     final theme = Theme.of(context);
-    final status = switch (episode.status) {
-      wire.EpisodeStatus.RECEIVED => '주문을 받았어요. 읽기 대기 중이에요.',
-      wire.EpisodeStatus.READING => '주문을 읽고 있어요.',
-      wire.EpisodeStatus.READ_FAILED => '주문을 읽지 못했어요. 주문 화면을 캡처해서 다시 공유해 주세요.',
-      wire.EpisodeStatus.JUDGED => '집에서 준비할 일이 없어요.',
-      wire.EpisodeStatus.NOTIFIED => '준비를 확인했어요.',
-      wire.EpisodeStatus.HELD => '준비할 시간을 기다리고 있어요.',
-      wire.EpisodeStatus.CLOSED => '주문을 마쳤어요.',
-      wire.EpisodeStatus.PAUSED_SKIP =>
-        '주문을 보관했어요. 자동 준비가 일시정지 중이라 주문을 판단하지 않았어요.',
-    };
     return Padding(
-      padding: const EdgeInsets.only(top: 22),
+      padding: const EdgeInsets.symmetric(horizontal: DesignTokens.space20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            seoulDateTime(episode.sharedAt),
-            style: theme.textTheme.titleMedium,
-          ),
-          StatusMessage(status),
-          if (episode.itemCount > 0) Text('읽은 품목 ${episode.itemCount}개'),
+          const Divider(height: 1),
+          if (app.exampleShareError case final error?) StatusMessage(error),
           Wrap(
-            spacing: 8,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              if (app.canEdit(episode))
-                TextButton(
-                  onPressed: () => Navigator.push<void>(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => _OrderEditor(app: app, episode: episode),
-                    ),
-                  ),
-                  child: const Text('읽은 품목 수정'),
+              KoreanText(
+                fixturePreviewLabel,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
-              if (episode.cardIds.isEmpty &&
-                  const {
-                    wire.EpisodeStatus.JUDGED,
-                    wire.EpisodeStatus.CLOSED,
-                  }.contains(episode.status))
-                TextButton(
-                  onPressed: () =>
-                      openRationale(context, app, episode.episodeId),
-                  child: const Text('WHY · 이유 보기'),
+              ),
+              TextButton(
+                onPressed: app.canShareExample ? app.shareExample : null,
+                child: KoreanText(
+                  app.sharingExample ? '주문을 보내는 중…' : '예시 주문으로 공유',
                 ),
+              ),
             ],
           ),
-          for (final card in cards) _PreparationCard(app: app, card: card),
-          if (episode.itemTasks.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            _ItemGuidance(episode: episode),
-          ],
         ],
       ),
     );
@@ -132,76 +329,109 @@ class _OrderSection extends StatelessWidget {
 }
 
 class _PreparationCard extends StatelessWidget {
-  const _PreparationCard({required this.app, required this.card});
+  const _PreparationCard({
+    required this.app,
+    required this.card,
+    required this.hero,
+  });
 
   final AppController app;
   final wire.Card card;
+  final bool hero;
+
+  Future<void> _confirmStop(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      animationStyle: MediaQuery.disableAnimationsOf(context)
+          ? AnimationStyle.noAnimation
+          : null,
+      builder: (context) => AlertDialog(
+        title: const KoreanText('이 준비를 멈출까요?'),
+        content: const KoreanText('이 카드의 준비만 멈춰요.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const KoreanText('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const KoreanText('멈추기'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    final latest = app.cards[card.cardId];
+    if (latest != null) await app.stop(latest);
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final stopPending = app.stopPending(card.cardId);
     final stopUncertain = app.stopUncertain(card.cardId);
     return Card(
       key: ValueKey(card.cardId),
-      margin: const EdgeInsets.symmetric(vertical: 6),
+      color: hero ? appPaper : colors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(appCardRadius),
+        side: BorderSide(color: hero ? colors.outline : colors.outlineVariant),
+      ),
+      margin: const EdgeInsets.only(bottom: DesignTokens.space12),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(DesignTokens.space16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          spacing: 8,
           children: [
-            Text(
-              card.text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.titleLarge,
+            Semantics(
+              header: true,
+              child: KoreanText(
+                card.text,
+                style: theme.textTheme.headlineMedium,
+              ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              card.startsAt == null
-                  ? '일정이 잡히기를 기다리고 있어요.'
-                  : '${seoulWeekdayTime(card.startsAt!)} 일정',
-            ),
-            Text('${card.summary.done}/${card.summary.total} 준비'),
-            if (card.summary.waitingFor case final event?)
-              Text('${eventLabel(event)} 기다리는 중'),
+            if (card.startsAt case final start?)
+              Wrap(
+                spacing: 12,
+                runSpacing: 4,
+                children: [
+                  KoreanText(
+                    seoulDateTime(start, fullDate: true),
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  KoreanText(
+                    '${card.summary.total}개 중 ${card.summary.done}개 끝남',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  if (card.summary.waitingFor case final event?)
+                    KoreanText(
+                      waitingLabel(event),
+                      style: theme.textTheme.bodySmall,
+                    ),
+                ],
+              ),
             if (stopPending)
-              StatusMessage(card.stopped ? '종료 결과 확인 중…' : '이 준비의 중지 요청 확인 중…')
+              const StatusMessage('요청함')
             else if (card.stopped)
               const StatusMessage('이 준비가 중지됐어요.'),
             if (app.controlErrors[card.cardId] case final error?)
               StatusMessage(error),
-            for (final line in card.lines.take(4)) ...[
-              const Divider(height: 24),
+            for (final line in card.lines) ...[
+              const Divider(height: 1),
               _PreparationLine(app: app, card: card, line: line),
             ],
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              alignment: WrapAlignment.spaceBetween,
-              children: [
-                TextButton(
-                  onPressed: () => openRationale(
-                    context,
-                    app,
-                    card.episodeId,
-                    cardId: card.cardId,
-                  ),
-                  child: const Text('WHY · 이유 보기'),
+            if (!card.stopped && card.buttons.contains(wire.CardButton.STOP))
+              Align(
+                alignment: Alignment.centerRight,
+                child: OutlinedButton(
+                  onPressed: !app.canControl || (stopPending && !stopUncertain)
+                      ? null
+                      : () => _confirmStop(context),
+                  child: KoreanText(stopUncertain ? '멈추기 다시 요청' : '멈추기'),
                 ),
-                if (!card.stopped &&
-                    card.buttons.contains(wire.CardButton.STOP))
-                  OutlinedButton(
-                    onPressed: app.canControl && (!stopPending || stopUncertain)
-                        ? () => app.stop(card)
-                        : null,
-                    child: Text(
-                      stopUncertain ? '중지 요청 재시도' : '이 준비 중지',
-                      semanticsLabel: '이 준비 중지 · ${card.text}',
-                    ),
-                  ),
-              ],
-            ),
+              ),
           ],
         ),
       ),
@@ -222,194 +452,83 @@ class _PreparationLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final timing = switch ((line.when?.time, line.when?.event)) {
-      (final time?, _) =>
-        card.startsAt != null &&
-                DateTime.parse(time)
-                    .isAtSameMomentAs(DateTime.parse(card.startsAt!))
-            ? '일정이 시작될 때'
-            : '${seoulWeekdayTime(time, relativeTo: card.startsAt)}에',
-      (_, wire.TriggerEvent.GUEST_ARRIVED) => '손님이 오면',
-      (_, wire.TriggerEvent.EVENT_END) => '일정이 끝나면',
-      (_, wire.TriggerEvent.PACKAGE_BROUGHT_IN) => '택배를 집 안으로 들이면',
-      _ => null,
+    final theme = Theme.of(context);
+    final timing = switch (line.when?.time) {
+      final time? => seoulDateTime(time),
+      null => triggerLabel(line.when?.event),
     };
-    final state = visibleLineLabel(line.state);
+    final relation = lineRelationLabel(line, card);
     final pending = app.linePending(card, line);
-    final on = line.state == wire.LineState.OFF;
-    final end = line.endState;
-    final outcome = end == null ? null : endLabel(end);
-    final note = line.note;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(line.text, style: Theme.of(context).textTheme.titleMedium),
-        if (timing != null) Text(timing),
-        if (state != null) Text(state),
-        if (outcome != null) Text(outcome),
-        if (note != null && note != outcome) Text(note),
-        if (pending) const StatusMessage('항목 변경 확인 중…'),
-        if (app.canSwitch(card, line))
-          TextButton(
-            onPressed: pending ? null : () => app.switchLine(card, line),
-            child: Text(
-              on ? '항목 켜기' : '항목 끄기',
-              semanticsLabel: '${line.text} ${on ? '켜기' : '끄기'}',
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-class _ItemGuidance extends StatelessWidget {
-  const _ItemGuidance({required this.episode});
-
-  final wire.Episode episode;
-
-  bool _waitingForPackage(wire.ItemTaskElement task) =>
-      task.state == wire.LineState.HELD ||
-      task.state == wire.LineState.SCHEDULED;
-
-  @override
-  Widget build(BuildContext context) {
-    final closed = episode.status == wire.EpisodeStatus.CLOSED;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text('품목 안내', style: Theme.of(context).textTheme.titleLarge),
-        if (closed)
-          const Text('품목 안내가 종료됐어요.')
-        else if (episode.itemTasks.any(_waitingForPackage))
-          const Text('택배를 집 안으로 들이면 안내를 볼 수 있어요.'),
-        for (final task in episode.itemTasks)
-          Padding(
-            padding: const EdgeInsets.only(top: 10),
+    final outcome = endLabel(line.endState);
+    final on = line.state != wire.LineState.OFF;
+    return Padding(
+      key: ValueKey((card.cardId, line.taskId)),
+      padding: const EdgeInsets.symmetric(vertical: DesignTokens.space4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: DesignTokens.space12,
+        children: [
+          Expanded(
+            flex: 3,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              spacing: DesignTokens.space4,
               children: [
-                Text(task.item, style: Theme.of(context).textTheme.titleMedium),
-                if (!closed && !_waitingForPackage(task)) ...[
-                  if (task.text case final text?) Text(text),
-                  Text(lineLabel(task.state)),
-                ],
+                if (timing != null)
+                  KoreanText(
+                    relation == null || relation == timing
+                        ? timing
+                        : '$timing · $relation',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                KoreanText(
+                  normalizeKelvin(line.text),
+                  style: theme.textTheme.titleMedium,
+                ),
+                if (outcome != null) KoreanText(outcome),
+                if (line.note case final note?
+                    when note.isNotEmpty && note != outcome)
+                  KoreanText(note),
               ],
             ),
           ),
-      ],
+          Flexible(
+            flex: 2,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              spacing: DesignTokens.space4,
+              children: [
+                StatusBadge(
+                  lineLabel(line.state),
+                  color: lineStatusColor(context, line.state),
+                ),
+                if (pending) const StatusMessage('요청함'),
+                if (app.canSwitch(card, line))
+                  Semantics(
+                    label: '${line.text} ${on ? '끄기' : '켜기'}',
+                    child: Switch(
+                      value: pending ? !on : on,
+                      padding: EdgeInsets.zero,
+                      trackColor: const WidgetStateProperty.fromMap({
+                        WidgetState.disabled: null,
+                        WidgetState.selected: DesignTokens.greenSoft,
+                      }),
+                      thumbColor: const WidgetStateProperty.fromMap({
+                        WidgetState.disabled: null,
+                        WidgetState.selected: DesignTokens.greenDeep,
+                      }),
+                      onChanged: pending
+                          ? null
+                          : (_) => app.switchLine(card, line),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
-}
-
-class _OrderEditor extends StatefulWidget {
-  const _OrderEditor({required this.app, required this.episode});
-
-  final AppController app;
-  final wire.Episode episode;
-
-  @override
-  State<_OrderEditor> createState() => _OrderEditorState();
-}
-
-class _OrderEditorState extends State<_OrderEditor> {
-  final _form = GlobalKey<FormState>();
-  late final _names = [
-    for (final item in widget.episode.items)
-      TextEditingController(text: item.name),
-  ];
-  late final _quantities = [
-    for (final item in widget.episode.items)
-      TextEditingController(text: item.qty?.toString()),
-  ];
-  bool _busy = false;
-  String? _error;
-
-  Future<void> _save() async {
-    if (_busy || !_form.currentState!.validate()) return;
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      await widget.app.edit(
-        widget.episode,
-        wire.OrderEdit(
-          items: [
-            for (var index = 0; index < _names.length; index++)
-              wire.OrderEditItem(
-                itemId: widget.episode.items[index].itemId,
-                name: _names[index].text.trim(),
-                qty: int.tryParse(_quantities[index].text.trim()),
-              ),
-          ],
-        ),
-      );
-      if (mounted) Navigator.pop(context);
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _busy = false;
-          _error = '품목을 수정하지 못했어요.';
-        });
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    for (final controller in [..._names, ..._quantities]) {
-      controller.dispose();
-    }
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: widget.app,
-    builder: (context, _) {
-      final editable = widget.app.canEdit(
-        widget.app.episodes[widget.episode.episodeId] ?? widget.episode,
-      );
-      return Scaffold(
-        appBar: AppBar(title: const Text('읽은 품목 수정')),
-        body: Form(
-          key: _form,
-          child: ListView(
-            padding: const EdgeInsets.all(20),
-            children: [
-              if (!editable && !_busy) const StatusMessage('현재 주문은 수정할 수 없어요.'),
-              if (_error case final error?) StatusMessage(error),
-              for (var index = 0; index < _names.length; index++) ...[
-                TextFormField(
-                  controller: _names[index],
-                  enabled: editable && !_busy,
-                  decoration: InputDecoration(labelText: '품목 ${index + 1} 이름'),
-                  validator: (value) => value == null || value.trim().isEmpty
-                      ? '품목 이름을 입력해 주세요.'
-                      : null,
-                ),
-                TextFormField(
-                  controller: _quantities[index],
-                  enabled: editable && !_busy,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(labelText: '품목 ${index + 1} 수량'),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) return null;
-                    return (int.tryParse(value.trim()) ?? 0) >= 1
-                        ? null
-                        : '1 이상의 수량을 입력해 주세요.';
-                  },
-                ),
-                const SizedBox(height: 12),
-              ],
-              FilledButton(
-                onPressed: editable && !_busy ? _save : null,
-                child: Text(_busy ? '저장 중…' : '수정 저장'),
-              ),
-            ],
-          ),
-        ),
-      );
-    },
-  );
 }

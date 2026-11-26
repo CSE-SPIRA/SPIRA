@@ -1,0 +1,38 @@
+[
+  {
+    "id": "cleaner_01",
+    "type": "cleaner",
+    "room": "거실"
+  },
+  {
+    "id": "light_01",
+    "type": "light",
+    "room": "거실"
+  },
+  {
+    "id": "display_01",
+    "type": "display",
+    "room": "거실"
+  },
+  {
+    "id": "cooktop_01",
+    "type": "cooktop",
+    "room": "주방"
+  },
+  {
+    "id": "oven_01",
+    "type": "oven",
+    "room": "주방"
+  },
+  {
+    "id": "fridge_01",
+    "type": "fridge",
+    "room": "주방"
+  },
+  {
+    "id": "plug_kettle",
+    "type": "smart_plug",
+    "room": "주방",
+    "label": "전기포트"
+  }
+]
