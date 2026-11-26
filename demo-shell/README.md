@@ -12,8 +12,20 @@ Server. The App source and build entry points live in `app/`.
 ## Run
 
 ```bash
-scripts/demo-up --tagger # from the repository root, needs uv and mosquitto
+scripts/demo-up --tagger # from the repository root
 ```
+
+The launcher uses `uv`, `mosquitto` and Flutter. It runs `flutter build web`,
+serves the build and its preview proxy, and supplies the preview URL to the
+shell. Builds are cached under `/private/tmp` on macOS by the App tree,
+working build inputs and build settings. The launcher prints the URLs for
+you to open.
+
+Use `--no-app` for the placeholder or `--app-web DIR` to serve an existing
+build. A supplied build must target the chosen App proxy port, household
+and peer mode. `--proxy-port` defaults to 8731 and `--web-port` to 8732.
+Set `DEMO_STATE_ROOT` to choose a directory for launcher state and the build
+cache.
 
 Open the printed **Demo** URL. In fixture mode, choose 생일 주문 or 평소 장보기
 and press **공유** (Space/→) to submit the sample, or use **주문 분석하기** in
@@ -34,9 +46,9 @@ the returned `hub_api_key` as `SPIRA_HUB_KEY`.
 scripts/demo-up --server "$SERVER_URL" --household "$SPIRA_HOUSEHOLD_ID"
 ```
 
-Use the returned household ID. The launcher serves a local App preview with
-Server mode enabled and keeps its credentials in the proxy. In the shell,
-share your own screenshot. A missing Server read shows
+Use the returned household ID. The shell and App preview use that Server.
+The preview proxy keeps the credentials on the launcher machine. Submit your
+own screenshot using **주문 분석하기** in the App. A missing Server read shows
 서버가 아직 이 단계를 내보내지 않아요 on its stage. The shell uses the Server's
 clock and moments when available. Without a rehearsal clock, the cue skips
 clock advances and shows a notice. Text tags and illustrated device displays are
@@ -99,6 +111,8 @@ Open `/demo?recordings` or press **R** to name, star or play a run. Starred runs
 come first, newest first within each group. The index is also available at
 `GET /demo/api/recordings`. Open `/demo?recording=<id>` and press 다음
 (Space/→) to advance immediately through the saved stages and house moments.
+Saved playback uses the phone placeholder. It can run from the recorded
+Server and house data while the peers are offline.
 The house uses locally cached renderer assets when the Simulator is offline.
 Older recordings may need the Simulator to supply assets that have yet to be
 cached. Playback redraws TV and fridge artwork from recorded template,
@@ -157,7 +171,9 @@ Add `owners=1` to the query string to show the owner tags. They are hidden by de
 | Judgment stage order and evidence display | `ui/judgment.js` and `ui/judgment-view.js` | Server rationale |
 | Text tagger lists, validation and cache | `tag-lists.json` and `tagger.py` | |
 | Prepared item icons, storage words and props per unit | `ui/item-types.json` | Item names |
-| App contract polling and tag reads | `ui/episode.js` | |
+| Server episode discovery, polling and tag reads | `ui/episode.js` | |
+| Presenter sample order upload | `ui/order-share.js` | App order UI |
+| House record | `ui/house-record.js` | App calendar |
 | Reasoning stages and pacing | `ui/reasoning.js` | |
 | House timeline and cameras | `ui/house-timeline.js` | |
 | Presenter cues, navigation and rehearsal clock | `ui/presenter-cues.js`, `ui/presenter.js` | |
@@ -200,7 +216,7 @@ Node.js 22.15 or newer and also run directly via
 PYTHONPATH=demo-shell uv run --no-project --python 3.12 \
   --with-requirements demo-shell/requirements.txt --with-editable contracts/generated/python \
   --with pytest --with httpx2 \
-  python -m pytest -q demo-shell/tests
+  python -m pytest -q demo-shell/tests scripts/tests
 ```
 
 Rules the demo keeps:
