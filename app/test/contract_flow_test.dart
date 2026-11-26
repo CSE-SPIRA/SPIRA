@@ -1069,6 +1069,20 @@ void main() {
     },
   );
 
+  testWidgets(
+    'a closed order whose card was never seen is dated by its share time',
+    (tester) async {
+      final episode = fixture('episode.json')..['status'] = 'closed';
+      final peer = Peer()
+        ..cards = []
+        ..episodes['ep_9031'] = episode;
+      final app = controller(peer, store: TestStore(), fixture: false);
+      await openApp(tester, app);
+      expect(app.memoryDates.single.episodeId, 'ep_9031');
+      expect(app.memoryDates.single.startsAt, episode['shared_at']);
+    },
+  );
+
   for (final rewound in [false, true]) {
     testWidgets(
       'empty Server lists clear the restored closed preparation (clock rewound: $rewound)',

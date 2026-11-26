@@ -170,9 +170,24 @@ class AppController extends ChangeNotifier {
 
   List<MemoryDate> get memoryDates => [
     for (final row in _episodeHistory.values)
-      if (row.status == wire.EpisodeStatus.CLOSED)
-        ?row.cardIds.map((id) => _cardStarts[id]).nonNulls.firstOrNull,
+      if (row.status == wire.EpisodeStatus.CLOSED && row.cardIds.isNotEmpty)
+        // A closed card cannot be fetched again. When this device never saw
+        // the card, the order's share date marks the memory; a card seen
+        // without a time (held) has no day.
+        ?_memoryDate(row),
   ];
+
+  MemoryDate? _memoryDate(wire.EpisodeListEpisode row) {
+    final seen = row.cardIds.map((id) => _cardStarts[id]).nonNulls;
+    if (seen.isEmpty) {
+      return (
+        episodeId: row.episodeId,
+        cardId: row.cardIds.first,
+        startsAt: row.sharedAt,
+      );
+    }
+    return seen.where((date) => date.startsAt.isNotEmpty).firstOrNull;
+  }
 
   bool stopPending(String cardId) => _pendingStops.containsKey(cardId);
   bool stopUncertain(String cardId) => _uncertainStops.contains(cardId);
@@ -756,7 +771,12 @@ class AppController extends ChangeNotifier {
         startsAt: startsAt,
       );
     } else {
-      _cardStarts.remove(card.cardId);
+      // Seen without a time (held): no calendar day, and no share-date guess.
+      _cardStarts[card.cardId] = (
+        episodeId: card.episodeId,
+        cardId: card.cardId,
+        startsAt: '',
+      );
     }
   }
 
