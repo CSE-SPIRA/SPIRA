@@ -489,6 +489,14 @@ def device_controls(device: Device, *, appliance: bool) -> list[Control]:
         return []
     commands = set(device.commands)
     controls = []
+    if "color" in commands:
+        controls.extend(
+            Control(
+                f"color_{name}", f"조명 색 바꾸기 · {STATE_WORDS[f'light_{name}']}",
+                {"color": {"hue": hue, "saturation": 60, "brightness": 70}},
+            )
+            for name, hue in (("pink", 330), ("yellow", 55))
+        )
     if "color_temp" in commands:
         controls.extend(
             Control(
@@ -498,7 +506,10 @@ def device_controls(device: Device, *, appliance: bool) -> list[Control]:
         )
     if "play_mood" in commands:
         controls.extend(
-            Control(scene, f"{label} 켜기", {"play_mood": {"scene": scene}})
+            Control(
+                scene, f"음악 바꾸기 · {PLAYLISTS['calm']}" if scene == "calm" else f"{label} 켜기",
+                {"play_mood": {"scene": scene}},
+            )
             for scene, label in SCENES.items()
         )
     if "off" in commands and device.device_type == "display":
@@ -529,11 +540,10 @@ def device_controls(device: Device, *, appliance: bool) -> list[Control]:
             )
         )
     if "play" in commands:
-        controls.append(
-            Control(
-                "play",
-                "가족 모임 음악 재생",
-                {"play": {"playlist": "family", "volume": 30}},
+        controls.extend(
+            (
+                Control("play", "가족 모임 음악 재생", {"play": {"playlist": "family", "volume": 30}}),
+                Control("music_calm", f"음악 바꾸기 · {PLAYLISTS['calm']}", {"play": {"playlist": "calm", "volume": 30}}),
             )
         )
     if "stop" in commands:
