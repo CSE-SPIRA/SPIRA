@@ -172,7 +172,7 @@ export function createPresenter(context, ui) {
         const result = await exchange(path + name, { method: "POST", signal: AbortSignal.timeout(8000) });
         if (state.reader !== reader) return false;
         ui.recording.log("presenter", { action: name, status: result.status, result: result.body });
-        if (!result.ok) throw new Error(result.status);
+        if (!result.ok) throw Object.assign(new Error(result.status), { status: result.status });
         if (event && result.body?.occurred_at) ui.house.rememberFacts([{ event, at: result.body.occurred_at }]);
         await Promise.allSettled([ui.surface.refreshSnapshot(), ui.surface.refreshHouseMarkers()]);
         focus = [...state.facts].find(([key, fact]) => !before.has(key) && fact.event === (event ?? "person"))?.[1];
@@ -180,7 +180,8 @@ export function createPresenter(context, ui) {
       return true;
     } catch (error) {
       if (state.reader === reader) notice(`집에서 확인하지 못했어요. (${error.message})`);
-      return false;
+      // A timeout or proxy error may follow a World write. Keep waiting for its observation.
+      if (error.status >= 400 && error.status < 500 && error.status !== 408) return false;
     } finally {
       if (state.reader === reader) {
         state.homeBusy = false;
@@ -249,10 +250,14 @@ export function createPresenter(context, ui) {
     return ui.house.canEnterHouse() && !state.draft && (state.page === "house" || state.step >= ui.reasoning.reasonStep("plan"));
   }
 
+  const inTimeCue = (cue, { id, at }) => cue.momentIds.includes(id) && Date.parse(at) === cue.target;
+  const waitingForTimeCue = (cue, moments) => moments.some((moment) =>
+    inTimeCue(cue, moment) && !moment.ready && moment.lines.some(canObserveLine));
+
   function cueMomentIndex(cue, moments) {
     if (cue.kind === "time") {
-      return cue.momentIds.every((id) => moments.some((moment) => moment.id === id && moment.ready))
-        ? moments.findLastIndex(({ id }) => cue.momentIds.includes(id)) : -1;
+      return waitingForTimeCue(cue, moments) ? -1
+        : moments.findLastIndex((moment) => moment.ready && inTimeCue(cue, moment));
     }
     const index = moments.findLastIndex(({ event, ready }) => ready && event === cue.event);
     if (index < 0 || cue.event !== "guest_arrived") return index;
@@ -307,7 +312,9 @@ export function createPresenter(context, ui) {
     if (pendingCue && !pendingCue.running) {
       const { cue } = pendingCue;
       const observed = cueMomentIndex(cue, moments);
-      if (observed >= 0 || (cue.kind === "time" && (state.clockMissing || state.cueClockMissing))) {
+      const noTimedResult = cue.kind === "time" &&
+        (state.clockMissing || state.cueClockMissing || !waitingForTimeCue(cue, moments));
+      if (observed >= 0 || noTimedResult) {
         pendingCue = null;
         if (observed >= 0 && state.page === "house" && ui.house.goHouse(observed)) return;
       }
@@ -365,7 +372,7 @@ export function createPresenter(context, ui) {
         if (cue.until !== undefined && (clockNow() ?? Date.now()) >= cue.until) {
           throw new Error("손님을 맞이할 시간이 지났어요.");
         }
-        if (!await presenterAction(cue)) pendingCue = null;
+        if (await presenterAction(cue) === false) pendingCue = null;
       }
     } catch (error) {
       if (state.reader !== reader) return;

@@ -7,7 +7,7 @@ const HOME_CUES = {
 };
 
 const clockLabel = (at) => displayTime(at).split(" ").at(-1);
-const NO_EFFECT = new Set(["off", "failed", "blocked", "held"]);
+const NO_EFFECT = new Set(["off", "failed", "blocked", "unknown", "held", "stopped", "cancelled", "dropped"]);
 export const canObserveLine = ({ state }) => !NO_EFFECT.has(state);
 
 function scheduleEnd({ cards, intents, evidence }, guestWindows) {
