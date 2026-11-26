@@ -153,13 +153,7 @@ class _OrderPanelState extends State<_OrderPanel> {
           if (app.pickImages != null)
             Align(
               alignment: Alignment.centerLeft,
-              child: FilledButton.icon(
-                onPressed: app.pickingImages || app.hasPendingSelection
-                    ? null
-                    : app.chooseOrderImages,
-                icon: const Icon(Icons.photo_library_outlined),
-                label: const KoreanText('주문 분석하기'),
-              ),
+              child: _galleryButton(app, secondary: widget.collapsible),
             ),
           if (app.galleryError case final error?) StatusMessage(error),
           if (app.hasPendingSelection && !app.pickingImages)
@@ -193,6 +187,17 @@ class _OrderPanelState extends State<_OrderPanel> {
         ],
       ],
     );
+  }
+
+  Widget _galleryButton(AppController app, {required bool secondary}) {
+    final select = app.pickingImages || app.hasPendingSelection
+        ? null
+        : app.chooseOrderImages;
+    const icon = Icon(Icons.photo_library_outlined);
+    const label = KoreanText('주문 분석하기');
+    return secondary
+        ? OutlinedButton.icon(onPressed: select, icon: icon, label: label)
+        : FilledButton.icon(onPressed: select, icon: icon, label: label);
   }
 }
 
@@ -282,7 +287,7 @@ class _PreviewStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.symmetric(horizontal: DesignTokens.space20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -362,9 +367,9 @@ class _PreparationCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(appCardRadius),
         side: BorderSide(color: hero ? colors.outline : colors.outlineVariant),
       ),
-      margin: const EdgeInsets.symmetric(vertical: 6),
+      margin: const EdgeInsets.only(bottom: DesignTokens.space12),
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(DesignTokens.space16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           spacing: 8,

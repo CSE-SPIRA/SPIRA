@@ -8,7 +8,8 @@ void main() {
     final installation = jsonDecode(
       File('../hub/installation.example.json').readAsStringSync(),
     ) as Map<String, dynamic>;
-    final devices = (installation['devices']['devices'] as List<dynamic>)
+    final inventory = installation['devices'] as Map<String, dynamic>;
+    final devices = (inventory['devices'] as List<dynamic>)
         .cast<Map<String, dynamic>>();
     final bundled = jsonDecode(
       File('assets/sample-home.json').readAsStringSync(),

@@ -37,6 +37,7 @@ const _idlePollInterval = Duration(seconds: 30);
 const _activePollInterval = Duration(seconds: 3);
 
 typedef MemoryDate = ({String episodeId, String cardId, String startsAt});
+typedef _ObservedCardDate = ({MemoryDate date, String? sharedAt});
 typedef _LineRequest = ({
   String taskId,
   String text,
@@ -114,18 +115,19 @@ class AppController extends ChangeNotifier {
   final cards = <String, wire.Card>{};
   final accepted = <String>{};
   final _episodeHistory = <String, wire.EpisodeListEpisode>{};
-  final _cardStarts = <String, MemoryDate>{};
+  final _cardStarts = <String, _ObservedCardDate>{};
   final _captures = <String, List<Uint8List>>{};
   String? _lastIntake;
   String? _mainMemoryId;
   String? _closedRationaleId;
+  ({String episodeId, String sharedAt})? _savedPreviewMemory;
   final _startedTasks = <String, Set<String>>{};
   final _pendingStops = <String, Set<String>>{};
   final _uncertainStops = <String>{};
   final _pendingLines = <(String, String), _LineRequest>{};
   final controlErrors = <String, String>{};
   final _notifications = <String, List<String>>{};
-  final _memoryReads = <String, Future<void>>{};
+  final _rationaleReads = <String, Future<void>>{};
   final _rationales = <String, wire.Rationale>{};
   bool pickingImages = false;
   String? galleryError;
@@ -177,7 +179,7 @@ class AppController extends ChangeNotifier {
   wire.Episode? get mainMemory => episodes[_mainMemoryId];
 
   String? memoryStart(String episodeId, Iterable<String> cardIds) => cardIds
-      .map((cardId) => _cardStarts[cardId])
+      .map((cardId) => _cardStarts[cardId]?.date)
       .nonNulls
       .where((date) => date.episodeId == episodeId && date.startsAt.isNotEmpty)
       .firstOrNull
@@ -234,7 +236,7 @@ class AppController extends ChangeNotifier {
   ];
 
   MemoryDate? _memoryDate(wire.EpisodeListEpisode row) {
-    final seen = row.cardIds.map((id) => _cardStarts[id]).nonNulls;
+    final seen = row.cardIds.map((id) => _cardStarts[id]?.date).nonNulls;
     if (seen.isEmpty) {
       return (
         episodeId: row.episodeId,
@@ -346,12 +348,21 @@ class AppController extends ChangeNotifier {
     if (!browserPreview) {
       api.token = await store.read(_serverTokenKey) ?? api.token;
     }
-    // The browser preview talks to a fixture that starts fresh each run with the same IDs;
-    // a cached snapshot from an earlier run would show its finished cards before the share.
-    if (household == null || demoPreview) return;
+    if (household == null) return;
     final cached = await store.read(_snapshotKey);
     if (cached == null) return;
     final value = jsonDecode(cached) as Map<String, dynamic>;
+    final memoryId = value['mainMemoryId'] as String?;
+    if (demoPreview) {
+      // A preview peer can restart with the same IDs. Confirm the saved
+      // memory against fresh episode history before showing it.
+      final sharedAt = value['mainMemorySharedAt'] as String?;
+      if (memoryId != null && sharedAt != null) {
+        _savedPreviewMemory = (episodeId: memoryId, sharedAt: sharedAt);
+      }
+      _restoreCardStarts(value);
+      return;
+    }
     for (final data
         in (value['episodes'] as List<dynamic>).cast<Map<String, dynamic>>()) {
       final episode = wire.Episode.fromJson(data);
@@ -365,19 +376,11 @@ class AppController extends ChangeNotifier {
       cards[card.cardId] = card;
     }
     _cursor = value['cursor'] as String?;
-    _mainMemoryId = value['mainMemoryId'] as String?;
-    for (final entry in (value['cardStarts'] as List<dynamic>? ?? const [])) {
-      final fields = (entry as List<dynamic>).cast<String>();
-      final date = (
-        episodeId: fields[0],
-        cardId: fields[1],
-        startsAt: fields[2],
-      );
-      _cardStarts[date.cardId] = date;
-    }
+    _mainMemoryId = memoryId;
+    _restoreCardStarts(value);
     // Migrate dates already supplied by the Server in older snapshots.
     for (final card in cards.values) {
-      _recordStart(card);
+      _recordStart(card, episodes[card.episodeId]?.sharedAt);
     }
     cards.removeWhere(
       (_, card) =>
@@ -405,6 +408,20 @@ class AppController extends ChangeNotifier {
     );
   }
 
+  void _restoreCardStarts(Map<String, dynamic> value) {
+    for (final entry in (value['cardStarts'] as List<dynamic>? ?? const [])) {
+      final fields = entry as List<dynamic>;
+      final sharedAt = fields.length > 3 ? fields[3] as String? : null;
+      if (demoPreview && sharedAt == null) continue;
+      final date = (
+        episodeId: fields[0] as String,
+        cardId: fields[1] as String,
+        startsAt: fields[2] as String,
+      );
+      _cardStarts[date.cardId] = (date: date, sharedAt: sharedAt);
+    }
+  }
+
   Future<void> _saveSetup() => store.write(
     _setupKey,
     jsonEncode({
@@ -421,11 +438,17 @@ class AppController extends ChangeNotifier {
     jsonEncode({
       'cursor': _cursor,
       'mainMemoryId': _mainMemoryId,
+      'mainMemorySharedAt': mainMemory?.sharedAt,
       'accepted': accepted.toList(),
       'episodes': episodes.values.map((episode) => episode.toJson()).toList(),
       'cards': cards.values.map((card) => card.toJson()).toList(),
       'cardStarts': _cardStarts.values
-          .map((date) => [date.episodeId, date.cardId, date.startsAt])
+          .map((record) => [
+            record.date.episodeId,
+            record.date.cardId,
+            record.date.startsAt,
+            record.sharedAt,
+          ])
           .toList(),
       'started': _startedTasks.map(
         (card, tasks) => MapEntry(card, tasks.toList()),
@@ -837,22 +860,18 @@ class AppController extends ChangeNotifier {
     if (images.isNotEmpty) _captures[episodeId] = images;
   }
 
-  void _recordStart(wire.Card card) {
-    if (card.startsAt case final startsAt?) {
-      DateTime.parse(startsAt);
-      _cardStarts[card.cardId] = (
+  void _recordStart(wire.Card card, String? sharedAt) {
+    final startsAt = card.startsAt;
+    if (startsAt != null) DateTime.parse(startsAt);
+    _cardStarts[card.cardId] = (
+      date: (
         episodeId: card.episodeId,
         cardId: card.cardId,
-        startsAt: startsAt,
-      );
-    } else {
-      // Seen without a time (held): no calendar day, and no share-date guess.
-      _cardStarts[card.cardId] = (
-        episodeId: card.episodeId,
-        cardId: card.cardId,
-        startsAt: '',
-      );
-    }
+        // A held card has been seen without an execution date.
+        startsAt: startsAt ?? '',
+      ),
+      sharedAt: sharedAt,
+    );
   }
 
   Future<void> _refresh() async {
@@ -933,6 +952,14 @@ class AppController extends ChangeNotifier {
       final hasClosedCard = order != null &&
           order.status == wire.EpisodeStatus.CLOSED &&
           order.cardIds.isNotEmpty;
+      if (_savedPreviewMemory case final saved?) {
+        if (hasClosedCard &&
+            saved.episodeId == orderId &&
+            saved.sharedAt == order.sharedAt) {
+          _mainMemoryId = saved.episodeId;
+        }
+        _savedPreviewMemory = null;
+      }
       if (rewound || _mainMemoryId != orderId || !hasClosedCard) {
         _mainMemoryId = null;
       }
@@ -965,7 +992,7 @@ class AppController extends ChangeNotifier {
                 .isBefore(DateTime.parse(previous.updatedAt))) {
           continue;
         }
-        _recordStart(card);
+        _recordStart(card, row.sharedAt);
         if (row.status == wire.EpisodeStatus.CLOSED) continue;
         cards[card.cardId] = card;
         _confirmControls(card);
@@ -996,9 +1023,12 @@ class AppController extends ChangeNotifier {
             ? !listed.containsKey(pair.last)
             : !currentCards.containsKey(pair.first);
       });
-      _cardStarts.removeWhere(
-        (id, date) => currentCards[id]?.episodeId != date.episodeId,
-      );
+      _cardStarts.removeWhere((id, record) {
+        final row = currentCards[id];
+        return row == null ||
+            row.episodeId != record.date.episodeId ||
+            (record.sharedAt != null && row.sharedAt != record.sharedAt);
+      });
       _rationales.removeWhere(
         (id, _) => id != _mainMemoryId &&
             (!listed.containsKey(id) ||
@@ -1279,7 +1309,7 @@ class AppController extends ChangeNotifier {
       false;
 
   Future<void> _loadRationale(String id, {bool closed = false}) =>
-      _memoryReads.putIfAbsent(id, () async {
+      _rationaleReads.putIfAbsent(id, () async {
         try {
           final result = await api.rationale(id);
           if (result.episodeId != id) {
@@ -1301,7 +1331,7 @@ class AppController extends ChangeNotifier {
         } catch (_) {
           // The observation may arrive on a later poll.
         } finally {
-          _memoryReads.remove(id);
+          _rationaleReads.remove(id);
           if (!closed && !_disposed && _mainMemoryId == id) {
             unawaited(_loadRationale(id, closed: true));
           }
@@ -1333,8 +1363,10 @@ class AppController extends ChangeNotifier {
       return switch (error.code) {
         wire.ErrorCode.LINE_STARTED => '이미 시작된 항목은 바꿀 수 없어요.',
         wire.ErrorCode.INVALID_IMAGE => '서버가 이미지를 읽을 수 없어요. 새 캡처를 공유해 주세요.',
-        wire.ErrorCode.HOUSEHOLD_TYPES_INVALID =>
-          error.reason ?? '선택한 가구 유형을 함께 사용할 수 없어요.',
+        wire.ErrorCode.HOUSEHOLD_TYPES_INVALID => switch (error.reason) {
+          final reason? when RegExp(r'[가-힣]').hasMatch(reason) => reason,
+          _ => '함께 선택할 수 없는 가구 유형이에요.',
+        },
         _ => fallback,
       };
     }

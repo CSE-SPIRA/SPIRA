@@ -51,17 +51,23 @@ class SetupScreen extends StatelessWidget {
         'Google 캘린더',
         style: Theme.of(context).textTheme.headlineMedium,
       ),
-      const KoreanText('앞으로 14일의 일정을 참고해 준비할게요.'),
-      FilledButton(
-        onPressed: app.busy || app.readCalendar == null
-            ? null
-            : () => app.finishCalendar(connect: true),
-        child: const KoreanText('Google 캘린더 연결'),
-      ),
-      TextButton(
-        onPressed: app.busy ? null : () => app.finishCalendar(connect: false),
-        child: const KoreanText('건너뛰기'),
-      ),
+      if (app.readCalendar != null) ...[
+        const KoreanText('앞으로 14일의 일정을 참고해 준비할게요.'),
+        FilledButton(
+          onPressed: app.busy ? null : () => app.finishCalendar(connect: true),
+          child: const KoreanText('Google 캘린더 연결'),
+        ),
+        TextButton(
+          onPressed: app.busy ? null : () => app.finishCalendar(connect: false),
+          child: const KoreanText('건너뛰기'),
+        ),
+      ] else ...[
+        const KoreanText('Google 연결 없이 시작할 수 있어요.'),
+        FilledButton(
+          onPressed: app.busy ? null : () => app.finishCalendar(connect: false),
+          child: const KoreanText('건너뛰기'),
+        ),
+      ],
     ],
   );
 

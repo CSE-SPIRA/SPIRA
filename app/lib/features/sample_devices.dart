@@ -2,7 +2,6 @@ import 'dart:convert';
 
 // ignore: deprecated_member_use
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../app_controller.dart';
 import '../contracts.dart' as wire;
@@ -47,11 +46,18 @@ class _SampleDevicesState extends State<SampleDevices> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         spacing: DesignTokens.space12,
         children: [
-          KoreanText(
-            '예시 집',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: colors.onSurfaceVariant,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              KoreanText(
+                '예시 집',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+              ),
+              if (snapshot.hasData)
+                KoreanText('맡기기', style: theme.textTheme.bodySmall),
+            ],
           ),
           if (snapshot.hasError) const StatusMessage('예시 집을 불러오지 못했어요.'),
           if (snapshot.data case final inventory?)
