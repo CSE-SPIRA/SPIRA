@@ -1,12 +1,20 @@
-import { esc, rows } from "./markup.js";
-import { findTag, highlightsMarkup, itemIcon } from "./tags.js";
+import { esc, rows, skeletonBars } from "./markup.js";
+import { findTag, highlightsMarkup } from "./tags.js";
 
-export function quantityCards(items, itemTypes) {
-  return `<div class="item-grid">${rows(items, (item) => `<div class="item-tile" data-item="${esc(item.sourceId)}" data-type="${esc(item.id)}">
-    ${itemIcon(itemTypes, item.id)}
-    <div><strong>${esc(item.id)}</strong><small>${esc(item.name)}</small><small class="item-why" hidden></small></div>
-    <span class="count">${item.qty == null ? "수량 미확인" : esc(item.qty) + "개"}</span>
-  </div>`)}</div>`;
+const ITEM_COLUMNS = ["이름", "수량", "분류", "라벨", "속성"];
+
+export function extractionMarkup(items, maskedCount) {
+  const body = items
+    ? rows(items, ({ name, qty, group, label, attributes }) => {
+        const values = [name, qty, group, label, typeof attributes === "object" && attributes !== null
+          ? JSON.stringify(attributes) : attributes];
+        return `<tr>${rows(values, (value) => `<td>${esc(value)}</td>`)}</tr>`;
+      })
+    : `<tr>${ITEM_COLUMNS.map(() => `<td>${skeletonBars(1)}</td>`).join("")}</tr>`.repeat(3);
+  return `<table class="extraction-table" aria-label="추출 품목">
+    <thead><tr>${rows(ITEM_COLUMNS, (column) => `<th scope="col">${column}</th>`)}</tr></thead>
+    <tbody>${body}</tbody>
+  </table><p class="masked-count">가린 품목 ${maskedCount == null ? "" : esc(maskedCount) + "개"}</p>`;
 }
 
 const COMPARISON = {
@@ -91,10 +99,22 @@ export function slotsMarkup(groups, items, calendar, tags = []) {
   </div>`)}`;
 }
 
-export function paintTheme(text, theme) {
-  const index = theme ? text.indexOf(theme) : -1;
-  if (index < 0) return esc(text);
-  return esc(text.slice(0, index)) + `<span class="theme-text">${esc(theme)}</span>` + esc(text.slice(index + theme.length));
+export function contextMarkup(context, orderClock) {
+  const types = context?.householdTypes?.join(" · ") ?? "";
+  const comparison = context?.comparison;
+  const usual = comparison?.status === "list" ? comparison.usual ?? [] : [];
+  return `<article class="context-card">
+    <div class="context-order"><strong>주문 시각</strong><time>${esc(orderClock) || (context ? "" : skeletonBars(1))}</time></div>
+    <div class="context-columns">
+      <section><h2>이 집</h2><div class="context-types"><b>가구 유형</b> ${esc(types)}</div>
+        ${context ? `<h3>${comparisonText(comparison)}</h3>
+          <ul>${rows(comparison?.items ?? [], ({ item, why }) =>
+            `<li>${esc(item)} <small title="${esc(why)}">${esc(itemComparison(comparison, item).label)}</small></li>`)}</ul>
+          ${usual.length ? `<p class="context-usual">평소 품목 · ${esc(usual.join(" · "))}</p>` : ""}`
+          + calendarMarkup(context.candidates) : `<h3>평소와 다른 물건</h3>${skeletonBars(3)}<h3>가까운 일정</h3>${skeletonBars(2)}`}
+      </section>
+      <section>${context ? similarMarkup(context) : `<h2>비슷한 다른 집 주문</h2>${skeletonBars(4)}`}</section>
+    </div></article>`;
 }
 
 export function intentMarkup({ intents, reason, unbundled }, items, calendar, tags = []) {
@@ -109,11 +129,8 @@ export function intentMarkup({ intents, reason, unbundled }, items, calendar, ta
 export function judgmentBeatLine(beat) {
   switch (beat?.id) {
     case "items": return `물건 ${beat.items.length}종 읽음`;
-    case "unusual": return beat.comparison?.status === "list"
-      ? `평소와 다른 물건 ${beat.comparison.items?.length ?? 0}종` : comparisonText(beat.comparison);
-    case "calendar": return `가까운 일정 후보 ${beat.candidates.length}건`;
-    case "similar": return beat.counts?.length
-      ? `비슷한 다른 집 주문 ${beat.counts.reduce((total, { n }) => total + n, 0)}건` : "";
+    case "context": return `가까운 일정 후보 ${beat.candidates.length}건` + (beat.counts?.length
+      ? ` · 비슷한 다른 집 주문 ${beat.counts.reduce((total, { n }) => total + n, 0)}건` : "");
     case "slots": return `상황 단서 ${beat.groups.flat().filter(({ value }) => value).length}개`;
     case "intent": return beat.intents.length ? `의도 ${beat.intents.length}개` : "의도 없음";
     case "tasks": return [`할 일 ${beat.count}개`, beat.itemTaskCount && `냉장고 안내 ${beat.itemTaskCount}개`].filter(Boolean).join(" · ");

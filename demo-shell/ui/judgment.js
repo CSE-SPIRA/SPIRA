@@ -1,6 +1,6 @@
 export const SLOT_LABELS = { event: "행사", guests: "손님", activity: "활동", theme: "테마" };
 export const JUDGMENT_STAGES = {
-  extract: ["items"], context: ["unusual", "calendar", "similar"], intent: ["slots", "intent"], tasks: ["tasks"],
+  extract: ["items"], context: ["context"], intent: ["slots", "intent"], tasks: ["tasks"],
 };
 
 const HOUSEHOLD = "가구 유형";
@@ -20,17 +20,16 @@ function useCalendar(intents, calendar) {
 // has yet to publish. Keep the Server's order and its basis references.
 export function buildJudgment(items, rationale, { extract, extractMissing, tasks, maskedCount, itemTaskCount = 0 } = {}) {
   if (!extract && !extractMissing) return [];
-  const beats = extract ? [{ id: "items", items, maskedCount: rationale?.masked_count ?? maskedCount }] : [];
+  const beats = extract ? [{ id: "items", items, maskedCount: maskedCount ?? rationale?.masked_count }] : [];
   const evidence = rationale?.evidence;
   if (!evidence) return beats;
 
-  const { calendar, unusual_items, kb_counts, kb_examples, kb_note } = evidence;
-  beats.push(
-    { id: "unusual", comparison: unusual_items },
-    { id: "calendar", candidates: calendar },
-    { id: "similar", counts: kb_counts, examples: kb_examples.slice(0, 2), note: kb_note },
-  );
-  const { intents, none_reason, unbundled } = rationale;
+  const { calendar = [], household_types, unusual_items, kb_counts, kb_examples = [], kb_note } = evidence;
+  beats.push({
+    id: "context", householdTypes: household_types, comparison: unusual_items, candidates: calendar,
+    counts: kb_counts, examples: kb_examples.slice(0, 2), note: kb_note,
+  });
+  const { intents = [], none_reason, unbundled = [] } = rationale;
   if (!intents.length && !none_reason) return beats;
 
   if (intents.length) {
@@ -38,6 +37,6 @@ export function buildJudgment(items, rationale, { extract, extractMissing, tasks
       Object.entries(SLOT_LABELS).map(([key, label]) => ({ key, label, value: situation[key], basis: basis[key] }))) });
   }
   beats.push({ id: "intent", intents, reason: none_reason, unbundled });
-  if (tasks) beats.push({ id: "tasks", count: rationale.tasks.length, itemTaskCount });
+  if (tasks) beats.push({ id: "tasks", count: rationale.tasks?.length ?? 0, itemTaskCount });
   return beats;
 }

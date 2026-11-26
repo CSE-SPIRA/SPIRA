@@ -1,8 +1,8 @@
 # Demo shell
 
-**ACTIVE** · This guide describes operation and inputs for the demo shell.
-The phone mirrors [the App specification](../app/spec.md) and
-[shared vocabulary](../design/vocabulary.json).
+**ACTIVE** · This guide defines the demo shell's behaviour, operation and
+inputs. The [integration contracts](../contracts/) define Server payloads.
+The shell's phone is a simplified App view of the main lifecycle.
 
 At `/demo`, the phone stays on the left and the Server's judgment plays on the
 right. Before sharing, choose 집까지 or 계획까지 in the presenter header.
@@ -10,11 +10,20 @@ The `ep_9031` sample defaults to 집까지. Share from the phone and open the
 preparation card with the presenter cue. A house run opens 우리 집 after the
 Hub receives its plan. A plan run ends at 계획.
 
-The stage strip marks each stage done when its data arrives. A Hub plan receipt
-for the active episode at or after its share time marks 집 done. Items, home
-comparison, calendar and similar cases take turns
-as evidence. The intent beat keeps the situation, verdict and their source
-labels in view.
+The stage strip follows the episode status and arriving items, evidence,
+intents, tasks and cards. A Hub plan receipt for the active episode at or
+after its share time marks 집 done. The extraction table shows fields supplied
+by the Server, with empty cells for unexported fields. The context stage
+shows order time, household context and similar cases on one card. The
+intent stage keeps the situation, verdict and their source labels in view.
+
+| Check | Expected behaviour |
+| --- | --- |
+| Share an order | The phone shows receipt and reading. The live extraction stage MUST show a skeleton and fill it as data arrives. |
+| Advance while judgment is loading | Each stage MUST fill from its own export and preserve the unavailable notice for a missing export. The presenter controls live advancement. |
+| Open a recording | Playback MUST advance without dwell holds. |
+| Open the card and play the house | The phone MUST stay on the left and show Server line states, pending reactions and outcomes. Reasoning stays on the stage screens. |
+| Close the episode | The card MUST leave the phone's main screen. The execution day's calendar dot opens the memory sheet. |
 
 ## Run
 
@@ -25,7 +34,8 @@ scripts/demo-up --tagger # from the repository root, needs uv and mosquitto
 Open the printed **Demo** URL. In fixture mode, choose 생일 주문 or 평소 장보기, then tap
 다음 (Space/→) to share the sample or upload a screenshot from the phone.
 Keep pressing 다음 when its label changes to open the preparation card, visit the
-house and play its moments, then open 기록. The cue shows what it is waiting for.
+house and play its moments, then open the calendar and select its memory dot.
+The cue shows what it is waiting for.
 Use ← to go back and open 진행자 조작 to recover with the manual controls.
 The share uses the contract's `POST /v1/orders`. In fixture mode, sharing a
 sample queues its matching recording before uploading. To rehearse with your
@@ -47,8 +57,11 @@ clock and moments when available. Without a rehearsal clock, the cue skips
 clock advances and shows a notice. Text tags and illustrated device displays are
 disabled for these runs. The run logs include the selected Server URL.
 
-In a live run, press 다음 once per judgment beat. The cue names the next stage and waits for its data.
-Add `?auto=1` to play the live judgment automatically with the 2.2-second item hold and 1.6-second evidence and intent holds.
+In a live run, press 다음 to move to the next stage. A waiting stage shows its
+skeleton, then fills in place. The intent stage has separate situation and
+intent views. Add `?auto=1` for the optional timed judgment rehearsal.
+If you have a Server dashboard URL, pass it URL-encoded as the
+`dashboard` query parameter to display a link in the presenter header.
 
 The launcher starts with an empty fixture and fresh Hub and World databases.
 To start a fresh take, choose **새로 시작** in **진행자 조작** or in the notice
@@ -99,15 +112,12 @@ Story time follows the available Server clock or wall time on the ordinary live 
 
 Open `/demo?recordings` or press **R** to name, star or play a run. Starred runs
 come first, newest first within each group. The index is also available at
-`GET /demo/api/recordings`. A recording link (`/demo?recording=<id>`) plays from
-the shell with saved data and tags. Judgment stages hold for about
-three seconds each, with the evidence beats within their stage. House scenes
-play in order from saved observations and use locally cached renderer assets
-when the Simulator is offline. Older recordings need the Simulator to supply
-renderer assets that have yet to be cached. Playback redraws TV and fridge
-artwork from recorded template, palette, and motif codes. Earlier recordings
-with embedded artwork still play. Add
-`&dwell=2` to set the hold in seconds or `&auto=0` to step by hand.
+`GET /demo/api/recordings`. Open `/demo?recording=<id>` and press 다음
+(Space/→) to advance immediately through the saved stages and house moments.
+The house uses locally cached renderer assets when the Simulator is offline.
+Older recordings may need the Simulator to supply assets that have yet to be
+cached. Playback redraws TV and fridge artwork from recorded template,
+palette, and motif codes. Earlier recordings with embedded artwork still play.
 
 The old `/demo?episode=ep_9031&replay=1` link redirects to a completed local recording
 when available. Otherwise it keeps its read-only rehearsal behavior against the
@@ -128,9 +138,10 @@ in the living room. A set adds seven balloons to the bunch and three to the
 floor, up to each slot's count limit. The shell scene rules omit garland and confetti. A line
 palette can recolour the balloons after that line is observed.
 
-After the last house moment, 다음 opens 기록. The right area waits for the
-per-card verdicts and a fresh household memory read. The phone also shows
-its own record.
+After the last house moment, the phone shows the Server's verdict and line
+feedback when available. When the episode closes, the card leaves the main
+screen. Open 캘린더 and select the dot for the execution day to show the
+memory sheet. The sheet uses the episode, card and rationale observations.
 
 Deep links include `/demo?episode=ep_9031&step=3` and
 `/demo?episode=ep_9031&page=house`. They require a readable Server episode.
@@ -142,10 +153,9 @@ Add `owners=1` to the query string to show the owner tags. They are hidden by de
 | --- | --- |
 | Phone order screen and share stage | 앱 · 공유 |
 | Phone preparation screen and plan stage | 앱 · 카드 |
-| 추출, 맥락, 의도, 할 일 stages | 앱 · 판단 근거 |
-| Phone 우리 집 map | 앱 · 우리 집 |
+| 추출, 맥락, 의도, 할 일 stages | 서버 창 |
+| Phone calendar and memory sheet | 앱 · 캘린더 |
 | 3D house, device labels and house timeline | 시뮬레이터 · 집 |
-| Similar cases in the judgment scene | 서버 창 |
 
 ## Where to change what
 
@@ -163,7 +173,7 @@ Add `owners=1` to the query string to show the owner tags. They are hidden by de
 | 3D models, device faces and lamp anchor | [`simulator/spira_simulator/ui/house/house.js`](../simulator/spira_simulator/ui/house/house.js) | |
 | Web evidence chain shape, joins and fixed map devices | `ui/chain.js` | Panel renderers |
 | The next phone action and line switch rules | `ui/wire.js` | |
-| Judgment beat order and evidence display | `ui/judgment.js` and `ui/judgment-view.js` | Server rationale |
+| Judgment stage order and evidence display | `ui/judgment.js` and `ui/judgment-view.js` | Server rationale |
 | Text tagger lists, validation and cache | `tag-lists.json` and `tagger.py` | |
 | Prepared item icons, storage words and props per unit | `ui/item-types.json` | Item names |
 | App contract polling and tag reads | `ui/episode.js` | |
@@ -219,10 +229,9 @@ Rules the demo keeps:
   arrival, person actions and event end through its viewer and operator reads.
   The Hub relates plan lines to timings, trigger matches and verified
   device read-backs. Camera navigation only changes the view.
-- Close-up labels use the Simulator's observed device values and the current
-  moment name. Guest arrival opens on the entrance. When a matching device
-  read-back arrives, the active guest moment advances to the preparation line's
-  devices. The 3D fridge can show its observed notice.
+- The whole-house view marks each observed change. A marker opens an optional
+  close-up with the observed device values. The 3D fridge can show its observed
+  notice.
 - `GET /demo/api/hub` reads only the Hub's `/state`. Waiting actions and recorded
   run commands from received plans supply the device settings.
 - The plan and card project the linked rationale calendar for display. The

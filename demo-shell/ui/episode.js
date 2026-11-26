@@ -1,4 +1,4 @@
-import { readProblem, startedLines } from "./wire.js";
+import { readProblem, reactionConfirmed, startedLines } from "./wire.js";
 import { createRecorder } from "./run.js";
 
 export function createEpisodeReader(context, ui) {
@@ -26,7 +26,9 @@ export function createEpisodeReader(context, ui) {
       }
       state.cards = [...current.values()];
       const pending = state.reactionPending;
-      if (pending?.awaitingStop && current.get(pending.cardId)?.stopped) state.reactionPending = null;
+      if (pending && (state.episode?.status === "closed" || reactionConfirmed(current.get(pending.cardId), pending))) {
+        state.reactionPending = null;
+      }
     }
     state.started = startedLines(state.started, state.cards, state.rationale?.executions);
     ui.reasoning.refreshChain();
@@ -76,7 +78,7 @@ export function createEpisodeReader(context, ui) {
       state.started = new Set();
       state.reactionPending = null;
       state.controlError = "";
-      state.memory = undefined;
+      state.houseOnReceipt = state.memoryOpen = false;
       state.finalMemory = state.recordRequested = state.recordVisible = state.recordFinished = false;
       state.quietEnd = null;
       state.waiting = undefined;
@@ -109,6 +111,8 @@ export function createEpisodeReader(context, ui) {
         state.chain.ready.extract && !state.quietRamped.has(id) && state.quietEnd === null) {
         ui.presenter.moveClockTo(QUIET_END, { episodeId: id, signal: controller.signal }).catch(() => {});
       }
+      if (state.episode?.status === "read_failed") return;
+      if (state.episode?.status === "closed" && ui.phone.recordReady()) return;
       if (state.chain.cardReady && state.chain.hasEpisode &&
         (state.judgment.some(({ id }) => id === "tasks") || ui.reasoning.missingJudgment())) return;
       if (!state.config.fixture && state.chain.cardReady && state.readProblems.rationale) return;
@@ -127,6 +131,7 @@ export function createEpisodeReader(context, ui) {
     let payload;
     try {
       const body = await observe("cards", cardsPath(since), options, {
+        read,
         transform: (data) => ({ ...data, cards: data.cards.filter(({ episode_id }) => episode_id === id) }),
       });
       payload = { cards: body.cards, cursor: body.server_time };
@@ -182,19 +187,8 @@ export function createEpisodeReader(context, ui) {
     ]);
   }
 
-  async function refreshMemory() {
-    const { reader } = state;
-    const final = ui.phone.reviewsReady();
-    let problem = null;
-    const memory = await observe("memory", `/demo/api/server/v1/households/${encodeURIComponent(state.config.household_id)}/memory`,
-      { signal: AbortSignal.timeout(4000) }).catch((error) => {
-      if (!state.config.fixture) problem = readProblem(error.status);
-      return null;
-    });
-    if (state.reader !== reader || (state.finalMemory && (!final || !memory))) return;
-    if (memory || problem) acceptReadProblem("memory", problem);
-    state.memory = memory;
-    state.finalMemory = final && Boolean(memory);
+  // The house's ending hook redraws the episode and observation data just read by refreshCards.
+  function refreshMemory() {
     if (state.page === "house") ui.house.renderTimeline();
   }
 

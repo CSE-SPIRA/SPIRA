@@ -1,7 +1,7 @@
 import { sendScene } from "./scene-rules.js";
 
 export function createRecordingPlayback(context, ui) {
-  const { state, DWELL_MS, sleep } = context;
+  const { state } = context;
 
   function stamp(story = ui.presenter.clockNow() ?? (state.config?.fixture ? null : Date.now())) {
     return [new Date().toISOString(), Number.isFinite(story) ? new Date(story).toISOString() : null];
@@ -26,8 +26,6 @@ export function createRecordingPlayback(context, ui) {
     state.cards = frame.cards ?? [];
     state.hub = frame.hub ?? null;
     state.snapshot = frame.snapshot ?? null;
-    state.memory = frame.memory;
-    state.finalMemory = Boolean(frame.finalMemory && frame.memory);
     state.replayTime = frame.storyAt;
     ui.reasoning.refreshChain();
     ui.surface.applyHouseMarkers(frame.viewer);
@@ -42,53 +40,21 @@ export function createRecordingPlayback(context, ui) {
       else state.house.clearScene();
       if (moment) {
         ui.house.updateHousePresentation(moment);
-        ui.house.directHouse(moment);
+        ui.house.directHouse(moment, true);
       }
     }
+    applyReplayFrame(state.replayVisit.frame);
   }
 
   function playReplayVisit() {
     const visit = state.replay.house[state.replayStep];
-    clearTimeout(state.replaySceneTimer);
-    state.replayPending ??= [];
-    const previous = state.replayVisit;
-    if (previous) state.replayPending.push(...previous.scenes.slice(state.replaySceneIndex));
     state.replayVisit = visit;
-    state.replaySceneIndex = 0;
-    applyReplayFrame(visit.scenes[0]?.frame ?? visit.frame);
-
-    const dwell = DWELL_MS ?? 6500;
-    const showNext = () => {
-      const next = visit.scenes[state.replaySceneIndex++];
-      state.replayPending.push(next ?? { frame: visit.frame, moment: visit.moment });
-      flushReplayScenes();
-      if (state.replaySceneIndex < visit.scenes.length) {
-        state.replaySceneTimer = setTimeout(showNext, dwell / visit.scenes.length);
-      }
-    };
-    showNext();
-    if (state.page === "house") ui.house.renderTimeline();
+    state.replayPending ??= [];
+    state.replayPending.push(...(visit.scenes.length ? visit.scenes : [{ frame: visit.frame, moment: visit.moment }]));
+    applyReplayFrame(visit.frame);
+    flushReplayScenes();
+    if (state.page === "house") ui.house.renderTimeline({ instant: true });
   }
 
-  async function playRecordedHouse() {
-    const playback = {};
-    state.auto = playback;
-    while (state.auto === playback && state.page === "house" && !state.recordRequested) {
-      await sleep(DWELL_MS ?? 6500);
-      if (state.auto !== playback || state.page !== "house") return;
-      if (state.replayStep < ui.house.timeline().length - 1) ui.house.goHouse(state.replayStep + 1);
-      else {
-        if (ui.house.houseEnded(ui.house.timeline())) {
-          applyReplayFrame(state.replay.house.at(-1).frame);
-          ui.house.openRecord();
-        }
-        break;
-      }
-    }
-    if (state.auto === playback) state.auto = null;
-  }
-
-  return {
-    log, stamp, recordedMoment, playReplayVisit, playRecordedHouse, applyReplayFrame, flushReplayScenes,
-  };
+  return { log, stamp, recordedMoment, playReplayVisit, applyReplayFrame, flushReplayScenes };
 }

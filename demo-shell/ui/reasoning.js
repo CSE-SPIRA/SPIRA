@@ -4,13 +4,13 @@ import { buildChain } from "./chain.js";
 import { stageNotice } from "./wire.js";
 import { buildJudgment } from "./judgment.js";
 import {
-  calendarMarkup, comparisonText, intentMarkup, itemComparison, judgmentBeatLine, quantityCards, similarMarkup, slotsMarkup,
+  calendarMarkup, contextMarkup, extractionMarkup, intentMarkup, judgmentBeatLine, slotsMarkup,
 } from "./judgment-view.js";
-import { esc, rows, setMarkup } from "./markup.js";
+import { esc, rows, setMarkup, skeletonBars } from "./markup.js";
 import { findTag, lineWithTag } from "./tags.js";
 
 export function createReasoning(context, ui) {
-  const { OWNERS, state, $, AUTO_PLAY, motion, sleep, REPLAY, RECORDING, DWELL_MS } = context;
+  const { OWNERS, state, $, AUTO_PLAY, sleep, REPLAY, RECORDING } = context;
 
   const ownerTag = (owner) => `<span class="owner-tag">${OWNERS[owner]}</span>`;
 
@@ -26,7 +26,7 @@ export function createReasoning(context, ui) {
       },
     });
     state.judgment = buildJudgment(state.chain.items, rationale, {
-      extract: state.chain.ready.extract && (state.chain.items.length > 0 || !missingJudgment()),
+      extract: state.chain.ready.extract,
       extractMissing: Boolean(state.readProblems.episode),
       tasks: state.chain.ready.tasks, maskedCount: episode?.masked_count,
       itemTaskCount: state.chain.item_tasks.length,
@@ -37,7 +37,7 @@ export function createReasoning(context, ui) {
   function renderStageIndicator() {
     const scene = state.scenes.reason[state.step];
     const stage = state.recordVisible ? "record" : state.page === "house" ? "hub" : scene.id === "share" ? "extract" : scene.id;
-    const beat = state.page === "reason" && !stageNotice(stage, state.readProblems)
+    const beat = state.page === "reason" && !problemFor(stage)
       ? state.judgment.find(({ id }) => id === scene.beat) : null;
     const waiting = waitingStage(scene);
     if (waiting !== state.waiting?.stage) {
@@ -50,19 +50,18 @@ export function createReasoning(context, ui) {
     if (!retry) state.retryUntil = 0;
     const line = [help, judgmentBeatLine(beat), retry].filter(Boolean).join(" · ");
     $("stage-beat").toggleAttribute("data-ending", stage === "record" || waiting === "record" || waiting === "hub");
-    const ready = { ...state.chain.ready, record: ui.phone.recordReady() };
+    const ready = { ...state.chain.ready, record: state.episode?.status === "closed" && ui.phone.recordReady() };
     let prior = true;
     for (const id of ["extract", "context", "intent", "tasks", "plan"]) {
-      if (stageNotice(id, state.readProblems)) {
+      if (problemFor(id)) {
         ready[id] = false;
         continue;
       }
-      if (id === "plan" && missingJudgment()) break;
       prior = ready[id] = prior && ready[id];
     }
     state.flow(stage, ready, line);
 
-    if (!state.recordFinished && state.record && ((state.recordVisible && ui.phone.recordReady()) ||
+    if (!state.recordFinished && state.record && ((state.recordVisible && state.finalMemory) ||
         (state.page === "reason" && scene.id === "plan" && state.chain.cardReady && state.runPath === "plan"))) {
       state.recordFinished = true;
       ui.recording.log("finish", { stage: state.recordVisible ? "record" : "plan" });
@@ -72,12 +71,11 @@ export function createReasoning(context, ui) {
   function waitingStage(scene) {
     if (state.page === "house") return state.recordRequested && !state.recordVisible ? "record" : null;
     if (!state.episodeId || state.draft) return null;
-    if (scene.id === "plan") return stageNotice("plan", state.readProblems) ? null : !state.chain.cardReady ? "plan"
-      : state.runPath === "house" && !state.chain.ready.hub ? "hub" : null;
-    if (state.shownAt === null) return scene.id === "share" ? "extract" : scene.id;
-    if (AUTO_PLAY && performance.now() < state.shownAt + stageDwell()) return null;
-    const next = nextReasonStep();
-    return reasonReady(next) ? null : state.scenes.reason[next].id;
+    if (scene.id === "share" && !reasonReady(reasonStep("extract"))) return "extract";
+    if (scene.id === "plan" && state.chain.cardReady && state.runPath === "house" &&
+        state.cardOpen && !state.chain.ready.hub && state.episode?.status !== "held") return "hub";
+    if (!reasonReady(state.step)) return scene.id;
+    return null;
   }
 
   function intentSlots(intent) {
@@ -165,152 +163,63 @@ export function createReasoning(context, ui) {
   }
 
   function stageBody(scene) {
-    if (scene.id === "share") return "";
-    const problem = stageNotice(scene.id, state.readProblems);
+    const { id, beat } = scene;
+    if (id === "share") return "";
+    const problem = problemFor(id);
     if (problem) return `<p class="lead">${problem}</p>`;
-    if (scene.id === "plan" && !state.chain.cardReady && state.cardsRead && !state.config.fixture) {
-      return '<p class="lead">아직 도착한 준비 카드가 없어요.</p>';
+    const result = state.judgment.find((entry) => entry.id === beat);
+    if (id === "extract") {
+      if (state.episode?.status === "read_failed") return '<p class="lead">읽지 못했어요. 다시 보내 주세요.</p>';
+      return extractionMarkup(result?.items, result?.maskedCount);
     }
-    if (!stageReady(scene.id)) return `<p class="lead">${waitingForJudgment()}</p>`;
-    if (scene.id === "tasks") return tasksStage(state.chain);
+    if (id === "context") return contextMarkup(result, state.chain.orderClock);
+    if (!reasonReady(state.step)) {
+      const layout = { intent: "intent", tasks: "tasks", plan: "plan" }[id];
+      return `<div class="stage-skeleton" data-layout="${layout}">${skeletonBars(6)}</div>
+        <p class="lead">${waitingForJudgment()}</p>`;
+    }
+    if (id === "intent") {
+      const items = state.chain.items;
+      const calendar = state.chain.evidence.calendar;
+      const slots = state.judgment.find((entry) => entry.id === "slots");
+      const linked = calendar.filter(({ id }) => slots?.calendarUse.some(({ event }) => event.id === id));
+      const proofs = slots ? `<section id="judgment-slots">${slotsMarkup(slots.groups, items, calendar, state.tags)}</section>` : "";
+      const evidence = beat === "slots" && linked.length
+        ? `<section class="panel linked-calendar">${calendarMarkup(linked, slots.calendarUse, items)}</section>` : "";
+      const intent = beat === "intent"
+        ? `<section id="judgment-intent">${intentMarkup(result, items, calendar, state.tags)}</section>` : "";
+      return `<div id="judgment-scene">${evidence}${proofs}${intent}</div>`;
+    }
+    if (id === "tasks") return tasksStage(state.chain);
+    if (!state.chain.cardReady && state.cardsRead) return '<p class="lead">아직 도착한 준비 카드가 없어요.</p>';
     const receipt = state.runPath === "plan" && state.chain.receiptStory;
     return planStage(state.chain) + (receipt ? `<p class="lead">${esc(receipt)}</p>` : "");
   }
 
-  let flightVersion = 0;
-
-  async function flyItems(version) {
-    if (motion.matches || !Element.prototype.animate || state.mapOpen) return;
-    const sources = new Map([...$("phone-content").querySelectorAll(".receipt-row")]
-      .map((item) => [item.dataset.item, item]));
-    const targets = [...$("stage-copy").querySelectorAll(".item-tile")]
-      .filter((target) => sources.has(target.dataset.item));
-    if (!targets.length || !sources.size) return;
-    const slide = Number.parseFloat(getComputedStyle($("frame")).getPropertyValue("--phone-motion"));
-    const waits = targets.map((target) =>
-      target.animate([{ opacity: 0 }, { opacity: 0 }], { duration: slide, fill: "both" }));
-    await sleep(slide);
-    waits.forEach((animation) => animation.cancel());
-    if (version !== flightVersion || state.mapOpen || state.page !== "reason") return;
-    const frame = $("frame").getBoundingClientRect();
-    targets.forEach((target, index) => {
-      const source = sources.get(target.dataset.item)?.getBoundingClientRect();
-      const end = target.getBoundingClientRect();
-      if (!source?.width || !end.width) return;
-      const clone = target.cloneNode(true);
-      clone.classList.add("flight");
-      clone.setAttribute("aria-hidden", "true");
-      const scale = state.scale;
-      Object.assign(clone.style, {
-        left: `${(end.left - frame.left) / scale}px`, top: `${(end.top - frame.top) / scale}px`,
-        width: `${end.width / scale}px`, height: `${end.height / scale}px`, transformOrigin: "top left",
-      });
-      $("frame").append(clone);
-      const timing = { delay: index * 53, duration: 460, easing: "ease-out", fill: "both" };
-      const incoming = clone.animate([
-        { transform: `translate(${(source.left - end.left) / scale}px,${(source.top - end.top) / scale}px) scale(.5)`, opacity: 0 },
-        { opacity: 1, offset: .2 }, { transform: "none", opacity: 1 },
-      ], timing);
-      const uncover = target.animate([{ opacity: 0 }, { opacity: 0, offset: .88 }, { opacity: 1 }], timing);
-      incoming.onfinish = () => { clone.remove(); uncover.cancel(); };
-    });
-  }
-
-  function renderJudgment(copy, scene) {
-    if (!copy.dataset.judgment) {
-      copy.dataset.judgment = "shown";
-      setMarkup(copy, `<div id="judgment-scene">
-      <header class="judgment-head"><h1>주문의 판단 근거</h1>${ownerTag("reasoning")}</header>
-      <section id="judgment-items"><h2 id="judgment-items-heading"></h2><div id="judgment-tiles"></div>
-        <p id="judgment-masked" hidden></p><p id="judgment-comparison" hidden></p></section>
-      <div class="judgment-evidence"><section class="panel" id="judgment-calendar" hidden></section>
-        <section class="panel kb-panel" id="judgment-similar" hidden></section></div>
-      <section id="judgment-slots" hidden></section><section id="judgment-intent" hidden></section>
-    </div>`);
-    }
-
-    const beats = new Map(state.judgment.map((beat) => [beat.id, beat]));
-    const items = beats.get("items");
-    const showItems = ["items", "unusual"].includes(scene.beat);
-    $("judgment-items").hidden = !showItems;
-    if (showItems) {
-      const tiles = $("judgment-tiles");
-      const itemMarkup = items?.items.length ? quantityCards(items.items, state.itemTypes) : "";
-      const newTiles = tiles.dataset.content !== itemMarkup;
-      setMarkup(tiles, itemMarkup);
-      $("judgment-items-heading").textContent = items
-        ? `사진에서 물건 ${items.items.length}종을 읽었어요`
-        : missingJudgment() ? "저장된 판단 근거가 없어요." : "주문을 읽는 중이에요.";
-      $("judgment-masked").hidden = !items?.maskedCount;
-      $("judgment-masked").textContent = items?.maskedCount ? `가린 물건 ${items.maskedCount}개` : "";
-
-      const unusual = scene.beat === "unusual" ? beats.get("unusual") : null;
-      $("judgment-comparison").hidden = !unusual;
-      if (unusual) $("judgment-comparison").textContent = comparisonText(unusual.comparison);
-      for (const tile of tiles.querySelectorAll(".item-tile")) {
-        const { kind, label } = itemComparison(unusual?.comparison, tile.dataset.type);
-        if (tile.dataset.comparison !== kind) tile.dataset.comparison = kind;
-        const why = tile.querySelector(".item-why");
-        why.hidden = !label;
-        if (why.textContent !== label) why.textContent = label;
-      }
-      if (newTiles && itemMarkup && scene.beat === "items") flyItems(++flightVersion);
-    }
-
-    const calendar = beats.get("calendar");
-    const similar = beats.get("similar");
-    const slots = beats.get("slots");
-    const intent = beats.get("intent");
-    const candidates = calendar?.candidates ?? [];
-    const atSlots = scene.beat === "slots";
-    const linked = atSlots ? candidates.filter(({ id }) => slots?.calendarUse.some(({ event }) => event.id === id)) : candidates;
-    // Later beats keep their own sources visible without stacking every earlier panel.
-    for (const [id, show, markup] of [
-      ["calendar", (scene.beat === "calendar" && calendar) || (atSlots && linked.length),
-        () => calendarMarkup(linked, atSlots ? slots.calendarUse : null, items?.items ?? [])],
-      ["similar", scene.beat === "similar" && similar, () => ownerTag("server") + similarMarkup(similar)],
-      ["slots", (atSlots || scene.beat === "intent") && slots, () => slotsMarkup(slots.groups, items?.items ?? [], candidates, state.tags)],
-      ["intent", scene.beat === "intent" && intent, () => intentMarkup(intent, items?.items ?? [], candidates, state.tags)],
-    ]) {
-      const node = $(`judgment-${id}`);
-      node.hidden = !show;
-      if (show) setMarkup(node, markup());
-    }
-  }
-
   function renderReason() {
-    let scene = state.scenes.reason[state.step];
-    if ((AUTO_PLAY || RECORDING) && scene.beat === "slots" && omittedSlots()) {
-      scene = state.scenes.reason[++state.step];
+    if (state.scenes.reason[state.step].beat === "slots" && noSlots()) {
+      state.step += 1;
       state.shownAt = null;
     }
-    const { chain } = state;
-    const layout = $("reason-layout");
-    const copy = $("stage-copy");
-    if (state.shownAt === null && reasonReady(state.step)) state.shownAt = performance.now();
-    layout.dataset.stage = scene.id;
-    $("phone-dock").dataset.stage = scene.id;
+    const scene = state.scenes.reason[state.step];
+    const { id } = scene;
+    const ready = reasonReady(state.step);
+    if (state.shownAt === null && ready) state.shownAt = performance.now();
+    $("reason-layout").dataset.stage = id;
+    $("phone-dock").dataset.stage = id;
     renderStageIndicator();
     ui.phone.renderPhone();
-    const problem = stageNotice(scene.id, state.readProblems);
-    if (scene.beat && scene.beat !== "tasks" && !problem) {
-      renderJudgment(copy, scene);
-      ui.presenter.renderControls();
-      return;
-    }
-    delete copy.dataset.judgment;
-    document.querySelectorAll(".flight").forEach((clone) => clone.remove());
-    const headline = ["share", "plan"].includes(scene.id);
-    let title = problem ? STAGE_NAMES[scene.id] : stageReady(scene.id) ? scene.title : "결과를 기다려요";
-    if (scene.id === "plan" && chain.cardReady) title = chain.cards.length ? scene.readyTitle : scene.noCardTitle;
-    const owner = { share: "share", plan: "card" }[scene.id] ?? "reasoning";
+    const { chain } = state;
+    const title = id === "plan" && chain.cardReady && !problemFor(id)
+      ? chain.cards.length ? scene.readyTitle : scene.noCardTitle
+      : scene.title ?? STAGE_NAMES[id];
+    const owner = { share: "share", plan: "card" }[id] ?? "server";
     const markup = `<div class="copy-enter"><header class="stage-head">${ownerTag(owner)}
-    <h1${headline ? ' class="headline"' : ""}>${esc(title)}</h1><p class="lead">${esc(stageReady(scene.id) ? scene.lead : "")}</p>
+    <h1${id === "share" ? ' class="headline"' : ""}>${esc(title)}</h1>
+    ${ready && scene.lead && !problemFor(id) ? `<p class="lead">${esc(scene.lead)}</p>` : ""}
     </header>${stageBody(scene)}</div>`;
-    if (copy.dataset.content !== markup) {
-      setMarkup(copy, markup);
-      ++flightVersion;
-    }
+    $("stage-copy").setAttribute("aria-busy", String(!ready && !RECORDING));
+    setMarkup($("stage-copy"), markup);
     ui.presenter.renderControls();
   }
 
@@ -318,71 +227,67 @@ export function createReasoning(context, ui) {
     return state.scenes.reason.findIndex((scene) => scene.id === id);
   }
 
-  function stageReady(id) {
-    return state.chain.ready[id] ?? true;
+  function stageReady(scene) {
+    if (scene.id === "extract" && state.episode?.status === "read_failed") return true;
+    if (scene.id === "plan" && state.cardsRead && state.readProblems.episode && !state.config.fixture) return true;
+    return scene.beat ? state.judgment.some(({ id }) => id === scene.beat) : state.chain.ready[scene.id] ?? true;
   }
 
   function missingJudgment() {
-    return state.episode && state.rationaleMissing && !state.rationale && state.cards.length > 0;
+    return state.rationaleMissing && !state.rationale && state.chain.cardReady;
+  }
+
+  function noSlots() {
+    return state.judgment.some(({ id, intents }) => id === "intent" && !intents.length);
+  }
+
+  function problemFor(id) {
+    const problem = stageNotice(id, state.readProblems);
+    if (["context", "intent", "tasks"].includes(id)) {
+      if (missingJudgment()) return stageNotice(id, { rationale: "missing" });
+      if (problem && !state.chain.cardReady && ["received", "reading"].includes(state.episode?.status)) return null;
+    }
+    if (problem) return problem;
+    if (!RECORDING) return null;
+    const steps = state.scenes.reason.filter((scene) => scene.id === id);
+    if (steps.some(stageReady)) return null;
+    return stageNotice(id, { episode: "missing", rationale: "missing", cards: "missing" });
   }
 
   function reasonReady(step) {
-    const { id, beat } = state.scenes.reason[step];
-    if (stageNotice(id, state.readProblems)) return true;
-    if (id === "plan" && state.cardsRead && !state.config.fixture) return true;
-    if (!beat) return stageReady(id);
-    if (beat === "items" && missingJudgment()) return true;
-    return state.judgment.some((entry) => entry.id === beat);
-  }
-
-  function canOpenPlan() {
-    return REPLAY || state.cardOpen || (state.chain.cardReady && !state.cards.length) ||
-      stageNotice("plan", state.readProblems) || (!state.config.fixture && state.cardsRead && !state.cards.length);
+    const scene = state.scenes.reason[step];
+    return Boolean(problemFor(scene.id) || stageReady(scene));
   }
 
   function canPresentCard() {
-    return state.page === "house" || state.cardOpen || state.step >= reasonStep("tasks") ||
-      (missingJudgment() && state.step >= reasonStep("extract"));
-  }
-
-  function omittedSlots() {
-    return state.judgment.some(({ id, intents }) => id === "intent" && !intents.length);
+    return state.page === "house" || state.step >= reasonStep("plan");
   }
 
   function nextReasonStep() {
     let next = state.step + 1;
     const { id } = state.scenes.reason[state.step];
-    if (stageNotice(id, state.readProblems)) {
+    if (problemFor(id)) {
       while (state.scenes.reason[next]?.id === id) next += 1;
     }
-    const { beat } = state.scenes.reason[next] ?? {};
-    if (beat && beat !== "items" && missingJudgment()) return reasonStep("plan");
-    if (beat === "slots" && omittedSlots()) return next + 1;
+    if (state.scenes.reason[next]?.beat === "slots" && noSlots()) next += 1;
     return next;
   }
 
   function stageDwell() {
-    const { id, beat } = state.scenes.reason[state.step];
-    if (RECORDING) {
-      const beats = state.scenes.reason.filter((scene) => scene.id === id && (scene.beat !== "slots" || !omittedSlots()));
-      return (DWELL_MS ?? 3000) / beats.length;
-    }
-    if (beat === "items") return Math.max(1800, DWELL_MS ?? 2200);
-    if (beat && beat !== "tasks") return Math.max(1200, DWELL_MS ?? 1600);
-    return DWELL_MS ?? 3000;
+    const { beat } = state.scenes.reason[state.step];
+    if (beat === "items") return 2200;
+    if (beat && beat !== "tasks") return 1600;
+    return 3000;
   }
 
   async function autoAdvance() {
     if (!AUTO_PLAY || state.auto || state.draft) return;
     const run = {};
     state.auto = run;
-    while (state.auto === run && state.page === "reason" && (RECORDING || state.step < reasonStep("plan"))) {
+    while (state.auto === run && state.page === "reason" && state.step < reasonStep("plan")) {
       const remaining = state.shownAt === null ? 0 : Math.ceil(state.shownAt + stageDwell() - performance.now());
       if (remaining > 0) await sleep(remaining);
-      else if (state.shownAt !== null && canMoveReasonForward()) {
-        if (state.step === reasonStep("plan")) ui.presenter.enterHouse();
-        else setStep(nextReasonStep(), true);
-      } else if (state.shownAt !== null && state.step === reasonStep("plan")) break;
+      else if (state.shownAt !== null && canMoveReasonForward()) setStep(nextReasonStep(), true);
       else {
         renderStageIndicator();
         await sleep(120);
@@ -393,23 +298,23 @@ export function createReasoning(context, ui) {
 
   function setStep(step, automatic = false) {
     if (!automatic) state.auto = null;
-    const next = Math.max(0, Math.min(step, state.scenes.reason.length - 1));
+    let next = Math.max(0, Math.min(step, state.scenes.reason.length - 1));
+    if (state.scenes.reason[next].beat === "slots" && noSlots()) next += 1;
     if (next !== state.step) state.shownAt = null;
     state.step = next;
-    if (REPLAY && state.step >= reasonStep("plan")) state.cardOpen = true;
+    if (REPLAY && !RECORDING && next >= reasonStep("plan")) state.cardOpen = true;
     renderReason();
   }
 
   function canMoveReasonForward() {
     const { id } = state.scenes.reason[state.step];
-    if (id === "plan") return RECORDING ? state.replay.house.length > 0 && ui.house.canEnterHouse()
-      : REPLAY && ui.house.canEnterHouse() && stageReady("hub");
-    const next = nextReasonStep();
-    return (state.scenes.reason[next].id !== "plan" || canOpenPlan()) && reasonReady(next);
+    if (id === "plan") return ui.presenter.canEnterHouse();
+    if (state.episode?.status === "read_failed") return id === "share";
+    return reasonReady(state.step);
   }
 
   return {
-    themeFor, canPresentCard, reasonStep, reasonReady, stageDwell, setStep, renderReason, autoAdvance,
+    canPresentCard, reasonStep, reasonReady, setStep, renderReason, autoAdvance,
     renderStageIndicator, refreshChain, missingJudgment, canMoveReasonForward, nextReasonStep,
   };
 }

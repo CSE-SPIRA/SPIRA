@@ -61,8 +61,8 @@ export function buildChain({
     kbCounts: sources?.kb_counts ?? null, kbExamples: sources?.kb_examples ?? [], kbNote: sources?.kb_note ?? null,
   };
   const unbundled = rationale?.unbundled ?? [];
-  const items = (episode?.items ?? []).map(({ type, name, qty, item_id }) => ({
-    id: type, name, qty, unbundled: unbundled.includes(type), sourceId: item_id,
+  const items = (episode?.items ?? []).map(({ type, name, qty, item_id, grp, label, attributes }) => ({
+    id: type, name, qty, group: grp, label, attributes, unbundled: unbundled.includes(type), sourceId: item_id,
   }));
   const basisIds = (basis) => basis.map((id) => {
     if (id === "가구 유형" || evidence.calendar.some((event) => event.id === id)) return id;
@@ -143,7 +143,7 @@ export function buildChain({
     hasEpisode: Boolean(episode?.items), hasRationale: Boolean(rationale), hasHubPlan: hubReady,
     cardReady,
     ready: {
-      extract: items.length > 0 || Boolean(episode?.items && (sources || judged)),
+      extract: items.length > 0 || Boolean(episode?.items && (episode.masked_count > 0 || judged)),
       context: Boolean(sources),
       intent: intentReady,
       tasks: tasksReady,
