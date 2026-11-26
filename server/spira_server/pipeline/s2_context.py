@@ -2,7 +2,8 @@
 
 Output stored in `episodes.context`:
 
-    {"for_intent": {"order_time": {...}, "this_home": {...}, "kb_neighbors": {...}}, "snapshot": [case_id, ...]}
+    {"for_intent": {"order_time": {...}, "this_home": {...}, "kb_neighbors": {...}}, "snapshot": [case_id, ...],
+     "kb_search": {...}}    (kb_search: display and replay only, never in the S3 message)
 
 `this_home` is left out with HOME_CONTEXT=off, `kb_neighbors` with KB_MODE=off (spec §15).
 """
@@ -19,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import clock
+from . import stage_times
 from ..config import Config, get_config
 from ..db.engine import kb_engine, session_scope
 from ..db.models import CalendarEvent, Episode, Household, OrderItem
@@ -130,13 +132,33 @@ def calendar_block(s: Session, ep: Episode, cfg: Config, lists: KbLists) -> list
 # ------------------------------------------------------------------------------------------------ KB neighbours (§8.3)
 
 def kb_neighbors(types: list[str], calendar: list[dict], household_types: list[str], settings: Settings,
-                 cfg: Config, lists: KbLists) -> tuple[dict, list[str]]:
+                 cfg: Config, lists: KbLists) -> tuple[dict, list[str], dict]:
+    """(kb_neighbors block for S3, case ids used, search record for display)."""
     n = cfg.numbers
     q = embedding.embed_basket(types)
     cases = search(kb_engine(), q, kb_version_number=settings.kb_version_number, sample=settings.kb_sample,
                    limit=n.search_limit)
-    return summarize_neighbors(cases, types, calendar, household_types, home=settings.home_context == "on", n=n,
-                               lists=lists, sim_floor=n.sim_floor, max_use=n.max_use, base=base_rates(settings, n))
+    home = settings.home_context == "on"
+    block, snapshot = summarize_neighbors(cases, types, calendar, household_types, home=home, n=n, lists=lists,
+                                          sim_floor=n.sim_floor, max_use=n.max_use, base=base_rates(settings, n))
+    return block, snapshot, search_record(cases, snapshot, calendar, household_types, home=home, n=n)
+
+
+def search_record(cases: list[KbCase], used: list[str], calendar: list[dict], household_types: list[str], *,
+                  home: bool, n) -> dict:
+    """What the KB search returned, kept for display and replay only (§8.3 step 9). S3 never reads it."""
+    cal_tags = {t for e in calendar for t in e["tags"]}
+    house = set(household_types)
+    kept = set(used)
+    by_sim = sorted(cases, key=lambda c: (c.sim, c.case_id), reverse=True)
+    top = []
+    for c in by_sim[: n.search_record_top]:
+        cal, hh = context_bonus(c, cal_tags, house, home, n)
+        top.append({"case_id": c.case_id, "sim": round(c.sim, 4), "score": round(c.sim + cal + hh, 4),
+                    "intent_id": c.intent_id, "intent_text": c.intent_text, "items": sorted(c.items),
+                    "used": c.case_id in kept})
+    return {"searched": len(cases), "sim_floor": n.sim_floor, "above_floor": sum(1 for c in cases if c.sim > n.sim_floor),
+            "used": len(kept), "sims": [round(c.sim, 4) for c in by_sim], "top": top}
 
 
 _BASE: dict[tuple[int, float], tuple[float, dict[str, int]]] = {}
@@ -255,10 +277,12 @@ def build_context(episode_id: str) -> dict:
                 "calendar": calendar,
             }
     snapshot: list[str] = []
+    out: dict = {"for_intent": for_intent, "snapshot": snapshot}
     if settings.kb_mode == "on":
         types = list(dict.fromkeys(i.type for i in items))
-        for_intent["kb_neighbors"], snapshot = kb_neighbors(types, calendar, types_h, settings, cfg, lists)
-    return {"for_intent": for_intent, "snapshot": snapshot}
+        for_intent["kb_neighbors"], out["snapshot"], out["kb_search"] = kb_neighbors(
+            types, calendar, types_h, settings, cfg, lists)
+    return out
 
 
 def run(episode_id: str) -> bool:
@@ -272,6 +296,7 @@ def run(episode_id: str) -> bool:
         ep = s.execute(select(Episode).where(Episode.id == episode_id).with_for_update()).scalar_one()
         ep.context = context
         ep.stage = "s2"
+        stage_times.mark(ep, "s2")
     return True
 
 
@@ -279,5 +304,6 @@ def _fail(episode_id: str, message: str) -> None:
     with session_scope() as s:
         ep = s.execute(select(Episode).where(Episode.id == episode_id).with_for_update()).scalar_one()
         ep.status, ep.judged, ep.stage = "judged", True, "done"
+        stage_times.mark(ep, "s2")
         ep.error = {"stage": "s2", "message": message}
         ep.intent = {"bundles": [], "unbundled": [], "none_reason": "error", "error": {"stage": "s2"}}

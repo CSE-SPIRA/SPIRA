@@ -68,6 +68,11 @@ def iso(dt: datetime | None) -> str | None:
     return dt.astimezone(KST).replace(microsecond=0).isoformat()
 
 
+def iso_ms(dt: datetime) -> str:
+    """+09:00 with milliseconds: stage times for display and replay (internal, not a contract time)."""
+    return dt.astimezone(KST).isoformat(timespec="milliseconds")
+
+
 def weekday_ko(dt: datetime) -> str:
     return WEEKDAYS[dt.astimezone(KST).weekday()]
 

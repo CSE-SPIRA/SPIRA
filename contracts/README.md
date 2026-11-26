@@ -16,7 +16,7 @@ Version `0.1.0` (also in `enums.json`). Source: the Notion page *SPIRA integrati
 
 | Path | What |
 | --- | --- |
-| `openapi/` | `app.yaml` (app ↔ server), `hub.yaml` (hub ↔ server). The server never calls the hub |
+| `openapi/` | `app.yaml` (app ↔ server), `hub.yaml` (hub ↔ server), `demo.yaml` (demo shell ↔ server, `DEMO_MODE=1` only). The server never calls the hub |
 | `schemas/` | JSON Schema 2020-12, one file per body. `common.json` holds IDs, time formats and enums |
 | `enums.json` | Every closed set of string values and where it is used |
 | `rules.md` · `state-mapping.md` | Common rules · how card line states are derived (C-7) |

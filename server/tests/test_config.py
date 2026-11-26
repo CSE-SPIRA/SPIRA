@@ -14,12 +14,13 @@ def test_normal_values():
 
 def test_demo_values_exact():
     n = load_config(demo=True).numbers
-    assert n.quiet_s == 30
+    assert n.quiet_s == 0                 # judge as soon as the capture is read
     assert n.before_start_default_min == 3
     assert n.end_fallback_min == 10
     assert n.notice_after_door_min == 2
     assert n.guest_window_before_min == 1
-    assert n.group_window_h == 8          # not in demo: unchanged
+    assert n.group_window_h == 0          # every share is its own episode
+    assert n.max_images_per_call == 10    # not in demo: unchanged
 
 
 def test_durations_are_integers_in_their_unit():

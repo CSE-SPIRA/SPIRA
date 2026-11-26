@@ -28,6 +28,7 @@ def run_from_s2(episode_id: str) -> None:
         return
     s3_intent.run(episode_id)
     drafts = s4_tasks.generate(episode_id)
+    s4_tasks.store_result(episode_id, drafts)
     s5_plan.finalize(episode_id, drafts)
 
 

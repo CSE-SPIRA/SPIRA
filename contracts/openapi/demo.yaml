@@ -1,0 +1,82 @@
+# Demo shell <-> Server: how far one judgment has come, for the presenter screen. Only when DEMO_MODE=1 (else 404).
+# Auth: Authorization: Bearer <demo token> (same as the app). Not part of the app contract; the app never calls it.
+openapi: 3.1.0
+info:
+  title: SPIRA Demo API
+  version: 0.1.0
+  description: >-
+    Stage states and times of one episode, built from stored values only (server/spec.md §12.5). The stage results
+    themselves are read from GET /v1/episodes/{id} and …/rationale (app.yaml). With `at` the answer is the state at
+    that many seconds after the order was received, for replaying a past judgment at its real pace.
+servers:
+  - url: http://localhost:8000
+security:
+  - appToken: []
+paths:
+  /v1/demo/episodes/{episode_id}/trace:
+    get:
+      summary: Stage states, end times and LLM time of one judgment (live, or at `at` seconds for a replay).
+      parameters:
+        - {name: episode_id, in: path, required: true, schema: {$ref: '../schemas/common.json#/$defs/EpisodeId'}}
+        - name: at
+          in: query
+          required: false
+          description: Replay. Seconds after `started_at` (decimals allowed, ≥ 0). Stages that ended later are not done yet.
+          schema: {type: number, minimum: 0}
+      responses:
+        '200': {description: Trace, content: {application/json: {schema: {$ref: '#/components/schemas/Trace'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+components:
+  securitySchemes:
+    appToken: {type: http, scheme: bearer}
+  responses:
+    Error:
+      description: See error.code (enums.json error_code). 404 also when DEMO_MODE is off.
+      content: {application/json: {schema: {$ref: '../schemas/error.json'}}}
+  schemas:
+    Trace:
+      type: object
+      additionalProperties: false
+      required: [episode_id, status, mode, at, started_at, elapsed_s, finished, stages]
+      properties:
+        episode_id: {$ref: '../schemas/common.json#/$defs/EpisodeId'}
+        status: {$ref: '../schemas/common.json#/$defs/EpisodeStatus'}
+        mode: {type: string, enum: [live, replay]}
+        at: {type: [number, 'null'], description: The `at` asked for (replay), else null.}
+        started_at:
+          type: [string, 'null']
+          description: Wall time the order was received (ISO, milliseconds). null for orders stored before stage times.
+        elapsed_s:
+          type: [number, 'null']
+          description: Live = seconds from started_at to now; replay = at.
+        finished: {type: boolean, description: Every stage is done, failed or skipped (at `at` for a replay).}
+        stages:
+          type: array
+          minItems: 5
+          maxItems: 5
+          items: {$ref: '#/components/schemas/Stage'}
+    Stage:
+      type: object
+      additionalProperties: false
+      required: [name, state, done_s, llm]
+      properties:
+        name: {type: string, enum: [s1, s2, s3, s4, s5]}
+        state:
+          type: string
+          enum: [pending, running, done, failed, skipped]
+          description: failed = the episode stopped here (s1 read nothing, s2 KB down); later stages are skipped.
+        done_s: {type: [number, 'null'], description: Seconds from started_at to the end of this stage (done or failed).}
+        llm:
+          description: LLM calls of this stage (s1, s3, s4 only), once it is done; else null.
+          anyOf:
+            - {type: 'null'}
+            - type: object
+              additionalProperties: false
+              required: [calls, ms, input_tokens, output_tokens]
+              properties:
+                calls: {type: integer, minimum: 0}
+                ms: {type: integer, minimum: 0}
+                input_tokens: {type: integer, minimum: 0}
+                output_tokens: {type: integer, minimum: 0}

@@ -161,7 +161,7 @@ Every job takes the locks of §2.4 and is safe to run twice. On start: re-schedu
 
 - **Lock order.** Anything that decides for the whole household (grouping a capture, package linking, pause, calendar replace, S5 confirm and publish, reactions) first takes `SELECT … FROM households WHERE id = … FOR UPDATE`, then the episode rows it touches in `id` order. Never the other way round.
 - **One transaction per input.** An event, an execution result, an ack, a reaction or a capture is stored **together with every effect** (task status, line states, new plan version, `care_notices_shown`, window changes) in one transaction. Duplicates are found by the unique key (`event_id`, `result_id`, (`household_id`, `source_id`)) with `INSERT … ON CONFLICT DO NOTHING`; a conflict means the whole input was already applied, so nothing else runs. A crash before commit leaves nothing, and the resend is processed normally.
-- **Long steps.** LLM and KB calls never run inside a transaction. A pipeline run reads its inputs, calls outside any lock, then commits each stage's result and `episodes.stage` (`s1` items stored → `s2` context stored → `s5` plan published → `done`). A stage is re-run from its stored inputs after a crash. S5 re-reads the household state under the lock before confirming, so a result computed on stale state is merged, never blindly written.
+- **Long steps.** LLM and KB calls never run inside a transaction. A pipeline run reads its inputs, calls outside any lock, then commits each stage's result and `episodes.stage` (`s1` items stored → `s2` context stored → `s5` plan published → `done`). A stage is re-run from its stored inputs after a crash. Every stage also records, in the transaction that stores its result, the wall time it ended in `episodes.stage_times` (`received`, `s1_start`, `s1`, `s2`, `s3`, `s4`, `s5`; ISO with milliseconds; wall time, not the server clock, because the demo clock may move during a run; a re-run overwrites the keys it passes). S4 stores what it produced in `episodes.s4` when it ends, before S5 (display and replay only; S5 confirms from the drafts in memory as before). S5 re-reads the household state under the lock before confirming, so a result computed on stale state is merged, never blindly written.
 - **Hub and app replies** are built from the committed state.
 
 ---
@@ -242,8 +242,8 @@ Tables and starting values live in `server/config/*.yaml`, not in code (so new i
 
 | Key | Value | DEMO | Meaning |
 | --- | --- | --- | --- |
-| `group_window_h` | 8 | 8 | Captures within this many hours of the first capture form one episode |
-| `quiet_s` | 600 | 30 | Judge after this many seconds without a new capture |
+| `group_window_h` | 8 | 0 | Captures within this many hours of the first capture form one episode (DEMO: every share is its own episode, so a rehearsal never lands in an earlier, judged one; send the captures of one order in one request, ≤ `images_per_request`) |
+| `quiet_s` | 600 | 0 | Judge after this many seconds without a new capture (DEMO: right away) |
 | `max_images_per_call` | 10 | 10 | S1 images per LLM call |
 | `image_max_mb` / `images_per_request` | 5 / 3 | | Request limits |
 | `calendar_window_d` | 14 | 14 | Calendar events used, from `shared_at` |
@@ -258,6 +258,7 @@ Tables and starting values live in `server/config/*.yaml`, not in code (so new i
 | `w_cal` / `w_house` | 0.05 / 0.03 | | Context bonus (tuned) |
 | `search_limit` | 200 | 200 | KB candidates (`hnsw.ef_search` ≥ this) |
 | `max_use` | 50 | 50 | Cases counted |
+| `search_record_top` | 10 | 10 | Searched cases kept with their similarity for display (`context.kb_search`, §8.3 step 9) |
 | `cover` / `none_min` / `max_reps` | 0.8 / 0.10 / 3 | | Representative cases |
 | `base_refresh_min` | 60 | | KB base rates (cases per intent) are counted again after this (R48) |
 | `max_bundles` | 2 | 2 | Bundles kept |
@@ -402,7 +403,7 @@ Column types are binding; extra internal columns are allowed.
 | `calendar_events` | `household_id`, `id`, `start timestamptz`, `end timestamptz`, `tags text[]`, `tagged bool`, `fingerprint text`, `updated_at`; pk (`household_id`, `id`) | Titles are never stored. `fingerprint` = HMAC-SHA256(server secret, title + start + end), used only to detect changes |
 | `calendar_revisions` | `household_id pk`, `revision int` | +1 on every calendar PUT (§8.5) |
 | `episode_sources` | `household_id`, `source_id`, `episode_id`; pk (`household_id`, `source_id`) | Idempotency of `POST /v1/orders`, also while paused |
-| `episodes` | `id text pk`, `household_id`, `status` (§5.2), `shared_at`, `received_at`, `source_ids text[]`, `judged bool`, `stage` (`s1`/`s2`/`s5`/`done`, last committed step, §2.4), `quiet_due null`, `plan_version int`, `context jsonb` (S2), `intent jsonb` (S3), `error jsonb`, `closed_at`, `created_at`, `updated_at` | Index (`household_id`, `status`), (`household_id`, `shared_at`) |
+| `episodes` | `id text pk`, `household_id`, `status` (§5.2), `shared_at`, `received_at`, `source_ids text[]`, `judged bool`, `stage` (`s1`/`s2`/`s5`/`done`, last committed step, §2.4), `quiet_due null`, `plan_version int`, `context jsonb` (S2), `intent jsonb` (S3), `error jsonb`, `closed_at`, `created_at`, `updated_at`, `stage_times jsonb` (§2.4, migration 0003), `s4 jsonb null` (§10, migration 0003) | Index (`household_id`, `status`), (`household_id`, `shared_at`) |
 | `episode_images` | `id`, `episode_id`, `path`, `read bool`, `created_at` | Deleted after the extraction of its pass is committed (≤ 1 day) |
 | `orders` | `episode_id`, `order_no text null`, `mall text null`, `eta_text text null` | eta is stored only |
 | `order_items` | `episode_id`, `id text` (`it_…`, numbered inside the episode); pk (`episode_id`, `id`), `order_no null`, `name null`, `type null`, `grp null`, `label`, `qty int null`, `deal null`, `attributes jsonb`, `masked bool`, `created_at` | Masked rows: name/type/attributes null |
@@ -598,6 +599,7 @@ Masked items never reach S2 embedding, S3, S4, notices, rationale or the order e
 6. `intent_counts` = per `intent_id` among the kept cases (one row = one case): `n`, `share = n / kept`, and `base_share` = that intent's share of all searchable cases (same `source`, `KB_VERSION` and `KB_SAMPLE` filter as §8.4, `GROUP BY intent_id`; counted once per process and again after `base_refresh_min`, because the KB grows under one version while it is built). `none` always has a row (`n` 0 when absent). `base_total` = all searchable cases. Names from `contracts/kb/intents.json` (`none` → "의도 없음"). No label or threshold is added: S3 compares the two shares itself (R48).
 7. Representative cases (`pick_reps`): go through intents by count desc; take the best case (score, sim, case_id) of each intent until the covered share reaches `cover` (0.8), at most `max_reps` (3); `none` is always included if its share ≥ `none_min` (0.10). Keep only `case_id, items, intent_id, intent_text, situation, calendar_tags, case_household_types`. No item overlap count: exact names miss the same item under another name (R49).
 8. `snapshot` = the case ids used (for the rationale).
+9. `kb_search` (next to `for_intent` and `snapshot` in `context`, **never read by S3**, display and replay only): `{searched` = candidates returned, `sim_floor`, `above_floor` = candidates with `sim > sim_floor` (not capped by `max_use`, unlike `similar_count`), `used` = cases kept, `sims` = every candidate's similarity (desc, 4 decimals), `top` = the `search_record_top` (10) most similar `{case_id, sim, score, intent_id, intent_text, items, used}}`. Not written when `KB_MODE=off`.
 
 ### 8.4 KB search query
 
@@ -754,6 +756,7 @@ def build_schema(item_types, cal_ids, intent_ids):
 9. Turn `fridge_notices` into per-item notice tasks (text set, `kind`, `intent_change` kept in `meta`). **Shared-screen rule** (fridge and TV are seen by guests): a notice text must not name the occasion. Drop the notice (no task, recorded `public_text`) if its text contains, as a substring, the bundle's `intent_text`, the intent label name, `situation.event`, `situation.guests`, `situation.theme`, or any of the bundle's `calendar_tags`. A weekday is allowed ("토요일").
 10. For each situation task (§10.4): `task_id`, trigger, end, value fill, drop switched-off actions.
 11. Cap at `max_lines` (4) per bundle, in `needs` order.
+12. Store the result in `episodes.s4` with stage time `s4` (§2.4), for display and replay only: `{llm_called, whens` (bundle index → `{start, end, source}` or null), `skipped_bundles, drafts` (contract task + `need, line, target_room, bundle`, `meta` item/kind/slug), `dropped` (`{slug|item, reason}` plus, for tasks dropped in steps 7/8/10/11, what they said: `line, way, need, actions` as `device.cmd`)`}`. S5 still confirms from the drafts in memory.
 
 ### 10.2 This home's reactions (from `cases` with `source = this_home`)
 
@@ -794,7 +797,7 @@ Every `when` satisfies `start > now` and `end > start`; a window that fails is s
 
 ### 10.5 User message (`s4_blocks.yaml`)
 
-Order: `[의도 n]` per bundle (unclassified first line added) → `[관리법 문구가 필요한 물건]` → `[이 집]` (household types if any, rooms) → `[이 집 기기]` → `[이 집이 지난번 같은 의도에서 남긴 반응]` (only when reactions exist).
+Order: `[의도 n]` per bundle (unclassified first line added) → `[관리법을 확인할 물건]` → `[이 집]` (household types if any, rooms) → `[이 집 기기]` → `[이 집이 지난번 같은 의도에서 남긴 반응]` (only when reactions exist).
 
 - Intent block: situation fields "모름" when empty; time `"{요일}요일 {start}~{end} ({days}일 뒤)"` or `"모름 (일정이 아직 없음)"`; items with qty and attributes.
 - Notice item line: `- {type} × {qty or 모름} [{key}: {value}, …] · {group}{ · 의도 n의 물건}` — attributes included, so the notice can see 냉동, 손질 and the like (R47).
@@ -827,7 +830,7 @@ def build_task_schema(catalog, bundle_ids, notice_items):
 
 ### 10.8 Prompt summary (`s4_system.txt`)
 
-Needs first, then tasks only where a listed device fulfils a need, then notice texts. Only what the day needs (usually 1–3, never more than 4 per intent; zero is normal). Do not make per-item tasks (fridge, freeze, styler, mattress). One task = one purpose the user switches off. Never run money, heat-starting, door-opening or irreversible actions: use standby. `way` run/standby/notice; triggers before_start / guest_arrived / event_end as minutes only, no dates; guest_arrived only when guests is known. `target_room` = the device's room. Values are numbers or enum values inside the listed ranges, never words. `slug` is one lowercase English word. Notices: `kind` prep/storage, only sure facts, skip what is already processed or obvious, frozen items (`보관`/`가공` 냉동) never get thaw-and-chill advice on arrival (without an intent no notice, since freezing is obvious; with an intent, `intent_change` says to move them to the fridge the day before), adapt to the intent with `intent_change` — but the text is shown on a shared screen, so never name the occasion, guests or theme (a weekday is fine). Answer format (`[답의 형식]`, since S4 has no enforced schema): one JSON object following the appended schema, no prose or code fence, field names and enum values exactly as in the schema, `actions[].key` only from the schema, every `value` field filled with listed values or numbers in range, numbers unquoted, empty fields null.
+Needs first, then tasks only where a listed device fulfils a need, then notice texts. Only what the day needs (usually 1–3, never more than 4 per intent; zero is normal). Do not make per-item tasks (fridge, freeze, styler, mattress). One task = one purpose the user switches off. Never run money, heat-starting, door-opening or irreversible actions: use standby. `way` run/standby/notice; triggers before_start / guest_arrived / event_end as minutes only, no dates; guest_arrived only when guests is known. `target_room` = the device's room. Values are numbers or enum values inside the listed ranges, never words. `slug` is one lowercase English word. Notices: write only (a) a little-known prep or storage step whose omission costs something (spoils, makes ill, wasted) or (b) handling that this intent makes different from usual; everything else null, intent items included ("would a typical person get this wrong without the notice?"); never chill/keep cool/avoid sunlight/don't shake/check the date, even with a weekday (R51). `kind` prep/storage, only sure facts, skip what is already processed or obvious, frozen items (`보관`/`가공` 냉동) never get thaw-and-chill advice on arrival (without an intent no notice, since freezing is obvious; with an intent, `intent_change` says to move them to the fridge the day before), adapt to the intent with `intent_change` — but the text is shown on a shared screen, so never name the occasion, guests or theme (a weekday is fine). Answer format (`[답의 형식]`, since S4 has no enforced schema): one JSON object following the appended schema, no prose or code fence, field names and enum values exactly as in the schema, `actions[].key` only from the schema, every `value` field filled with listed values or numbers in range, numbers unquoted, empty fields null.
 
 ### 10.9 Failure handling
 
@@ -993,9 +996,9 @@ The API surface, paths, bodies and status codes are in `contracts/openapi/app.ya
 | `GET …/cards?since=` | `since` with a `+` left unencoded (arrives as a space) is accepted. Every card write takes the household lock and sets `updated_at = now()` and `seq` inside it; this read takes the same lock (shared), so no write can commit with an `updated_at` at or before the returned `server_time`. Return cards with `updated_at > since` (or all non-archived cards of open episodes), `server_time` = the time read under the lock. Archived cards are returned once more with their final state, then never |
 | `GET …/memory`, `DELETE …/memory/{case_id}` | §13.5 |
 | `POST /v1/orders` | §7.1 |
-| `GET /v1/episodes/{id}` | Items (unmasked), `item_count`, `masked_count`, item tasks with state, `card_ids` = non-archived cards (≤ 2, `episode.json`) |
+| `GET /v1/episodes/{id}` | Items (unmasked), `item_count`, `masked_count`, item tasks with state, `card_ids` = non-archived cards (≤ 2, `episode.json`). Readable from the start: `items` fill after S1, `item_tasks` and `card_ids` after S5 |
 | `PUT /v1/episodes/{id}/order` | §14 (order edit) → 202 |
-| `GET /v1/episodes/{id}/rationale` | Assemble from stored values only (no LLM): intents (+card ids, basis), evidence from `context` (`kb_counts` keeps `intent_id, name, n` of rows with `n` ≥ 1 only, as in `contracts/schemas/rationale.json`; the base shares stay in `context`, R48), unbundled, masked count, tasks (+devices with type and room), item tasks, executions (latest final result per task and device), observations (verdict and feedback per card) |
+| `GET /v1/episodes/{id}/rationale` | Readable from S2 on, so a poller sees each stage as it is stored: `404 not_found` until S2 stored `context` (unless the episode was judged before S2, e.g. all items masked); then `evidence`, with `intents` `[]` and `none_reason` null until S3; `card_id` null and `tasks`/`item_tasks` `[]` until S5. Assemble from stored values only (no LLM): intents (+card id of the card with that `bundle_index`, basis), evidence from `context` (`kb_counts` keeps `intent_id, name, n` of rows with `n` ≥ 1 only, as in `contracts/schemas/rationale.json`; the base shares stay in `context`, R48; `kb_counts` null when KB was off, `[]` when only the note; `kb_examples[].overlap` = the example's items with the exact same name in this order, for display only — S3 never sees it, R49), unbundled, masked count, tasks (+devices with type and room), item tasks, executions (latest final result per task and device), observations (verdict and feedback per card) |
 | `POST /v1/cards/{id}/reactions` | §11.7 |
 | `PUT /v1/hub/households/{hid}/devices` | The same device `id` twice in one list → 422 `validation_error` (`details.path` = the second one). Revision lower than stored → 409 `stale_revision`; equal → 200 no change; higher → store. Plans already published keep their `devices_revision` (the hub checks delegation at run time) |
 | `GET /v1/hub/plans?household=` | Latest version of every episode that §11.3 says is still pulled + `paused` + `devices_revision` |
@@ -1033,6 +1036,16 @@ Also 422 when a value is not one of the 20 types or a "pick one" axis (size, lif
 2. None → store the event only.
 3. Else set every such live task of that episode to `{event: package.brought_in, released: true, at: event.at}`; increment `care_notices_shown` for released fridge notices; publish a version; `plans_changed: true` — all in the event's transaction.
 4. Several packages of one order group: everything is released at the first one (known limit).
+
+### 12.5 Demo trace (`contracts/openapi/demo.yaml`, `DEMO_MODE=1` only)
+
+`GET /v1/demo/episodes/{id}/trace[?at=seconds]`, app bearer token; with `DEMO_MODE=0` it answers 404 like an unknown path. For the presenter screen (demo-shell): which of S1–S5 are done and when, read from `episodes.stage_times` (§2.4) and `llm_calls`; the stage results themselves stay in `GET /v1/episodes/{id}` and `…/rationale`. No LLM, nothing written.
+
+- `started_at` = `stage_times.received`; `done_s` = seconds from it to the stage's time. `elapsed_s` = now − `started_at` (wall), or `at`.
+- Per stage, in order: after a failed stage → `skipped`; time present (and ≤ `at` in a replay) → `done`, or `failed` for the stage the episode stopped at (`read_failed` → s1, `error.stage = s2` → s2; every item masked → s1 done, later skipped); else the first unfinished stage is `running` (s1 only once `s1_start` is reached; live only while `episodes.stage ≠ done`), the rest `pending`.
+- `llm` (done s1/s3/s4 only) = sums of that episode's `llm_calls` rows of the stage: `calls`, `ms`, tokens.
+- Episodes stored before stage times (no `received`): states from `episodes.stage`, every time null.
+- `finished` = no stage `pending`/`running`. A replay asks with `at` growing by the playback speed each second; the shell gates what it shows from `…/rationale` by these states.
 
 ---
 
@@ -1365,3 +1378,4 @@ Not yet in the Notion server spec (synchronised in one pass later). B.2 lists th
 | R48 | KB neighbours: `sim_floor` 0.6 → 0.70 (start value, tuned) and intent counts shown with the KB base rate (`share`, `base_share`, `base_total`; `none` always listed); the S3 KB block says to prefer what came up "more than usual" and to read `none` only when above its usual share. No thresholds or labels: S3 compares the two shares. Context bonuses kept (household bonus conditions left to tuning). Dry run B (kb-v1, 2,080 cases): cases sharing 0–1 items scored 0.58–0.69, all 200 were above 0.6 for the birthday order, the kept cases followed the KB's 64 % `none`, bonuses moved 8–26 of 50; no KB case shared 2+ items with the test orders (11-21, 서진) | §8.3, §8.6, §9.3, `s3_blocks.yaml`, `numbers.yaml` |
 | R49 | S3 KB examples drop the line "이번 주문과 겹치는 물건: N개 중 K개" and the rule "fewer shared items = less alike"; the how-to says example items may be the same item under another name. Exact names undercounted (B8: 28 of the 31 kept cases shared 0 names, yet were the right kid birthday cases); an embedding match per item name was measured and rejected, same and different items overlap (나무젓가락 0.92, 생일 초 0.67 vs 클라이밍 초크 0.71, 케이크 0.76). S3 sees both item lists and judges itself; search and counts unchanged (11-22, 서진) | §8.3, §9.3, `s3_blocks.yaml`, `s2_context.py` |
 | R50 | S1 `type` keeps an occasion or use word from the product name ("타요풍선 생일파티세트" → 생일 풍선, "생일초 공룡초 케이크 초" → 생일 초) and drops flavour, colour and character (theme attribute only); same product, same type. Dry run B8/B9 (same cart photo): S1 read 생일 풍선 / 포도맛 탄산음료 once and 풍선 세트 / 탄산음료 once; the whole similarity band moved about 0.025 and the KB neighbours above 0.70 went from 31 to 2 (KB block off). Shortening names (dropping modifiers) was rejected: occasion words are search cues and the theme already has its own attribute (11-22, 서진) | §7, `s1_system.txt` |
+| R51 | S4 fridge notices only for (a) little-known prep/storage whose omission costs something or (b) handling this intent changes; otherwise null even for intent items. The rule "an intent item gets an intent_change and a matching text" made every intent item get one (dry run: 탄산음료 "금요일 밤부터 냉장실에 세워 두어 차게", 생수 "직사광선을 피해 서늘한 곳에"). Step 3 and the block header no longer say every listed item needs a text; null examples for intent items added. The frozen-thaw example uses weekday placeholders (○요일 / △요일, the intent's schedule day and the day before) because the model copied its "토요일" verbatim (11-26, 서진) | §10.5, §10.8, `s4_system.txt`, `s4_blocks.yaml` |
