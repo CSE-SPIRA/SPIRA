@@ -1,5 +1,10 @@
 import 'contracts.dart' as wire;
 
+const sampleBirthdayOffset = Duration(minutes: 20);
+const sampleBirthdayDuration = Duration(hours: 1);
+const sampleBirthdayRenewalWindow = Duration(minutes: 10);
+const _seoulOffset = Duration(hours: 9);
+
 // The birthday uses the h_042 replay's Saturday, with the preview's four-hour window.
 final sampleCalendar = wire.Calendar(
   events: [
@@ -23,3 +28,32 @@ final sampleCalendar = wire.Calendar(
     ),
   ],
 );
+
+wire.Calendar serverSampleCalendar(DateTime serverTime) {
+  final birthday = sampleCalendar.events.first;
+  final start = serverTime.toUtc().add(sampleBirthdayOffset);
+  final shift = _seoulDay(start)
+      .difference(_seoulDay(DateTime.parse(birthday.start)));
+  return wire.Calendar(
+    events: [
+      wire.EventElement(
+        id: birthday.id,
+        title: birthday.title,
+        start: start.toIso8601String(),
+        end: start.add(sampleBirthdayDuration).toIso8601String(),
+      ),
+      for (final event in sampleCalendar.events.skip(1))
+        wire.EventElement(
+          id: event.id,
+          title: event.title,
+          start: DateTime.parse(event.start).add(shift).toIso8601String(),
+          end: DateTime.parse(event.end).add(shift).toIso8601String(),
+        ),
+    ],
+  );
+}
+
+DateTime _seoulDay(DateTime utcTime) {
+  final day = utcTime.add(_seoulOffset);
+  return DateTime.utc(day.year, day.month, day.day);
+}

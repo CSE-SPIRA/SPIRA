@@ -76,18 +76,17 @@ class AppController extends ChangeNotifier {
   bool get canShareExample =>
       demoPreview && !sharingExample && (canControl || serverUnavailable);
 
-  bool get _startsFromFirstRun => firstRun && (fixture || browserPreview);
-
   String get _environment => jsonEncode([
     fixture,
     api.baseUrl.toString(),
     configuredHousehold,
-    if (_startsFromFirstRun) 'first-run',
+    if (firstRun) 'first-run',
   ]);
   String get _scope => jsonEncode([_environment, household]);
   String get _setupKey => 'spira.setup.v1.$_environment';
   String get _snapshotKey => 'spira.snapshot.v1.$_scope';
   String get _calendarKey => 'spira.calendar.v1.$_scope';
+  String get _sampleAnchorKey => 'spira.sample-anchor.v1.$_scope';
   String get _serverTokenKey => 'spira.server-token.v1.$_environment';
   String get _connectionKey => 'spira.connection.v1.$_environment';
 
@@ -135,10 +134,17 @@ class AppController extends ChangeNotifier {
   bool get hasPendingSelection => _gallery != null;
 
   wire.Calendar _googleCalendar = wire.Calendar(events: []);
+  DateTime? _sampleAnchor;
+  bool get _usesReplayCalendar => fixture || browserPreview;
   bool get showsSampleCalendar =>
-      (fixture || browserPreview) && !_calendarConnected;
-  wire.Calendar get displayCalendar =>
-      showsSampleCalendar ? sampleCalendar : _googleCalendar;
+      !_calendarConnected && (_usesReplayCalendar || _sampleAnchor != null);
+  wire.Calendar get displayCalendar {
+    if (!showsSampleCalendar) return _googleCalendar;
+    return _usesReplayCalendar
+        ? sampleCalendar
+        : serverSampleCalendar(_sampleAnchor!);
+  }
+
   bool get calendarConnected => _calendarConnected;
   String? calendarError;
 
@@ -155,7 +161,6 @@ class AppController extends ChangeNotifier {
   String? _calendarFingerprint;
   bool _calendarFingerprintDirty = false;
   bool _calendarConnected = false;
-  bool _calendarClearPending = false;
   wire.Calendar? _initialCalendar;
   bool _inboxChanged = false;
   bool _disposed = false;
@@ -332,14 +337,13 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _restore() async {
-    final saved = _startsFromFirstRun ? null : await store.read(_setupKey);
+    final saved = firstRun ? null : await store.read(_setupKey);
     if (saved != null) {
       final setup = jsonDecode(saved) as Map<String, dynamic>;
       household = setup['household'] as String?;
       step = SetupStep.values.byName(setup['step'] as String);
       _calendarConnected = setup['calendarConnected'] as bool? ?? false;
       householdTypes.addAll((setup['types'] as List<dynamic>).cast<String>());
-      _calendarClearPending = setup['calendarClearPending'] as bool? ?? false;
       // An older calendar checkpoint already had a household but no code step.
       if (step == SetupStep.calendar && household != null) {
         step = SetupStep.household;
@@ -348,7 +352,7 @@ class AppController extends ChangeNotifier {
         connectionCode = await store.read(_connectionKey);
         if (connectionCode?.isEmpty == true) connectionCode = null;
       }
-    } else if (configuredHousehold != null && !_startsFromFirstRun) {
+    } else if (configuredHousehold != null && !firstRun) {
       household = configuredHousehold;
       step = SetupStep.ready;
     }
@@ -356,6 +360,10 @@ class AppController extends ChangeNotifier {
       api.token = await store.read(_serverTokenKey) ?? api.token;
     }
     if (household == null) return;
+    if (!_usesReplayCalendar) {
+      final anchor = await store.read(_sampleAnchorKey);
+      if (anchor != null) _sampleAnchor = DateTime.tryParse(anchor);
+    }
     final cached = await store.read(_snapshotKey);
     if (cached == null) return;
     final value = jsonDecode(cached) as Map<String, dynamic>;
@@ -443,7 +451,6 @@ class AppController extends ChangeNotifier {
       'step': step.name,
       'calendarConnected': _calendarConnected,
       'types': householdTypes.toList(),
-      'calendarClearPending': _calendarClearPending,
     }),
   );
 
@@ -564,7 +571,6 @@ class AppController extends ChangeNotifier {
     if (reader == null) throw StateError('Calendar unavailable');
     _googleCalendar = await reader(interactive: true);
     _calendarConnected = true;
-    _calendarClearPending = false;
     calendarError = null;
   }
 
@@ -574,9 +580,12 @@ class AppController extends ChangeNotifier {
       await disconnectCalendar?.call();
       _calendarConnected = false;
       _googleCalendar = wire.Calendar(events: []);
-      _calendarClearPending = true;
       await _saveSetup();
-      await resendCalendar();
+      if (_usesReplayCalendar) {
+        await resendCalendar();
+      } else {
+        await sync();
+      }
     });
     if (setupError case final error?) {
       calendarError = error;
@@ -584,24 +593,30 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> resendCalendar({wire.Calendar? selected}) {
+  Future<void> resendCalendar({wire.Calendar? selected}) =>
+      _syncCalendar(selected: selected);
+
+  Future<void> _syncCalendar({wire.Calendar? selected, DateTime? serverTime}) {
     final id = household;
     if (starting || _disposed || id == null) return Future<void>.value();
     // A full replacement must follow any older read already in flight.
     return _calendarQueue = _calendarQueue.then((_) async {
       if (_disposed) return;
       try {
-        if (showsSampleCalendar) {
-          await _sendCalendar(id, sampleCalendar, sample: true);
-          if (_calendarClearPending) {
-            _calendarClearPending = false;
-            await _saveSetup();
+        if (!_calendarConnected) {
+          if (!_usesReplayCalendar) {
+            if (serverTime == null) return;
+            final birthday = _sampleAnchor?.add(sampleBirthdayOffset);
+            if (birthday == null ||
+                (cards.isEmpty && _sampleNeedsRenewal(birthday, serverTime))) {
+              await store.write(_sampleAnchorKey, serverTime.toIso8601String());
+              _sampleAnchor = serverTime;
+            }
           }
-        } else if (_calendarClearPending) {
-          await _sendCalendar(id, wire.Calendar(events: []));
-          _calendarClearPending = false;
-          await _saveSetup();
-        } else if (readCalendar case final reader? when _calendarConnected) {
+          if (!_calendarConnected) {
+            await _sendCalendar(id, displayCalendar, sample: true);
+          }
+        } else if (readCalendar case final reader? when serverTime == null) {
           final calendar = selected ?? await reader(interactive: false);
           if (_disposed || !_calendarConnected) return;
           _googleCalendar = calendar;
@@ -618,6 +633,11 @@ class AppController extends ChangeNotifier {
     });
   }
 
+  bool _sampleNeedsRenewal(DateTime birthday, DateTime now) =>
+      !now.isBefore(birthday.add(sampleBirthdayDuration)) ||
+      (now.isBefore(birthday) &&
+          birthday.difference(now) < sampleBirthdayRenewalWindow);
+
   Future<void> _sendCalendar(
     String id,
     wire.Calendar calendar, {
@@ -632,7 +652,8 @@ class AppController extends ChangeNotifier {
         .toString();
     final key = _calendarKey;
     // A local preview peer may have restarted with the same address.
-    final firstSampleSync = sample && _calendarFingerprint == null;
+    final firstSampleSync =
+        sample && _usesReplayCalendar && _calendarFingerprint == null;
     final previous = _calendarFingerprint ?? await store.read(key);
     if (_disposed || (sample && !showsSampleCalendar)) return;
     if (firstSampleSync || previous != fingerprint) {
@@ -710,6 +731,14 @@ class AppController extends ChangeNotifier {
       shareIssue = inbox.issue;
       uploadError = null;
       _change();
+      // A share can launch the App before its demo calendar has been synced.
+      if (queuedShares > 0 &&
+          !_usesReplayCalendar &&
+          !_calendarConnected &&
+          !refreshed) {
+        await _refresh();
+        if (_disposed) return;
+      }
       for (final order in inbox.orders) {
         final ShareReceipt receipt;
         try {
@@ -925,6 +954,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> _refresh() async {
     final id = household!;
+    DateTime? calendarTime;
     try {
       final cursor = _cursor;
       var poll = await api.cards(id, since: cursor);
@@ -934,7 +964,7 @@ class AppController extends ChangeNotifier {
       final reconcile = cursor != null && (rewound || stale);
       final open = reconcile ? await api.cards(id) : null;
       if (rewound) poll = open!;
-      DateTime.parse(poll.serverTime);
+      final serverTime = DateTime.parse(poll.serverTime);
       final returnedOpenIds = open?.cards.map((card) => card.cardId).toSet();
 
       final cardUpdates = rewound
@@ -1161,6 +1191,9 @@ class AppController extends ChangeNotifier {
           when memoryId != _closedRationaleId) {
         unawaited(_loadRationale(memoryId, closed: true));
       }
+      if (!_calendarConnected && !_usesReplayCalendar) {
+        calendarTime = serverTime;
+      }
     } catch (error) {
       stale = true;
       serverUnavailable = isServerUnavailable(error);
@@ -1169,6 +1202,7 @@ class AppController extends ChangeNotifier {
           : _error(error, '새로 불러오지 못했어요. 다시 시도해 주세요.');
     }
     _change();
+    if (calendarTime != null) await _syncCalendar(serverTime: calendarTime);
     await _deliverNotifications();
   }
 
@@ -1442,9 +1476,11 @@ class AppController extends ChangeNotifier {
         }
       });
 
-  Future<({wire.Episode episode, wire.Rationale rationale})> readMemory(
-    String id,
-  ) async {
+  Future<({
+    wire.Episode episode,
+    wire.Rationale rationale,
+    List<String> cardIds,
+  })> readMemory(String id) async {
     final (episode, rationale) = await (
       api.episode(id),
       api.rationale(id),
@@ -1455,7 +1491,13 @@ class AppController extends ChangeNotifier {
         episode.status != wire.EpisodeStatus.CLOSED) {
       throw const FormatException('Wrong episode');
     }
-    return (episode: episode, rationale: rationale);
+    return (
+      episode: episode,
+      rationale: rationale,
+      cardIds: episode.cardIds.isEmpty
+          ? _episodeHistory[id]?.cardIds ?? const []
+          : episode.cardIds,
+    );
   }
 
   String _error(Object error, String fallback) {

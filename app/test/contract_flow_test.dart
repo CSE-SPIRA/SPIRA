@@ -281,11 +281,13 @@ AppController controller(
   CalendarReader? calendar,
   bool setup = false,
   bool fixture = true,
+  bool firstRun = false,
 }) => AppController(
   api: peer.client(),
   platform: platform ?? TestPlatform(),
   store: store ?? TestStore(),
   fixture: fixture,
+  firstRun: firstRun,
   configuredHousehold: setup ? null : 'h_042',
   pickImages: gallery,
   disconnectCalendar: disconnect,
@@ -491,6 +493,15 @@ void main() {
     await openApp(tester, reopened);
     expect(reopened.memoryDates.single.cardId, 'nc_331');
     expect(find.byKey(const ValueKey('memory-nc_331')), findsOneWidget);
+    await tapTab(tester, '캘린더');
+    await tester.tap(find.byTooltip('이전 달'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('memory-dot-ep_9031')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('2026-10-17')));
+    await tester.pumpAndSettle();
+    await tapText(tester, '준비 기억');
+    expect(find.text('설향 딸기 500g (냉장)'), findsOneWidget);
+    expect(find.text('아직 판정 전'), findsOneWidget);
   });
 
   for (final status in [404, 405, 501]) {
@@ -2326,15 +2337,206 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('AP-AT-11 disconnected production sends no sample calendar', (
+  testWidgets('AP-AT-18 sends one sample anchored to the Server clock', (
     tester,
   ) async {
-    final peer = Peer();
-    await openApp(tester, controller(peer, fixture: false));
+    final peer = Peer()..serverTime = '2026-11-30T23:53:05+09:00';
+    final store = TestStore();
+    final app = controller(peer, store: store, fixture: false);
+    await openApp(tester, app);
     await tapTab(tester, '캘린더');
-    expect(find.text('예시 일정'), findsNothing);
-    expect(peer.calendars, isEmpty);
+    expect(find.text('예시 일정'), findsOneWidget);
+    expect(find.text('2026년 12월'), findsOneWidget);
+    expect(find.text('생일 파티 00:13–01:13'), findsOneWidget);
+    final sample = peer.calendars.single;
+    final birthday = sample.events.first;
+    final start = DateTime.parse(birthday.start);
+    expect(start, DateTime.parse('2026-12-01T00:13:05+09:00'));
+    expect(
+      DateTime.parse(birthday.end).difference(start),
+      const Duration(hours: 1),
+    );
+    expect(sample.events.map((event) => event.title), [
+      '생일 파티',
+      '예방접종',
+      '가족 저녁',
+    ]);
+    expect(sample.events.skip(1).map((event) => seoulDay(event.start).day), [
+      4,
+      7,
+    ]);
+    expect(app.displayCalendar.toJson(), sample.toJson());
+    await app.sync();
+    await resumeApp(tester);
+    expect(peer.calendars, hasLength(1));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    peer.serverTime = '2026-12-01T00:03:05+09:00'; // Exactly ten minutes.
+    final reopened = controller(peer, store: store, fixture: false);
+    await openApp(tester, reopened);
+    expect(reopened.displayCalendar.toJson(), sample.toJson());
+    expect(peer.calendars, hasLength(1));
   });
+
+  testWidgets(
+    'AP-AT-18 renews near or after the birthday only without a card',
+    (tester) async {
+      final peer = Peer()..serverTime = '2026-11-26T14:00:00+09:00';
+      final app = controller(peer, fixture: false);
+      await openApp(tester, app);
+      expect(peer.calendars, hasLength(1));
+
+      peer.serverTime = '2026-11-26T14:11:00+09:00';
+      peer.episodes['ep_9031'] = fixture('episode.json')
+        ..['status'] = 'notified';
+      peer.cards = [fixture('card.v1.json')];
+      await app.sync();
+      expect(app.activeCards, hasLength(1));
+      expect(peer.calendars, hasLength(1));
+
+      peer.birthday
+        ..['status'] = 'closed'
+        ..['card_ids'] = [];
+      peer.cards = [];
+      await app.sync();
+      expect(app.activeCards, isEmpty);
+      expect(peer.calendars, hasLength(2));
+      expect(
+        DateTime.parse(peer.calendars.last.events.first.start),
+        DateTime.parse('2026-11-26T14:31:00+09:00'),
+      );
+      for (final time in ['14:31:00', '15:30:59']) {
+        peer.serverTime = '2026-11-26T$time+09:00';
+        await app.sync();
+        expect(peer.calendars, hasLength(2));
+      }
+
+      peer.serverTime = '2026-11-26T15:31:00+09:00';
+      peer.episodes['ep_9031'] = fixture('episode.json')
+        ..['status'] = 'notified';
+      peer.cards = [fixture('card.v1.json')];
+      await app.sync();
+      expect(app.activeCards, hasLength(1));
+      expect(peer.calendars, hasLength(2));
+
+      peer.birthday
+        ..['status'] = 'closed'
+        ..['card_ids'] = [];
+      peer.cards = [];
+      await app.sync();
+      expect(peer.calendars, hasLength(3));
+      expect(
+        DateTime.parse(peer.calendars.last.events.first.start),
+        DateTime.parse('2026-11-26T15:51:00+09:00'),
+      );
+      expect(app.displayCalendar.toJson(), peer.calendars.last.toJson());
+    },
+  );
+
+  testWidgets(
+    'AP-AT-18 an empty connected Google calendar suppresses samples',
+    (tester) async {
+      final peer = Peer();
+      final store = TestStore();
+      final empty = wire.Calendar(events: []);
+      final app = controller(
+        peer,
+        store: store,
+        fixture: false,
+        setup: true,
+        calendar: ({required interactive}) async => empty,
+      );
+      await connectCalendar(tester, app);
+      expect(app.calendarConnected, isTrue);
+      expect(peer.calendars.single.events, isEmpty);
+      peer.serverTime = '2026-12-03T14:00:00+09:00';
+      await app.sync();
+      expect(peer.calendars, hasLength(1));
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      final reopened = controller(
+        peer,
+        store: store,
+        fixture: false,
+        setup: true,
+        calendar: ({required interactive}) async => empty,
+      );
+      await openApp(tester, reopened);
+      await tapTab(tester, '캘린더');
+      expect(reopened.calendarConnected, isTrue);
+      expect(find.text('예시 일정'), findsNothing);
+      expect(peer.calendars, hasLength(1));
+      expect(peer.calendars.single.events, isEmpty);
+      await reopened.disconnectGoogle();
+      await tester.pumpAndSettle();
+      expect(peer.calendars, hasLength(2));
+      expect(find.text('예시 일정'), findsOneWidget);
+      expect(
+        DateTime.parse(peer.calendars.last.events.first.start),
+        DateTime.parse('2026-12-03T14:20:00+09:00'),
+      );
+    },
+  );
+
+  testWidgets('AP-AT-18 syncs the sample before a share that opens the App', (
+    tester,
+  ) async {
+    final peer = Peer()
+      ..episodeListError = 404
+      ..upload = (_) async => Peer.response({
+        'episode_id': 'ep_9031',
+        'status': 'received',
+      }, 202);
+    final platform = TestPlatform()
+      ..orders.add(
+        SharedOrder('cold-share', Peer.initialServerTime, [TestImage()]),
+      );
+    await openApp(tester, controller(peer, fixture: false, platform: platform));
+    final writes = peer.requests.where((r) => r.method != 'GET');
+    expect(writes.map((r) => r.url.path), [
+      '/v1/households/h_042/calendar',
+      '/v1/orders',
+    ]);
+    expect(find.text('받았어요'), findsOneWidget);
+  });
+
+  testWidgets(
+    'AP-AT-19 opens the configured Server household or forces setup',
+    (tester) async {
+      final peer = Peer()..episodeListError = 404;
+      final store = TestStore();
+      final app = controller(peer, store: store, fixture: false);
+      await openApp(tester, app);
+      expect(app.household, 'h_042');
+      expect(app.step, SetupStep.ready);
+      expect(find.byKey(const ValueKey('home-tabs')), findsOneWidget);
+      expect(find.text('Google 캘린더 연결'), findsNothing);
+      expect(peer.requests.map((r) => r.url.path), [
+        '/v1/households/h_042/cards',
+        '/v1/households/h_042/episodes',
+        '/v1/households/h_042/calendar',
+      ]);
+      expect(
+        peer.requests.every((r) => r.url.origin == 'https://test.invalid'),
+        isTrue,
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      final setup = controller(
+        peer,
+        store: store,
+        fixture: false,
+        firstRun: true,
+      );
+      await openApp(tester, setup);
+      expect(setup.household, isNull);
+      expect(setup.step, SetupStep.calendar);
+      expect(find.text('Google 캘린더'), findsOneWidget);
+      expect(find.text('건너뛰기'), findsOneWidget);
+      expect(find.byKey(const ValueKey('home-tabs')), findsNothing);
+      expect(peer.requests, hasLength(3));
+    },
+  );
 
   testWidgets('AP-AT-12 a card collapses the order and hides item guidance', (
     tester,
@@ -2425,7 +2627,9 @@ void main() {
       final app = controller(peer);
       await openApp(tester, app, size: const Size(390, 844));
       await tapTab(tester, '우리 집');
-      for (final room in ['현관', '거실', '주방']) {
+      expect(find.text('현관'), findsNothing);
+      expect(find.text('기기가 없어요.'), findsNothing);
+      for (final room in ['거실', '주방']) {
         final group = find.byKey(ValueKey('device-room-$room'));
         expect(
           find.descendant(of: group, matching: find.text(room)),

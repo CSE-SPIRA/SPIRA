@@ -21,33 +21,37 @@ class PreparationCalendar extends StatefulWidget {
 class _PreparationCalendarState extends State<PreparationCalendar> {
   AppController get app => widget.app;
   DateTime get _today => seoulDay(DateTime.now().toIso8601String());
-  late DateTime _selected = app.showsSampleCalendar
-      ? seoulDay(app.displayCalendar.events.first.start)
-      : _today;
-  late DateTime _month = DateTime.utc(_selected.year, _selected.month);
+  DateTime? _chosenDay;
 
-  void _showMonth(int offset) => setState(() {
-    _month = DateTime.utc(_month.year, _month.month + offset);
+  void _showMonth(DateTime month, int offset) => setState(() {
+    final next = DateTime.utc(month.year, month.month + offset);
     final today = _today;
-    _selected = today.year == _month.year && today.month == _month.month
+    _chosenDay = today.year == next.year && today.month == next.month
         ? today
-        : _month;
+        : next;
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final today = _today;
-    final firstColumn = _month.weekday % 7;
-    final days = DateTime.utc(_month.year, _month.month + 1, 0).day;
+    final calendar = app.displayCalendar;
+    final birthday = app.showsSampleCalendar
+        ? calendar.events.firstOrNull
+        : null;
+    final selected =
+        _chosenDay ?? (birthday == null ? today : seoulDay(birthday.start));
+    final month = DateTime.utc(selected.year, selected.month);
+    final firstColumn = month.weekday % 7;
+    final days = DateTime.utc(month.year, month.month + 1, 0).day;
     final rows = (firstColumn + days + 6) ~/ 7;
-    final events = [...app.displayCalendar.events]
+    final events = [...calendar.events]
       ..sort(
         (a, b) => DateTime.parse(a.start).compareTo(DateTime.parse(b.start)),
       );
     final dayEvents = <DateTime, List<wire.EventElement>>{};
     for (var number = 1; number <= days; number++) {
-      final day = DateTime.utc(_month.year, _month.month, number);
+      final day = DateTime.utc(month.year, month.month, number);
       final midnight = day.subtract(const Duration(hours: 9));
       final tomorrow = midnight.add(const Duration(days: 1));
       dayEvents[day] = events
@@ -78,25 +82,22 @@ class _PreparationCalendarState extends State<PreparationCalendar> {
             children: [
               Expanded(
                 child: KoreanText(
-                  '${_month.year}년 ${_month.month}월',
+                  '${month.year}년 ${month.month}월',
                   style: theme.textTheme.headlineMedium,
                 ),
               ),
               TextButton(
-                onPressed: () => setState(() {
-                  _selected = today;
-                  _month = DateTime.utc(today.year, today.month);
-                }),
+                onPressed: () => setState(() => _chosenDay = today),
                 child: const KoreanText('오늘'),
               ),
               IconButton(
                 tooltip: '이전 달',
-                onPressed: () => _showMonth(-1),
+                onPressed: () => _showMonth(month, -1),
                 icon: const Icon(Icons.chevron_left),
               ),
               IconButton(
                 tooltip: '다음 달',
-                onPressed: () => _showMonth(1),
+                onPressed: () => _showMonth(month, 1),
                 icon: const Icon(Icons.chevron_right),
               ),
             ],
@@ -129,6 +130,7 @@ class _PreparationCalendarState extends State<PreparationCalendar> {
                       row * 7 + col - firstColumn + 1,
                       days,
                       today,
+                      selected,
                       dayEvents,
                       memories,
                     ),
@@ -137,9 +139,9 @@ class _PreparationCalendarState extends State<PreparationCalendar> {
             ),
           const SizedBox(height: DesignTokens.space20),
           _DayAgenda(
-            day: _selected,
-            events: dayEvents[_selected] ?? const [],
-            memories: memories[_selected] ?? const [],
+            day: selected,
+            events: dayEvents[selected] ?? const [],
+            memories: memories[selected] ?? const [],
             onMemory: (memory) => showModalBottomSheet<void>(
               context: context,
               isScrollControlled: true,
@@ -157,19 +159,20 @@ class _PreparationCalendarState extends State<PreparationCalendar> {
     int number,
     int days,
     DateTime today,
+    DateTime selected,
     Map<DateTime, List<wire.EventElement>> events,
     Map<DateTime, List<MemoryDate>> memories,
   ) {
     if (number < 1 || number > days) return const SizedBox.shrink();
-    final day = DateTime.utc(_month.year, _month.month, number);
+    final day = DateTime.utc(selected.year, selected.month, number);
     return _MonthDay(
       key: ValueKey(day.toIso8601String().substring(0, 10)),
       day: day,
       today: day == today,
-      selected: day == _selected,
+      selected: day == selected,
       events: events[day] ?? const [],
       memories: memories[day] ?? const [],
-      onTap: () => setState(() => _selected = day),
+      onTap: () => setState(() => _chosenDay = day),
     );
   }
 }
@@ -387,7 +390,7 @@ class _CalendarMemoryState extends State<_CalendarMemory> {
 
   @override
   Widget build(BuildContext context) =>
-      FutureBuilder<({wire.Episode episode, wire.Rationale rationale})>(
+      FutureBuilder(
         future: _read,
         builder: (context, snapshot) => SafeArea(
           child: SingleChildScrollView(
@@ -398,9 +401,9 @@ class _CalendarMemoryState extends State<_CalendarMemory> {
                 episode: data.episode,
                 startsAt: widget.app.memoryStart(
                   data.episode.episodeId,
-                  data.episode.cardIds,
+                  data.cardIds,
                 ),
-                cardIds: data.episode.cardIds,
+                cardIds: data.cardIds,
               ),
               AsyncSnapshot(hasError: true) => Column(
                 children: [
