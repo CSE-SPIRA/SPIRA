@@ -4,6 +4,9 @@ Status: ACTIVE. This document owns App behavior and acceptance. Shared HTTP
 bodies, enum values, identifiers, and time rules remain under
 [contracts](../contracts/README.md). The App MUST use generated contract models.
 
+The [screen reference](screens.md) describes each screen, its states, words,
+data and controls.
+
 ## 1. Purpose and boundaries
 
 **P-R1.** The App MUST center on one preparation's lifecycle, from an order

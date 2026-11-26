@@ -4,6 +4,8 @@ Status: ACTIVE. This is the entry point for running and testing SPIRA's Android
 App. [App behavior and acceptance](spec.md) and
 [shared payloads](../contracts/README.md) have their own specifications.
 
+[Screen reference](screens.md)
+
 Main shows the Server's progress and the full order until its preparation card
 arrives. Cards and known episode history stay available when the Server has no
 episode list. Tap the order
