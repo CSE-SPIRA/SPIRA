@@ -396,7 +396,10 @@ class _CalendarMemoryState extends State<_CalendarMemory> {
               AsyncSnapshot(:final data?) => MemorySheet(
                 rationale: data.rationale,
                 episode: data.episode,
-                startsAt: widget.memory.startsAt,
+                startsAt: widget.app.memoryStart(
+                  data.episode.episodeId,
+                  data.episode.cardIds,
+                ),
                 cardIds: data.episode.cardIds,
               ),
               AsyncSnapshot(hasError: true) => Column(

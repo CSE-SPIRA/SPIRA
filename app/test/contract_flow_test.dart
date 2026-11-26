@@ -723,13 +723,7 @@ void main() {
       expect(find.text(explanation), findsNothing);
 
       Finder lineText(Map<String, dynamic> line, String label) {
-        final row = find.byWidgetPredicate(
-          (widget) =>
-              widget is Column &&
-              widget.children.whereType<Text>().any(
-                (text) => text.data == line['text'],
-              ),
-        );
+        final row = find.byKey(ValueKey(('nc_331', line['task_id'] as String)));
         return find.descendant(of: row, matching: find.text(label));
       }
 
@@ -986,6 +980,9 @@ void main() {
       final app = controller(peer);
       await openApp(tester, app);
       final guidance = find.text('설향 딸기 500g (냉장)');
+      expect(guidance, findsNothing);
+      await tester.tap(orderScan);
+      await tester.pumpAndSettle();
       expect(guidance, findsOneWidget);
       expect(
         find.ancestor(of: guidance, matching: find.byType(Card)),
@@ -1474,8 +1471,12 @@ void main() {
     expect(mainCards, findsNothing);
 
     await tapText(tester, '예시 주문으로 공유');
+    expect(orderScan, findsOneWidget);
+    expect(find.descendant(of: orderScan, matching: find.byType(Image)), findsOneWidget);
+    expect(find.text('읽은 품목 9개'), findsNothing);
+    await tester.tap(orderScan);
+    await tester.pumpAndSettle();
     expect(find.text('받았어요'), findsOneWidget);
-    expect(find.byType(Image), findsOneWidget);
     expect(find.text('읽은 품목 9개'), findsOneWidget);
     expect(mainCards, findsNWidgets(2));
     await tapTab(tester, '우리 집');
@@ -1824,7 +1825,7 @@ void main() {
   );
 
   testWidgets(
-    'AP-AT-7 and AP-AT-8 memory replaces the card and moves to its start date',
+    'AP-AT-7 and AP-AT-8 memory stays through close and acknowledgment keeps the dot',
     (tester) async {
       final store = TestStore();
       final peer = Peer()
@@ -1897,15 +1898,22 @@ void main() {
       final rationaleReadsBeforeClose = birthdayRationaleReads().length;
       await app.sync();
       await tester.pumpAndSettle();
-      expect(memory, findsNothing);
-      expect(mainCards, findsNothing);
+      expect(memory, findsOneWidget);
+      expect(card, findsNothing);
+      expect(find.text('확인'), findsOneWidget);
       expect(app.cards, isEmpty);
-      expect(birthdayRationaleReads(), hasLength(rationaleReadsBeforeClose));
+      expect(birthdayRationaleReads(), hasLength(rationaleReadsBeforeClose + 1));
       expect(store.values.values.join(), isNot(contains('Hidden KB example')));
 
       await tester.pumpWidget(const SizedBox.shrink());
       final cuts = controller(peer, store: store);
       await openApp(tester, cuts);
+      expect(memory, findsOneWidget);
+      await tapText(tester, '확인');
+      expect(memory, findsNothing);
+      await cuts.sync();
+      await tester.pumpAndSettle();
+      expect(memory, findsNothing);
       await tapTab(tester, '캘린더');
       final dot = find.byKey(const ValueKey('memory-dot-ep_9031'));
       final date = find.byKey(const ValueKey('2026-10-17'));
@@ -2078,6 +2086,74 @@ void main() {
     await tapTab(tester, '캘린더');
     expect(find.text('예시 일정'), findsNothing);
     expect(peer.calendars, isEmpty);
+  });
+
+  testWidgets('AP-AT-12 a card collapses the order and hides item guidance', (
+    tester,
+  ) async {
+    final peer = Peer()
+      ..episodes['ep_9031'] = (fixture('episode.json')
+        ..['status'] = 'judged'
+        ..['card_ids'] = []);
+    final app = controller(peer);
+    await openApp(tester, app);
+    const first = '설향 딸기 500g (냉장)';
+    final orderPanel = find.byKey(const ValueKey('main-order'));
+    final guidance = find.descendant(of: orderPanel, matching: find.text('완료'));
+    expect(orderScan, findsNothing);
+    expect(find.text(first), findsOneWidget);
+    expect(guidance, findsNWidgets(2));
+
+    peer.birthday
+      ..['status'] = 'notified'
+      ..['card_ids'] = ['nc_331'];
+    peer.cards = [fixture('card.v1.json')];
+    await app.sync();
+    await tester.pumpAndSettle();
+    expect(find.text('주문 9개 · $first 외 8개'), findsOneWidget);
+    expect(find.text(first), findsNothing);
+    expect(guidance, findsNothing);
+    expect(mainCards, findsOneWidget);
+    await tester.tap(orderScan);
+    await tester.pumpAndSettle();
+    expect(find.text(first), findsOneWidget);
+    expect(guidance, findsNWidgets(2));
+    await tester.tap(orderScan);
+    await tester.pumpAndSettle();
+    expect(find.text(first), findsNothing);
+    expect(guidance, findsNothing);
+  });
+
+  testWidgets('AP-AT-7 a newly shared order dismisses the closed memory', (
+    tester,
+  ) async {
+    final peer = Peer()
+      ..episodes['ep_9031'] = (fixture('episode.json')
+        ..['status'] = 'notified')
+      ..cards = [fixture('card.v1.json')];
+    final platform = TestPlatform();
+    final app = controller(peer, platform: platform);
+    await openApp(tester, app);
+    peer.birthday['status'] = 'closed';
+    peer.rationales['ep_9031'] = fixture('rationale.json');
+    peer.cards = [];
+    await app.sync();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('memory-nc_331')), findsOneWidget);
+
+    peer.upload = (_) async {
+      peer.episodes['ep_9150'] = fixture('episode.json', episode: 'ep_9150');
+      return Peer.response({'episode_id': 'ep_9150', 'status': 'received'}, 202);
+    };
+    platform.orders.add(
+      SharedOrder('new-order', '2026-11-04T19:30:41+09:00', [TestImage()]),
+    );
+    await app.sync();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('memory-nc_331')), findsNothing);
+    expect(app.currentOrderId, 'ep_9150');
+    await tapTab(tester, '캘린더');
+    expect(find.byKey(const ValueKey('memory-dot-ep_9031')), findsOneWidget);
   });
 
 }

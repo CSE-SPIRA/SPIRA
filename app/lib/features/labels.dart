@@ -30,10 +30,10 @@ String? endLabel(wire.EndState? state) => switch (state) {
 String normalizeKelvin(String text) =>
     text.replaceAllMapped(RegExp(r'(\d)\s+K\b'), (match) => '${match[1]}K');
 
-String eventLabel(wire.TriggerEvent event) => switch (event) {
-  wire.TriggerEvent.EVENT_END => '일정 종료',
-  wire.TriggerEvent.GUEST_ARRIVED => '손님 도착',
-  wire.TriggerEvent.PACKAGE_BROUGHT_IN => '택배를 집 안으로 들이는 때',
+String waitingLabel(wire.TriggerEvent event) => switch (event) {
+  wire.TriggerEvent.EVENT_END => '일정이 끝나길 기다리는 중',
+  wire.TriggerEvent.GUEST_ARRIVED => '손님 도착을 기다리는 중',
+  wire.TriggerEvent.PACKAGE_BROUGHT_IN => '택배가 들어오길 기다리는 중',
 };
 
 DateTime _seoulTime(String raw) =>

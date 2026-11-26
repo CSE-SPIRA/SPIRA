@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 // ignore: deprecated_member_use
 import 'package:flutter/material.dart';
 
@@ -21,7 +23,7 @@ class Preparations extends StatelessWidget {
   Widget build(BuildContext context) {
     final orderId = app.currentOrderId;
     final cards = app.activeCards;
-    final theme = Theme.of(context);
+    final memory = app.mainMemory;
     final main = RefreshIndicator(
       onRefresh: app.sync,
       child: ListView(
@@ -56,65 +58,36 @@ class Preparations extends StatelessWidget {
                 child: const KoreanText('다시 시도'),
               ),
             ),
-          Column(
-            key: const ValueKey('main-order'),
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            spacing: 10,
-            children: [
-              KoreanText('주문', style: theme.textTheme.titleLarge),
-              if (app.pickImages != null)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: FilledButton.icon(
-                    onPressed: app.pickingImages || app.hasPendingSelection
-                        ? null
-                        : app.chooseOrderImages,
-                    icon: const Icon(Icons.photo_library_outlined),
-                    label: const KoreanText('주문 분석하기'),
-                  ),
-                ),
-              if (app.galleryError case final error?) StatusMessage(error),
-              if (app.hasPendingSelection && !app.pickingImages)
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    OutlinedButton(
-                      onPressed: app.retryGallery,
-                      child: const KoreanText('다시 보내기'),
-                    ),
-                    TextButton(
-                      onPressed: app.discardGallery,
-                      child: const KoreanText('선택 취소'),
-                    ),
-                  ],
-                ),
-              if (orderId != null)
-                OrderExtraction(
-                  key: ValueKey(orderId),
-                  episode: app.episodes[orderId],
-                  images: app.orderImages(orderId),
-                  received:
-                      app.accepted.contains(orderId) ||
-                      app.orderImages(orderId).isNotEmpty,
-                )
-              else if (app.platform != null) ...[
-                const KoreanText('쇼핑 앱에서 주문 화면을 공유하면, 그 주문에 맞춰 집을 준비해요.'),
-                const KoreanText('주문 화면을 캡처하고 공유 메뉴에서 SPIRA를 선택해 주세요.'),
-              ],
-            ],
+          _OrderPanel(
+            key: ValueKey(orderId),
+            app: app,
+            orderId: orderId,
+            collapsible:
+                orderId != null &&
+                (memory?.episodeId == orderId ||
+                    cards.any((card) => card.episodeId == orderId)),
           ),
           const SizedBox(height: 18),
           Column(
             key: const ValueKey('main-preparations'),
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (cards.isNotEmpty)
-                KoreanText('SPIRA가 준비할 일', style: theme.textTheme.titleLarge),
+              if (memory != null)
+                MemorySheet(
+                  key: ValueKey('memory-${memory.cardIds.first}'),
+                  rationale: app.rationaleFor(memory.episodeId),
+                  episode: memory,
+                  startsAt: app.memoryStart(memory.episodeId, memory.cardIds),
+                  cardIds: memory.cardIds,
+                  onAcknowledge: app.acknowledgeMemory,
+                ),
               for (final (index, card) in cards.indexed)
                 if (app.isMemory(card))
                   MemorySheet(
                     key: ValueKey('memory-${card.cardId}'),
-                    rationale: app.rationaleFor(card.episodeId)!,
+                    rationale: app.rationaleFor(card.episodeId),
+                    episode: app.episodes[card.episodeId],
+                    startsAt: card.startsAt,
                     cardIds: [card.cardId],
                   )
                 else
@@ -131,6 +104,172 @@ class Preparations extends StatelessWidget {
         Expanded(child: main),
         _PreviewStrip(app: app),
       ],
+    );
+  }
+}
+
+class _OrderPanel extends StatefulWidget {
+  const _OrderPanel({
+    super.key,
+    required this.app,
+    required this.orderId,
+    required this.collapsible,
+  });
+
+  final AppController app;
+  final String? orderId;
+  final bool collapsible;
+
+  @override
+  State<_OrderPanel> createState() => _OrderPanelState();
+}
+
+class _OrderPanelState extends State<_OrderPanel> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final app = widget.app;
+    final orderId = widget.orderId;
+    final order = app.episodes[orderId];
+    final images = orderId == null
+        ? const <Uint8List>[]
+        : app.orderImages(orderId);
+    final theme = Theme.of(context);
+    return Column(
+      key: const ValueKey('main-order'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: DesignTokens.space8,
+      children: [
+        if (widget.collapsible)
+          _OrderSummary(
+            order: order,
+            thumbnail: images.firstOrNull,
+            expanded: _expanded,
+            onTap: () => setState(() => _expanded = !_expanded),
+          ),
+        if (!widget.collapsible || _expanded) ...[
+          if (!widget.collapsible)
+            KoreanText('주문', style: theme.textTheme.headlineMedium),
+          if (app.pickImages != null)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton.icon(
+                onPressed: app.pickingImages || app.hasPendingSelection
+                    ? null
+                    : app.chooseOrderImages,
+                icon: const Icon(Icons.photo_library_outlined),
+                label: const KoreanText('주문 분석하기'),
+              ),
+            ),
+          if (app.galleryError case final error?) StatusMessage(error),
+          if (app.hasPendingSelection && !app.pickingImages)
+            Wrap(
+              spacing: 8,
+              children: [
+                OutlinedButton(
+                  onPressed: app.retryGallery,
+                  child: const KoreanText('다시 보내기'),
+                ),
+                TextButton(
+                  onPressed: app.discardGallery,
+                  child: const KoreanText('선택 취소'),
+                ),
+              ],
+            ),
+          if (orderId != null)
+            OrderExtraction(
+              key: ValueKey(orderId),
+              episode: order,
+              images: images,
+              received:
+                  app.accepted.contains(orderId) ||
+                  app.orderImages(orderId).isNotEmpty,
+            )
+          else if (app.platform != null) ...[
+            const KoreanText('쇼핑 앱에서 주문 화면을 공유하면, 그 주문에 맞춰 집을 준비해요.'),
+            const KoreanText('주문 화면을 캡처하고 공유 메뉴에서 SPIRA를 선택해 주세요.'),
+          ] else
+            const KoreanText('주문 화면을 보내면 필요한 준비를 찾아드려요.'),
+        ],
+      ],
+    );
+  }
+}
+
+class _OrderSummary extends StatelessWidget {
+  const _OrderSummary({
+    required this.order,
+    required this.thumbnail,
+    required this.expanded,
+    required this.onTap,
+  });
+
+  final wire.Episode? order;
+  final Uint8List? thumbnail;
+  final bool expanded;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final count = order?.itemCount ?? 0;
+    final first = order?.items.firstOrNull?.name;
+    final summary = [
+      '주문 $count개',
+      if (first != null) '$first${count > 1 ? ' 외 ${count - 1}개' : ''}',
+      if (first == null && (order?.maskedCount ?? 0) > 0)
+        '가린 품목 ${order!.maskedCount}개',
+    ].join(' · ');
+    final colors = Theme.of(context).colorScheme;
+    return Material(
+      color: colors.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(DesignTokens.radius12),
+      clipBehavior: Clip.antiAlias,
+      child: Semantics(
+        expanded: expanded,
+        child: InkWell(
+          key: const ValueKey('order-scan-line'),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(DesignTokens.space8),
+            child: Row(
+              spacing: DesignTokens.space8,
+              children: [
+                SizedBox.square(
+                  dimension: DesignTokens.space32,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(DesignTokens.radius6),
+                    child: thumbnail == null
+                        ? const Icon(Icons.receipt_long_outlined, size: 20)
+                        : Image.memory(
+                            thumbnail!,
+                            fit: BoxFit.cover,
+                            cacheWidth: 96,
+                            semanticLabel: '주문 사진',
+                            errorBuilder: (_, _, _) => const Icon(
+                              Icons.receipt_long_outlined,
+                              size: 20,
+                            ),
+                          ),
+                  ),
+                ),
+                Expanded(
+                  child: KoreanText(
+                    summary,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+                Icon(
+                  expanded ? Icons.expand_less : Icons.expand_more,
+                  color: colors.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -233,7 +372,10 @@ class _PreparationCard extends StatelessWidget {
           children: [
             Semantics(
               header: true,
-              child: KoreanText(card.text, style: theme.textTheme.titleLarge),
+              child: KoreanText(
+                card.text,
+                style: theme.textTheme.headlineMedium,
+              ),
             ),
             if (card.startsAt case final start?)
               Wrap(
@@ -250,7 +392,7 @@ class _PreparationCard extends StatelessWidget {
                   ),
                   if (card.summary.waitingFor case final event?)
                     KoreanText(
-                      '${eventLabel(event)}을 기다리는 중',
+                      waitingLabel(event),
                       style: theme.textTheme.bodySmall,
                     ),
                 ],
@@ -261,7 +403,7 @@ class _PreparationCard extends StatelessWidget {
               const StatusMessage('이 준비가 중지됐어요.'),
             if (app.controlErrors[card.cardId] case final error?)
               StatusMessage(error),
-            for (final line in card.lines.take(4)) ...[
+            for (final line in card.lines) ...[
               const Divider(height: 1),
               _PreparationLine(app: app, card: card, line: line),
             ],
@@ -304,56 +446,74 @@ class _PreparationLine extends StatelessWidget {
     final pending = app.linePending(card, line);
     final outcome = endLabel(line.endState);
     final on = line.state != wire.LineState.OFF;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      spacing: 12,
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            spacing: 4,
-            children: [
-              KoreanText(
-                normalizeKelvin(line.text),
-                style: theme.textTheme.titleMedium,
-              ),
-              if (timing != null)
+    return Padding(
+      key: ValueKey((card.cardId, line.taskId)),
+      padding: const EdgeInsets.symmetric(vertical: DesignTokens.space4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: DesignTokens.space12,
+        children: [
+          Expanded(
+            flex: 3,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              spacing: DesignTokens.space4,
+              children: [
+                if (timing != null)
+                  KoreanText(
+                    relation == null || relation == timing
+                        ? timing
+                        : '$timing · $relation',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
                 KoreanText(
-                  relation == null || relation == timing
-                      ? timing
-                      : '$timing · $relation',
-                  style: theme.textTheme.bodySmall,
+                  normalizeKelvin(line.text),
+                  style: theme.textTheme.titleMedium,
                 ),
-              StatusBadge(
-                lineLabel(line.state),
-                color: lineStatusColor(context, line.state),
-              ),
-              if (outcome != null) KoreanText(outcome),
-              if (line.note case final note?
-                  when note.isNotEmpty && note != outcome)
-                KoreanText(note),
-              if (pending) const StatusMessage('요청함'),
-            ],
-          ),
-        ),
-        if (app.canSwitch(card, line))
-          Semantics(
-            label: '${line.text} ${on ? '끄기' : '켜기'}',
-            child: Switch(
-              value: on,
-              padding: EdgeInsets.zero,
-              trackColor: const WidgetStateProperty.fromMap({
-                WidgetState.disabled: null,
-                WidgetState.selected: DesignTokens.greenSoft,
-              }),
-              thumbColor: const WidgetStateProperty.fromMap({
-                WidgetState.disabled: null,
-                WidgetState.selected: DesignTokens.greenDeep,
-              }),
-              onChanged: pending ? null : (_) => app.switchLine(card, line),
+                if (outcome != null) KoreanText(outcome),
+                if (line.note case final note?
+                    when note.isNotEmpty && note != outcome)
+                  KoreanText(note),
+              ],
             ),
           ),
-      ],
+          Flexible(
+            flex: 2,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              spacing: DesignTokens.space4,
+              children: [
+                StatusBadge(
+                  lineLabel(line.state),
+                  color: lineStatusColor(context, line.state),
+                ),
+                if (pending) const StatusMessage('요청함'),
+                if (app.canSwitch(card, line))
+                  Semantics(
+                    label: '${line.text} ${on ? '끄기' : '켜기'}',
+                    child: Switch(
+                      value: pending ? !on : on,
+                      padding: EdgeInsets.zero,
+                      trackColor: const WidgetStateProperty.fromMap({
+                        WidgetState.disabled: null,
+                        WidgetState.selected: DesignTokens.greenSoft,
+                      }),
+                      thumbColor: const WidgetStateProperty.fromMap({
+                        WidgetState.disabled: null,
+                        WidgetState.selected: DesignTokens.greenDeep,
+                      }),
+                      onChanged: pending
+                          ? null
+                          : (_) => app.switchLine(card, line),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

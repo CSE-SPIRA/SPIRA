@@ -109,6 +109,8 @@ class AppController extends ChangeNotifier {
   final _cardStarts = <String, MemoryDate>{};
   final _captures = <String, List<Uint8List>>{};
   String? _lastIntake;
+  String? _mainMemoryId;
+  String? _closedRationaleId;
   final _startedTasks = <String, Set<String>>{};
   final _pendingStops = <String, Set<String>>{};
   final _uncertainStops = <String>{};
@@ -163,6 +165,26 @@ class AppController extends ChangeNotifier {
       _lastIntake ??
       accepted.lastOrNull ??
       orderedEpisodes.firstOrNull?.episodeId;
+
+  wire.Episode? get mainMemory => episodes[_mainMemoryId];
+
+  String? memoryStart(String episodeId, Iterable<String> cardIds) => cardIds
+      .map((cardId) => _cardStarts[cardId])
+      .nonNulls
+      .where((date) => date.episodeId == episodeId && date.startsAt.isNotEmpty)
+      .firstOrNull
+      ?.startsAt;
+
+  Future<void> acknowledgeMemory() async {
+    _mainMemoryId = null;
+    _change();
+    try {
+      await _serialize(_save);
+    } catch (_) {
+      refreshError = '확인 상태를 저장하지 못했어요.';
+      _change();
+    }
+  }
 
   List<Uint8List> orderImages(String episodeId) =>
       _captures[episodeId] ?? const [];
@@ -313,6 +335,7 @@ class AppController extends ChangeNotifier {
       cards[card.cardId] = card;
     }
     _cursor = value['cursor'] as String?;
+    _mainMemoryId = value['mainMemoryId'] as String?;
     for (final entry in (value['cardStarts'] as List<dynamic>? ?? const [])) {
       final fields = (entry as List<dynamic>).cast<String>();
       final date = (
@@ -367,6 +390,7 @@ class AppController extends ChangeNotifier {
     _snapshotKey,
     jsonEncode({
       'cursor': _cursor,
+      'mainMemoryId': _mainMemoryId,
       'accepted': accepted.toList(),
       'episodes': episodes.values.map((episode) => episode.toJson()).toList(),
       'cards': cards.values.map((card) => card.toJson()).toList(),
@@ -539,7 +563,7 @@ class AppController extends ChangeNotifier {
     // A local preview peer may have restarted with the same address.
     final firstSampleSync = sample && _calendarFingerprint == null;
     final previous = _calendarFingerprint ?? await store.read(key);
-    if (_disposed) return;
+    if (_disposed || (sample && !showsSampleCalendar)) return;
     if (firstSampleSync || previous != fingerprint) {
       await api.calendar(id, calendar);
       _calendarFingerprintDirty = true;
@@ -778,6 +802,7 @@ class AppController extends ChangeNotifier {
     accepted.add(episodeId);
     if (!showIntake) return;
     _lastIntake = episodeId;
+    _mainMemoryId = null;
     _captures.clear();
     if (images.isNotEmpty) _captures[episodeId] = images;
   }
@@ -873,6 +898,24 @@ class AppController extends ChangeNotifier {
           status: episode.status,
         );
       }
+      final orderId = _lastIntake ?? latest;
+      final order = listed[orderId];
+      final hasClosedCard = order != null &&
+          order.status == wire.EpisodeStatus.CLOSED &&
+          order.cardIds.isNotEmpty;
+      if (rewound || _mainMemoryId != orderId || !hasClosedCard) {
+        _mainMemoryId = null;
+      }
+      if (!rewound &&
+          hasClosedCard &&
+          _episodeHistory[orderId]?.status != wire.EpisodeStatus.CLOSED &&
+          (cards.values.any((card) => card.episodeId == orderId) ||
+              (episodes[orderId]?.status != wire.EpisodeStatus.CLOSED &&
+                  episodes.containsKey(orderId) &&
+                  cardUpdates.any((card) => card.episodeId == orderId)))) {
+        _mainMemoryId = orderId;
+        _closedRationaleId = null;
+      }
       final currentCards = {
         for (final row in listed.values)
           for (final cardId in row.cardIds) cardId: row,
@@ -927,9 +970,9 @@ class AppController extends ChangeNotifier {
         (id, date) => currentCards[id]?.episodeId != date.episodeId,
       );
       _rationales.removeWhere(
-        (id, _) =>
-            !listed.containsKey(id) ||
-            listed[id]!.status == wire.EpisodeStatus.CLOSED,
+        (id, _) => id != _mainMemoryId &&
+            (!listed.containsKey(id) ||
+                listed[id]!.status == wire.EpisodeStatus.CLOSED),
       );
       _captures.removeWhere(
         (id, _) =>
@@ -969,9 +1012,11 @@ class AppController extends ChangeNotifier {
       serverUnavailable = false;
       refreshError = null;
       for (final card in activeCards) {
-        if (!isMemory(card)) {
-          unawaited(_loadObservation(card.episodeId));
-        }
+        if (!isMemory(card)) unawaited(_loadRationale(card.episodeId));
+      }
+      if (_mainMemoryId case final memoryId?
+          when memoryId != _closedRationaleId) {
+        unawaited(_loadRationale(memoryId, closed: true));
       }
     } catch (error) {
       stale = true;
@@ -1203,23 +1248,33 @@ class AppController extends ChangeNotifier {
       ) ??
       false;
 
-  Future<void> _loadObservation(String id) =>
+  Future<void> _loadRationale(String id, {bool closed = false}) =>
       _memoryReads.putIfAbsent(id, () async {
         try {
           final result = await api.rationale(id);
           if (result.episodeId != id) {
             throw const FormatException('Wrong episode');
           }
-          if (!_disposed &&
-              episodes[id]?.status != wire.EpisodeStatus.CLOSED &&
-              episodes.containsKey(id)) {
+          if (_disposed) return;
+          if (closed ? _mainMemoryId == id
+              : episodes.containsKey(id) &&
+                  episodes[id]!.status != wire.EpisodeStatus.CLOSED) {
             _rationales[id] = result;
+            if (closed &&
+                episodes[id]!.cardIds.every((cardId) =>
+                    result.observations.any((row) =>
+                        row.cardId == cardId && row.verdict != null))) {
+              _closedRationaleId = id;
+            }
             _change();
           }
         } catch (_) {
           // The observation may arrive on a later poll.
         } finally {
           _memoryReads.remove(id);
+          if (!closed && !_disposed && _mainMemoryId == id) {
+            unawaited(_loadRationale(id, closed: true));
+          }
         }
       });
 
