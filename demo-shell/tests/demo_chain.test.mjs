@@ -34,6 +34,7 @@ const shellScenes = JSON.parse(readFileSync(
   new URL("../ui/scenes.json", import.meta.url)));
 const { house: wording, cameras } = shellScenes;
 const { buildMoments, closeView } = await import("../ui/scene-rules.js");
+const { buildPresenterCues } = await import("../ui/presenter-cues.js");
 const itemTypes = JSON.parse(readFileSync(new URL("../ui/item-types.json", import.meta.url)));
 const shellHtml = readFileSync(new URL("../ui/index.html", import.meta.url), "utf8");
 const shellCss = readFileSync(new URL("../ui/demo.css", import.meta.url), "utf8");
@@ -120,7 +121,8 @@ async function openShell(t, query, reply, withHouse = false) {
       },
       querySelectorAll: (selector) => ({
         "[data-page]": pageButtons, ".room-key [data-room]": roomButtons,
-      }[selector] ?? []), addEventListener() {},
+      }[selector] ?? []),
+      addEventListener(type, listener) { this[`on${type}`] = listener; },
     },
     window: { addEventListener(event, handler) { if (event === "resize") resize = handler; } }, location: { search: query },
     CSS: { supports: () => false },
@@ -204,6 +206,11 @@ async function openShell(t, query, reply, withHouse = false) {
   await settle();
   return {
     byId, pageButtons, roomButtons, cameraMoves, recordings, recordingPaths, drawn,
+    pressKey(key) {
+      const event = { key, target: { closest: () => null }, preventDefault() { this.handled = true; } };
+      document.onkeydown(event);
+      assert.equal(event.handled, true);
+    },
     resize(width, height) {
       Object.defineProperty(globalThis, "innerWidth", { configurable: true, value: width });
       Object.defineProperty(globalThis, "innerHeight", { configurable: true, value: height });
@@ -859,6 +866,177 @@ test("clock advances visit and record timed moments when Hub read-backs arrive",
   assert.deepEqual(recorded.filter(({ kind }) => kind === "house").map(({ data }) => data.moment.id),
     ["plan", `event:${delivered.event}:${Date.parse(delivered.at)}`, "line:t_clean#1", "line:t_safe#2"]);
   assert.deepEqual(shell.drawn.slice(-2).map(({ moment }) => moment), ["line:t_clean#1", "line:t_safe#2"]);
+});
+
+function birthdayCues() {
+  const input = sceneFixture();
+  const { episode, rationale, ledger, actions, relations } = input;
+  const { card } = birthday();
+  const chain = buildChain({ episode, rationale, card, hubLedger: ledger, hubPlan: actions });
+  const timeline = buildMoments({ chain, wording, relations, actions });
+  const guestWindows = { "t_mood#3": relations["t_mood#3"].trigger.window };
+  const published = [...input.facts.map(({ event, at }) => ({ event, at })),
+    { kind: "time", event: "judgment.quiet_end", at: "2026-10-15T21:10:08+09:00" },
+    { kind: "time", at: "2026-10-17T13:40:00+09:00" }];
+  return { ...input, card, chain, timeline, guestWindows, published };
+}
+
+test("the birthday cues use the card and Hub plan and skip clock stops without scenes", () => {
+  const cues = buildPresenterCues({ ...birthdayCues(), path: "house", clock: true });
+  assert.deepEqual(cues.map(({ label }) => label), [
+    "공유", "준비 카드", "우리 집", "택배 들이기", "12:30", "13:30", "손님 맞이", "14:00", "17:50 일정 끝내기", "7 기록",
+  ]);
+});
+
+test("without a clock, timed cues are absent and the schedule end still gates the event", () => {
+  const cues = buildPresenterCues({ ...birthdayCues(), path: "house", clock: false });
+  assert.deepEqual(cues.map(({ label }) => label), [
+    "공유", "준비 카드", "우리 집", "택배 들이기", "손님 맞이", "일정 끝내기", "7 기록",
+  ]);
+  assert.equal(cues.find(({ id }) => id === "event_end").target, Date.parse("2026-10-17T17:00:00+09:00"));
+});
+
+test("cue keys send once, wait for observations and reach the scheduled time before ending", async (t) => {
+  const { episode, rationale, card, hub, facts, viewer, devices, relations, published } = birthdayCues();
+  const { episode_id: id } = episode;
+  const start = episode.shared_at;
+  let clock = { version: 1, real_at: start, story_at: start, rate: 1 };
+  t.mock.method(Date, "now", () => Date.parse(start));
+  const commands = [];
+  const visible = [];
+  const delivery = Promise.withResolvers();
+  const [delivered, guests, , end] = facts;
+  const observations = Object.fromEntries(Object.entries(relations).map(([id, line]) => [id, line.observed]));
+  observations["t_clean#1"] = [{
+    device: "cleaner_01", cmd: "clean", at: relations["t_clean#1"].trigger.time,
+    values: { job_status: "running" }, revisions: { job_status: "1" },
+  }];
+  for (const id of ["t_clean#1", "t_safe#2", "t_mood#3", "t_oven#4"]) relations[id].observed = [];
+  const shell = await openShell(t, `?episode=${id}&page=house&auto=0`, (path, options) => {
+    if (path === "/demo/api/config") return Response.json({ server: true, hub: true, fixture: true, household_id: "h_042" });
+    if (path === "/demo/api/hub") return Response.json(hub);
+    if (path === "/demo/api/sim/viewer") return new Response(viewer(visible));
+    if (path === "/demo/api/sim/snapshot") return Response.json({ devices });
+    if (path.endsWith("/demo/clock")) return Response.json(clock);
+    if (path.endsWith("/demo/moments")) return Response.json(published);
+    if (path === "/demo/api/clock") {
+      const { advance_to } = JSON.parse(options.body);
+      commands.push(advance_to);
+      clock = { ...clock, version: clock.version + 1, story_at: advance_to };
+      return Response.json(clock);
+    }
+    if (path.startsWith("/demo/api/home/")) {
+      commands.push(path.split("/").at(-1));
+      if (path.endsWith("/delivery")) return delivery.promise;
+      const fact = path.endsWith("/event_end") ? end : guests;
+      assert.ok(Date.parse(clock.story_at) >= Date.parse(fact.at));
+      visible.push(fact);
+      return Response.json({ occurred_at: fact.at });
+    }
+    if (path.endsWith("/rationale")) return Response.json(rationale);
+    if (path.includes("/cards")) return Response.json({ cards: [card] });
+    if (path.endsWith(id)) return Response.json(episode);
+    return new Response(null, { status: 404 });
+  });
+  const cue = shell.byId("next-cue");
+  await shell.runTimer(800);
+  assert.equal(cue.textContent, "다음: 택배 들이기");
+  shell.pressKey(" ");
+  shell.pressKey("ArrowRight");
+  await settle();
+  assert.match(cue.textContent, /대기 · 택배 들이기 결과/);
+  assert.equal(cue.disabled, true);
+  delivery.resolve(Response.json({ applied: true }));
+  await settle();
+  shell.pressKey("ArrowRight");
+  await settle();
+  assert.deepEqual(commands, ["delivery"]);
+  visible.push(delivered);
+  await shell.runTimer(800);
+
+  async function cueAt(label, at) {
+    assert.equal(cue.textContent, `다음: ${label}`);
+    shell.pressKey("ArrowRight");
+    await settle();
+    assert.equal(commands.at(-1), new Date(at).toISOString());
+    assert.equal(cue.disabled, true);
+    await shell.runTimer(4300);
+  }
+  async function timedLine(label, id) {
+    const { trigger } = relations[id];
+    await cueAt(label, trigger.time);
+    assert.equal(cue.textContent, `대기 · ${label} 기기 상태`);
+    const count = commands.length;
+    shell.pressKey(" ");
+    await settle();
+    assert.equal(commands.length, count);
+    relations[id].observed = observations[id];
+    await shell.runTimer(800);
+  }
+  await timedLine("12:30", "t_clean#1");
+  await timedLine("13:30", "t_safe#2");
+  await cueAt("손님 맞이", guests.at);
+  assert.equal(commands.at(-1), "guests_arrive");
+  assert.equal(cue.disabled, true);
+  relations["t_mood#3"].observed = observations["t_mood#3"];
+  await shell.runTimer(800);
+  await timedLine("14:00", "t_oven#4");
+  await cueAt("17:50 일정 끝내기", end.at);
+  assert.deepEqual(commands, [
+    "delivery", ...["t_clean#1", "t_safe#2"].map((id) => new Date(relations[id].trigger.time).toISOString()),
+    new Date(guests.at).toISOString(), "guests_arrive", new Date(relations["t_oven#4"].trigger.time).toISOString(),
+    new Date(end.at).toISOString(), "event_end",
+  ]);
+  assert.equal(cue.textContent, "다음: 7 기록");
+  shell.pressKey("ArrowLeft");
+  assert.equal(cue.textContent, "다음: 17:50 일정 끝내기");
+  await cue.onclick();
+  assert.equal(cue.textContent, "다음: 7 기록");
+  assert.equal(commands.filter((command) => command === "event_end").length, 1);
+  await cue.onclick();
+  assert.match(cue.textContent, /대기 · 관찰 결과와 이 집의 기억/);
+  assert.equal(cue.disabled, true);
+  await settle();
+});
+
+test("the next cue shares once, opens the card and enters the observed house", async (t) => {
+  const { episode, rationale, card, hub, viewer, devices } = birthdayCues();
+  const share = Promise.withResolvers();
+  let shares = 0;
+  const shell = await openShell(t, "?auto=0", (path) => {
+    if (path === "/demo/api/config") return Response.json({ server: true, hub: true, fixture: true, household_id: "h_042" });
+    if (path === "/demo/api/order") {
+      shares++;
+      return share.promise;
+    }
+    if (path === "/demo/api/hub") return Response.json(hub);
+    if (path === "/demo/api/sim/viewer") return new Response(viewer([]));
+    if (path === "/demo/api/sim/snapshot") return Response.json({ devices });
+    if (path.endsWith("/rationale")) return Response.json(rationale);
+    if (path.includes("/cards")) return Response.json({ cards: [card] });
+    if (path.endsWith(episode.episode_id)) return Response.json(episode);
+    return new Response(null, { status: 404 });
+  });
+  const cue = shell.byId("next-cue");
+  assert.equal(cue.textContent, "다음: 공유");
+  const started = cue.onclick();
+  shell.pressKey(" ");
+  assert.equal(cue.textContent, "대기 · 주문 접수");
+  share.resolve(Response.json({ episode_id: episode.episode_id }));
+  await started;
+  await settle();
+  assert.equal(shares, 1);
+  assert.equal(cue.disabled, true);
+  for (const dwell of [3000, 2200, 1600, 1600, 1600, 1600, 1600]) await shell.runTimer(dwell);
+  assert.equal(cue.textContent, "다음: 준비 카드");
+  await cue.onclick();
+  await shell.runTimer(800);
+  assert.equal(cue.textContent, "다음: 우리 집");
+  shell.pressKey("ArrowRight");
+  await settle();
+  assert.equal(shell.byId("home").hidden, false);
+  assert.equal(shell.byId("clock-unavailable").hidden, false);
+  assert.equal(cue.textContent, "다음: 택배 들이기");
 });
 
 test("read-only rehearsal crosses the observed house moments without posting actions", async (t) => {

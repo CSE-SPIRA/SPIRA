@@ -29,7 +29,6 @@
         <button type="button" data-order="groceries" aria-pressed="false">평소 장보기</button>
       </div>
       <time class="mast-clock" id="story-clock" hidden></time>
-      <span class="mast-clock" id="clock-unavailable" role="status" hidden>서버가 시연 시계를 제공하지 않아요.</span>
     </div>
   </header>
   <main class="stage">
@@ -75,13 +74,6 @@
         </figure>
         <nav aria-label="집 시간표" id="house-timeline">
           <span class="owner-tag">시뮬레이터 · 집</span><ol id="timeline"></ol>
-          <div id="presenter-controls" aria-label="시연 조작" hidden>
-            <button class="button simple helper" type="button" data-presenter="delivery" data-event="package.brought_in">택배 들이기</button>
-            <button class="button simple helper" type="button" data-presenter="guests_arrive" data-event="guest_arrived">손님 맞이</button>
-            <button class="button simple helper" type="button" data-presenter="mom_light">엄마가 조명 바꾸기</button>
-            <button class="button simple helper" type="button" data-presenter="event_end" data-event="event_end">일정 끝내기</button>
-            <button id="presenter-clock" class="button simple helper" type="button" data-presenter="clock" hidden>다음 시연 시각</button>
-          </div>
         </nav>
       </section>
     </div>
@@ -89,9 +81,23 @@
   <footer class="controls" aria-label="단계 조작">
     <p id="notice" role="status"></p>
     <div class="control-right">
+      <span id="clock-unavailable" role="status" hidden>시연 시계가 없어 시각 이동을 건너뛰어요.</span>
       <button class="button simple helper" type="button" id="previous" aria-keyshortcuts="ArrowLeft" disabled>← 이전</button>
-      <span id="next-share" hidden>먼저 주문을 공유해 주세요</span>
-      <button class="button simple helper" type="button" id="next" aria-keyshortcuts="ArrowRight" aria-describedby="next-share" disabled>다음 →</button>
+      <button class="button" type="button" id="next-cue" aria-keyshortcuts="Space ArrowRight" aria-live="polite" disabled></button>
+      <details id="presenter-drawer">
+        <summary>진행자 조작</summary>
+        <div class="presenter-drawer-panel">
+          <span id="next-share" hidden>먼저 주문을 공유해 주세요</span>
+          <button class="button simple helper" type="button" id="next" aria-describedby="next-share" disabled>다음 단계</button>
+          <div id="presenter-controls" aria-label="집 조작" hidden>
+            <button class="button simple helper" type="button" data-presenter="delivery" data-event="package.brought_in">택배 들이기</button>
+            <button class="button simple helper" type="button" data-presenter="guests_arrive" data-event="guest_arrived">손님 맞이</button>
+            <button class="button simple helper" type="button" data-presenter="mom_light">엄마가 조명 바꾸기</button>
+            <button class="button simple helper" type="button" data-presenter="event_end" data-event="event_end">일정 끝내기</button>
+            <button id="presenter-clock" class="button simple helper" type="button" data-presenter="clock" hidden>다음 시연 시각</button>
+          </div>
+        </div>
+      </details>
     </div>
   </footer>
 </div>

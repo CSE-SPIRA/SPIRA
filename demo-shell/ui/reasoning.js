@@ -372,8 +372,8 @@ export function createReasoning(context, ui) {
     return DWELL_MS ?? 3000;
   }
 
-  async function autoAdvance() {
-    if (MANUAL || state.auto || state.draft) return;
+  async function autoAdvance({ cue = false } = {}) {
+    if ((MANUAL && !cue) || state.auto || state.draft) return;
     const run = {};
     state.auto = run;
     while (state.auto === run && state.page === "reason" && (RECORDING || state.step < reasonStep("plan"))) {

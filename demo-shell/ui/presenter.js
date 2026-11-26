@@ -1,18 +1,33 @@
 import { rehearsalControls } from "./wire.js";
+import { buildPresenterCues, canObserveLine } from "./presenter-cues.js";
 
 export function createPresenter(context, ui) {
-  const { state, observe, api, RECORDING, QUIET_END, notice, exchange, sleep, $, REPLAY, MANUAL, PHONE_CLOCK } = context;
+  const { state, observe, RECORDING, QUIET_END, notice, exchange, sleep, $, REPLAY, MANUAL, PHONE_CLOCK } = context;
 
   // The Hub and Simulator follow the Server's story clock independently.
   const FIXTURE_LEAD_MS = 5000;
   const RAMP_SECONDS = 4;
   let clockRead;
+  let momentRead;
+  let pendingCue;
+
+  const missingRoute = (status) => [404, 405, 501].includes(status);
 
   function markClockMissing(status) {
-    if (![404, 405, 501].includes(status)) return;
+    if (!missingRoute(status)) return;
     state.clockMissing = true;
     state.clock = null;
     renderControls();
+  }
+
+  function momentsPath(episodeId) {
+    const query = episodeId && !state.config.fixture ? `?${new URLSearchParams({ episode_id: episodeId })}` : "";
+    return "/demo/api/server/v1/demo/moments" + query;
+  }
+
+  function readMoments(episodeId) {
+    return observe("moments", momentsPath(episodeId), { signal: AbortSignal.timeout(2500) },
+      { transform: (data) => data.filter((entry) => !entry.episode_id || entry.episode_id === episodeId) });
   }
 
   // The rehearsal clock is optional. Stop polling it when the peer says it is unavailable.
@@ -22,15 +37,22 @@ export function createPresenter(context, ui) {
     if (clockRead && clockRead.reader === reader) return clockRead.pending;
     const pending = observe("clock", "/demo/api/server/v1/demo/clock", { signal: AbortSignal.timeout(2500) })
       .then(async (clock) => {
-        if (!state.clockMoments) {
-          const moments = await api("/demo/api/server/v1/demo/moments", { signal: AbortSignal.timeout(2500) });
-          if (!Array.isArray(moments) || state.reader !== reader) return null;
-          state.clockMoments = true;
+        if (state.reader !== reader) return null;
+        if (!(clock.version < state.clock?.version)) state.clock = clock;
+        const ready = state.chain.ready.hub;
+        if (!momentRead || momentRead.reader !== reader || momentRead.ready !== ready) {
+          try {
+            const moments = await readMoments(state.episodeId);
+            if (state.reader !== reader) return null;
+            state.publishedMoments = moments;
+            state.clockMoments = true;
+            momentRead = { reader, ready };
+          } catch ({ status }) {
+            if (state.reader !== reader) return null;
+            if (missingRoute(status)) momentRead = { reader, ready };
+          }
         }
-        if (state.reader === reader && !(clock.version < state.clock?.version)) {
-          state.clock = clock;
-          renderControls();
-        }
+        renderControls();
         return state.clock;
       })
       .catch(({ status }) => {
@@ -54,15 +76,28 @@ export function createPresenter(context, ui) {
     return story + (real - anchor) * clock.rate;
   }
 
+  function clockOptions(signal) {
+    const timeout = AbortSignal.timeout(12000);
+    return {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    };
+  }
+
+  async function postClock(target, options, reader) {
+    const clock = await observe("clock", "/demo/api/clock", {
+      ...options, body: JSON.stringify({ advance_to: new Date(target).toISOString(), over_seconds: RAMP_SECONDS }),
+    });
+    if (state.reader === reader && !state.clockMissing && !(clock.version < state.clock?.version)) state.clock = clock;
+    return clock;
+  }
+
   async function moveClockTo(scene, { episodeId, signal } = {}) {
     if (!await readClock() || signal?.aborted) return;
     const reader = state.reader;
     const episode = new URLSearchParams({ episode_id: episodeId });
-    const momentsPath = "/demo/api/server/v1/demo/moments" + (state.config.fixture ? "" : `?${episode}`);
-    const moments = await observe("moments", momentsPath, { signal: AbortSignal.timeout(2500) },
-      { transform: (data) => data.filter((entry) => !entry.episode_id || entry.episode_id === episodeId) }).catch((error) => {
-      if (state.reader === reader) markClockMissing(error.status);
-      if (state.clockMissing) return [];
+    const moments = await readMoments(episodeId).catch((error) => {
+      if (missingRoute(error.status)) return [];
       throw error;
     });
     if (state.clockMissing) return;
@@ -92,16 +127,9 @@ export function createPresenter(context, ui) {
     const message = forQuiet ? "주문을 기다리는 시간을 앞당겨요." : "다음 시연 시각으로 시간을 보내요.";
     notice(message);
     try {
-      const timeout = AbortSignal.timeout(12000);
-      const options = {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-      };
+      const options = clockOptions(signal);
       if (forQuiet || state.config.fixture) {
-        const clock = await observe("clock", "/demo/api/clock", {
-          ...options, body: JSON.stringify({ advance_to: new Date(target).toISOString(), over_seconds: RAMP_SECONDS }),
-        });
-        if (state.reader === reader && !state.clockMissing) state.clock = clock;
+        await postClock(target, options, reader);
       } else {
         const result = await exchange(`/demo/api/clock/next?${episode}`, {
           ...options, body: JSON.stringify({ over_seconds: RAMP_SECONDS }),
@@ -129,7 +157,7 @@ export function createPresenter(context, ui) {
   }
 
   async function presenterAction({ name, event }) {
-    if (REPLAY || state.homeBusy || !ui.house.canEnterHouse()) return;
+    if (REPLAY || state.homeBusy || !ui.house.canEnterHouse()) return false;
     state.homeBusy = true;
     renderControls();
     const { reader } = state;
@@ -142,15 +170,17 @@ export function createPresenter(context, ui) {
         state.pendingClockLines.clear();
         const path = event ? "/demo/api/home/" : "/demo/api/person/";
         const result = await exchange(path + name, { method: "POST", signal: AbortSignal.timeout(8000) });
-        if (state.reader !== reader) return;
+        if (state.reader !== reader) return false;
         ui.recording.log("presenter", { action: name, status: result.status, result: result.body });
         if (!result.ok) throw new Error(result.status);
         if (event && result.body?.occurred_at) ui.house.rememberFacts([{ event, at: result.body.occurred_at }]);
         await Promise.allSettled([ui.surface.refreshSnapshot(), ui.surface.refreshHouseMarkers()]);
         focus = [...state.facts].find(([key, fact]) => !before.has(key) && fact.event === (event ?? "person"))?.[1];
       }
+      return true;
     } catch (error) {
       if (state.reader === reader) notice(`집에서 확인하지 못했어요. (${error.message})`);
+      return false;
     } finally {
       if (state.reader === reader) {
         state.homeBusy = false;
@@ -219,6 +249,137 @@ export function createPresenter(context, ui) {
     return ui.house.canEnterHouse() && !state.draft && (state.page === "house" || state.step >= ui.reasoning.reasonStep("plan"));
   }
 
+  function cueMomentIndex(cue, moments) {
+    if (cue.kind === "time") {
+      return cue.momentIds.every((id) => moments.some((moment) => moment.id === id && moment.ready))
+        ? moments.findLastIndex(({ id }) => cue.momentIds.includes(id)) : -1;
+    }
+    const index = moments.findLastIndex(({ event, ready }) => ready && event === cue.event);
+    if (index < 0 || cue.event !== "guest_arrived") return index;
+    const device = moments.findIndex(({ follows, ready }) => ready && follows === moments[index].id);
+    const waiting = moments.some(({ event, follows, ready, lines }) => !ready &&
+      (event === cue.event || follows === moments[index].id) && lines.some(canObserveLine));
+    return device >= 0 ? device : waiting ? -1 : index;
+  }
+
+  function nextCue(moments, current) {
+    const clock = Boolean(state.clock && !state.cueClockMissing);
+    const relations = state.hub?.plan_lines?.[state.episodeId] ?? {};
+    const guestWindows = Object.fromEntries(Object.entries(relations).flatMap(([id, { trigger }]) =>
+      trigger?.event === "guest_arrived" && trigger.window ? [[id, trigger.window]] : []));
+    const cues = buildPresenterCues({
+      path: state.draft || !state.episodeId ? ui.phone.draftPath() : state.runPath, chain: state.chain, timeline: moments,
+      published: momentRead?.reader === state.reader ? state.publishedMoments : undefined,
+      guestWindows: { ...guestWindows, ...state.hub?.guest_windows?.[state.episodeId] }, clock,
+    });
+    const named = (id) => cues.find((cue) => cue.id === id);
+    if (state.sharing) return { wait: "주문 접수" };
+    if (!state.episodeId || state.draft) return state.config.server ? named("share") : { wait: "서버 연결" };
+    if (state.page === "reason") {
+      if (state.step >= ui.reasoning.reasonStep("plan") && (state.cardOpen || !state.cards.length)) {
+        if (named("house")) return canUsePhoneMap() ? named("house") : { wait: "집의 계획 수신" };
+        return state.chain.cardReady || state.readProblems.cards ? {} : { wait: "준비 카드" };
+      }
+      if (state.cardOpen) return { wait: "준비 계획" };
+      if ((state.cards.length && ui.reasoning.canPresentCard()) ||
+          (MANUAL && !state.auto && ui.reasoning.canMoveReasonForward())) return named("card");
+      return { wait: "준비 카드와 판단 장면" };
+    }
+    if (state.recordRequested) return state.recordVisible ? {} : { wait: "관찰 결과와 이 집의 기억" };
+    if (!state.snapshot || !state.houseMarkup) return { wait: "집 상태" };
+    if (!state.clockMissing && !state.cueClockMissing && (momentRead?.reader !== state.reader || !momentRead?.ready)) {
+      return { wait: "시연 시계 확인" };
+    }
+    const now = clockNow() ?? Date.now();
+    for (const cue of cues.filter(({ kind }) => kind)) {
+      const index = cueMomentIndex(cue, moments);
+      if (index >= 0 && index <= current) continue;
+      const observed = index >= 0 || moments.some(({ event, ready }) => ready && event === cue.event);
+      if (!observed && cue.until !== undefined && now >= cue.until) continue;
+      if (!observed && !clock && cue.target > now) return { wait: cue.label + " 시각" };
+      return cue;
+    }
+    return named("record") ?? {};
+  }
+
+  function updateCue(moments, index) {
+    if (pendingCue?.reader !== state.reader) pendingCue = null;
+    if (pendingCue && !pendingCue.running) {
+      const { cue } = pendingCue;
+      const observed = cueMomentIndex(cue, moments);
+      if (observed >= 0 || (cue.kind === "time" && (state.clockMissing || state.cueClockMissing))) {
+        pendingCue = null;
+        if (observed >= 0 && state.page === "house" && ui.house.goHouse(observed)) return;
+      }
+    }
+    const next = REPLAY ? { id: "replay", label: "다음 →" } : pendingCue ? { wait: pendingCue.wait } : nextCue(moments, index);
+    const button = $("next-cue");
+    button.disabled = REPLAY ? $("next").disabled : Boolean(!next.id || state.homeBusy || state.reactionPending);
+    const label = REPLAY ? next.label : next.label ? `다음: ${next.label}` : next.wait ? `대기 · ${next.wait}` : "시연 완료";
+    if (button.textContent !== label) button.textContent = label;
+  }
+
+  async function advanceCueClock(target, reader) {
+    if (!state.clock || target === undefined || clockNow() >= target) return;
+    const { signal } = reader;
+    const clock = await postClock(target, clockOptions(signal), reader);
+    if (state.reader !== reader) return;
+    ui.recording.log("presenter", { action: "clock", status: 200, result: clock });
+    await sleep(RAMP_SECONDS * 1000 + 300);
+    if (state.reader === reader && clockNow() < target) {
+      await readClock();
+      if (clockNow() < target) throw new Error("시연 시각을 확인하지 못했어요.");
+    }
+  }
+
+  async function pressNext() {
+    if (REPLAY) return move(1);
+    if (pendingCue || state.sharing || state.homeBusy || state.reactionPending) return;
+    const moments = ui.house.timeline();
+    const cue = nextCue(moments, moments.indexOf(ui.house.currentMoment(moments)));
+    if (cue.id === "share") {
+      if (!state.config.fixture) return $("files")?.click();
+      if (await ui.phone.shareSample()) ui.reasoning.autoAdvance({ cue: true });
+      return;
+    }
+    if (cue.id === "card") {
+      ui.phone.openCard();
+      ui.reasoning.autoAdvance({ cue: true });
+      return;
+    }
+    if (cue.id === "house") return $("phone-map").onclick();
+    if (cue.id === "record") return ui.house.openRecord();
+    if (!cue.kind) return;
+    const observed = cueMomentIndex(cue, moments);
+    if (observed >= 0) return ui.house.goHouse(observed);
+    const { reader } = state;
+    const waiting = cue.target > (clockNow() ?? Date.now()) ? "시각" : "결과";
+    const pending = pendingCue = { reader, cue, running: true, wait: `${cue.label} ${waiting}` };
+    renderControls();
+    try {
+      await advanceCueClock(cue.target, reader);
+      if (state.reader !== reader) return;
+      pending.wait = cue.kind === "time" ? cue.label + " 기기 상태" : cue.label + " 결과";
+      renderControls();
+      if (cue.kind === "event" && !ui.house.timeline().some(({ ready, event }) => ready && event === cue.event)) {
+        if (cue.until !== undefined && (clockNow() ?? Date.now()) >= cue.until) {
+          throw new Error("손님을 맞이할 시간이 지났어요.");
+        }
+        if (!await presenterAction(cue)) pendingCue = null;
+      }
+    } catch (error) {
+      if (state.reader !== reader) return;
+      pendingCue = null;
+      if (missingRoute(error.status)) state.cueClockMissing = true;
+      else notice(error.status ? `시연 시각을 확인하지 못했어요. (${error.status})` : error.message);
+    } finally {
+      if (state.reader === reader) {
+        pending.running = false;
+        renderControls();
+      }
+    }
+  }
+
   function renderControls() {
     const inHouse = state.page === "house";
     const blocked = state.sharing || state.homeBusy;
@@ -234,7 +395,7 @@ export function createPresenter(context, ui) {
     $("presenter-controls").hidden = !inHouse || REPLAY || state.recordVisible;
     const clock = rehearsalControls(state.clock, state.clockMoments, state.clockMissing, REPLAY);
     $("presenter-clock").hidden = !clock.advance;
-    $("clock-unavailable").hidden = !clock.unavailable;
+    $("clock-unavailable").hidden = !(clock.unavailable || state.cueClockMissing);
     for (const button of $("presenter-controls").querySelectorAll("button")) button.disabled = blocked;
     $("next").disabled = blocked || atEnd || waiting || needsShare;
     $("next-share").hidden = !needsShare || state.sharing;
@@ -251,6 +412,7 @@ export function createPresenter(context, ui) {
     document.querySelectorAll("[data-page]").forEach((button) => {
       button.disabled = blocked || (button.dataset.page === "house" && !canUsePhoneMap());
     });
+    updateCue(moments, index);
   }
 
   function move(delta) {
@@ -305,7 +467,10 @@ export function createPresenter(context, ui) {
   function bindControls() {
     $("orders").hidden = !state.config.fixture;
     $("demo-path").onchange = (event) => {
-      if (!state.sharing) state.draftPath = event.target.value;
+      if (!state.sharing) {
+        state.draftPath = event.target.value;
+        renderControls();
+      }
     };
     $("orders").addEventListener("click", (event) => {
       const button = event.target.closest("[data-order]");
@@ -350,14 +515,18 @@ export function createPresenter(context, ui) {
     };
     $("previous").onclick = () => move(-1);
     $("next").onclick = () => move(1);
+    $("next-cue").onclick = pressNext;
     document.addEventListener("keydown", (event) => {
       if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.repeat ||
         event.target.closest("input, textarea, select")) return;
       if (event.key.toLowerCase() === "r") {
         location.href = "/demo?recordings";
-      } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      } else if (event.key === "ArrowLeft") {
         event.preventDefault();
-        move(event.key === "ArrowRight" ? 1 : -1);
+        move(-1);
+      } else if (event.key === "ArrowRight" || (event.key === " " && !event.target.closest("summary"))) {
+        event.preventDefault();
+        void pressNext();
       }
     });
     window.addEventListener("resize", fit);

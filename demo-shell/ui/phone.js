@@ -234,7 +234,7 @@ export function createPhone(context, ui) {
     };
   }
 
-  function openCard(notification) {
+  function openCard(notification = state.notifications.keys().next().value) {
     if (!ui.reasoning.canPresentCard() || !state.cards.length || state.sharing || state.homeBusy) return;
     if (notification) {
       state.notifications.delete(notification);
@@ -411,6 +411,6 @@ export function createPhone(context, ui) {
   }
 
   return {
-    recordReady, renderPhone, reviewsReady, renderEnding, draftPath, chooseOrder, react,
+    recordReady, renderPhone, reviewsReady, renderEnding, draftPath, chooseOrder, react, openCard, shareSample,
   };
 }

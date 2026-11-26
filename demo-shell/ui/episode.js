@@ -56,6 +56,7 @@ export function createEpisodeReader(context, ui) {
       state.tagsReady = state.tagsRead = null;
       state.episode = state.rationale = state.hub = state.snapshot = null;
       state.houseMarkup = "";
+      state.markerSignature = null;
       state.homeId = "plan";
       state.followGuest = false;
       state.facts.clear();

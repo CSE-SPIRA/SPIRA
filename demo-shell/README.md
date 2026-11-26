@@ -7,8 +7,8 @@ The phone mirrors [the App specification](../app/spec.md) and
 At `/demo`, the phone stays on the left and the Server's judgment plays on the
 right. Before sharing, choose 집까지 or 계획까지 in the presenter header.
 The `ep_9031` sample defaults to 집까지. Share from the phone and open the
-preparation card. A house run can open 우리 집 from the phone or header after
-the Hub receives its plan. A plan run ends at 계획.
+preparation card with the presenter cue. A house run opens 우리 집 after the
+Hub receives its plan. A plan run ends at 계획.
 
 The stage strip marks each stage done when its data arrives. A Hub plan receipt
 for the active episode at or after its share time marks 집 done. Items, home
@@ -23,7 +23,10 @@ scripts/demo-up --tagger # from the repository root, needs uv and mosquitto
 ```
 
 Open the printed **Demo** URL. In fixture mode, choose 생일 주문 or 평소 장보기, then tap
-예시 주문으로 공유 or upload a screenshot. Selecting a sample opens its preview.
+다음 (Space/→) to share the sample or upload a screenshot from the phone.
+Keep pressing 다음 when its label changes to open the preparation card, visit the
+house and play its moments, then open 기록. The cue shows what it is waiting for.
+Use ← to go back and open 진행자 조작 to recover with the manual controls.
 The share uses the contract's `POST /v1/orders`. In fixture mode, sharing a
 sample queues its matching recording before uploading. To rehearse with your
 own screenshot, choose a recording on the printed `/_fixture/control` page.
@@ -40,17 +43,15 @@ Use the returned household ID. The launcher serves a local App preview with
 Server mode enabled and keeps its credentials in the proxy. In the shell,
 share your own screenshot. A missing Server read shows
 서버가 아직 이 단계를 내보내지 않아요 on its stage. The shell uses the Server's
-clock and moments when available. With no rehearsal clock, the shell displays
-one line and hides 다음 시연 시각. Text tags and illustrated device displays are
+clock and moments when available. Without a rehearsal clock, the cue skips
+clock advances and shows a notice. Text tags and illustrated device displays are
 disabled for these runs. The run logs include the selected Server URL.
 
 The judgment scene advances as its data arrives. The strip names the pending
 result and shows elapsed seconds. Timeouts and temporary errors are retried
 and shown briefly in the strip. The items hold for 2.2 seconds and the evidence
 and intent beats hold for 1.6 seconds each by default. A complete rationale
-received in one response plays in the same order. Tap the
-notification to open the card and plan. Tap 우리 집 to see the house. The small
-이전 / 다음 helper also accepts the left and right arrow keys.
+received in one response plays in the same order.
 
 The launcher starts with an empty fixture and fresh Hub and World databases.
 Use `--keep` to resume the last run for this checkout, episode, and Simulator
@@ -115,9 +116,8 @@ verified read-back arrives. The timeline labels pending moments 대기.
 이전 and 다음 move between observed moments. 현관, 거실 and 주방 change the
 camera until the next moment.
 
-Use the named controls under the timeline to bring in a package, welcome
-guests, change the light at its panel, or end the event. 다음 시연 시각 advances
-the optional Server rehearsal clock. The Simulator supplies the people.
+The 진행자 조작 drawer includes the household actions and the optional clock
+advance. The Simulator supplies the people.
 After delivery, the stage places berries and cream on the kitchen counter,
 ordered hats and the cupcake topper on the dining table, and balloon sets
 in the living room. A set adds seven balloons to the bunch and three to the
@@ -166,7 +166,7 @@ Add `owners=1` to the query string to show the owner tags. They are hidden by de
 | Reasoning stages and pacing | `ui/reasoning.js` | |
 | Phone, sharing, reactions and final review | `ui/phone.js` | |
 | House timeline and cameras | `ui/house-timeline.js` | |
-| Presenter navigation, actions and rehearsal clock | `ui/presenter.js` | |
+| Presenter cues, navigation and rehearsal clock | `ui/presenter-cues.js`, `ui/presenter.js` | |
 | Recording timestamps and playback | `ui/recording.js`, `ui/run.js` | |
 | Shell setup and Simulator renderer loading | `ui/demo.js` | |
 | Story clock and time formatting | `ui/story-time.js` | |
