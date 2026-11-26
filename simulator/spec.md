@@ -6,6 +6,7 @@ authoritative in [`contracts/`](../contracts/README.md). The Hub↔Simulator
 device boundary is defined in [`protocol.md`](protocol.md), which is normative
 for both parts. Implementation guidance is non-normative and lives in
 [`design-notes.md`](design-notes.md).
+The [screen reference](screens.md) describes the pages and their current behavior.
 
 This specification does not certify an implementation, real Server integration,
 or physical-device equivalence. Those claims require separate evidence.
@@ -31,6 +32,15 @@ The Simulator MUST NOT infer purchase intent, create plans, decide Hub success,
 write Hub or Server result state, expose actor truth on a Hub-readable channel,
 or present virtual behavior as physical qualification. It is not a daily-control
 app or a 3D digital twin.
+
+The Simulator has no required Server dependency. Its only operational peer is
+the Hub through the [device protocol](protocol.md). World state and person actions
+work with optional evidence inputs unset. On this branch the viewer and operator
+can read C-1 for display from a local file or a configured HTTP source,
+including a direct plan-pull URL supplied by the demo launcher. The judge and
+restore overlay can use the Hub dashboard or configured test evidence.
+See [Simulator startup wiring](spira_simulator/api.py) and the
+[demo launcher](../scripts/demo_up.py).
 
 ## 2. Numbered requirements
 

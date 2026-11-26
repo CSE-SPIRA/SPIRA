@@ -3,6 +3,7 @@
 Owner: Yejoon Kim
 
 The Simulator runs one household per process, with its own SQLite state and an MQTT device interface. It provides a room viewer with person actions and a private operator for household occurrences, device actions, faults, and C-3 comparisons. [Specification](spec.md) · [Device protocol](protocol.md)
+[Screen reference](screens.md)
 
 ## Run locally
 
