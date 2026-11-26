@@ -152,11 +152,29 @@ function applyHouseMarkers(markup) {
     }
   }
   state.houseMarkup = markup;
+  const clocks = [...markers.querySelectorAll("time.wall-clock")].map((node) => {
+    const reading = { node, text: node.textContent, datetime: node.getAttribute("datetime") };
+    node.textContent = "";
+    node.removeAttribute("datetime");
+    return reading;
+  });
+  const signature = markers.outerHTML;
+  const current = $("viewer-markers");
+  const unchanged = signature === state.markerSignature;
+  const displayClocks = unchanged ? current.querySelectorAll("time.wall-clock") : clocks.map(({ node }) => node);
+  clocks.forEach(({ text, datetime }, index) => {
+    const node = displayClocks[index];
+    if (node.textContent !== text) node.textContent = text;
+    if (datetime === null) node.removeAttribute("datetime");
+    else node.setAttribute("datetime", datetime);
+  });
+  if (unchanged) return;
+  state.markerSignature = signature;
   if (!RECORDING) ui.house.rememberFacts(worldFacts(markers));
   state.displayReadings = new Map([...markers.querySelectorAll("[data-device][data-values]")].map(
     ({ dataset }) => [dataset.device, JSON.parse(dataset.values)]));
-  if (state.houseModule) state.houseModule.replaceHouseMarkers($("viewer-markers"), markers);
-  else $("viewer-markers").replaceWith(markers);
+  if (state.houseModule) state.houseModule.replaceHouseMarkers(current, markers);
+  else current.replaceWith(markers);
   state.house?.setMarkers(markers);
   revealHouseState();
 }

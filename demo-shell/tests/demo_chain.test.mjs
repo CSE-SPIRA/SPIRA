@@ -126,9 +126,19 @@ async function openShell(t, query, reply, withHouse = false) {
     CSS: { supports: () => false },
     DOMParser: class {
       parseFromString(markup) {
-        return { getElementById: () => Object.assign(element(), {
+        const markerMarkup = markup.slice(markup.indexOf('<div id="viewer-markers"'));
+        const clockTag = /<time class="wall-clock" datetime="([^"]+)">([^<]*)<\/time>/g;
+        const clocks = [...markerMarkup.matchAll(clockTag)].map(([, datetime, textContent]) => {
+          const clock = Object.assign(element(), { textContent });
+          clock.setAttribute("datetime", datetime);
+          return clock;
+        });
+        const marker = Object.assign(element(), { id: "fridge-marker" });
+        const root = Object.assign(element(), {
           tagName: "DIV", attributes: [], markup,
+          querySelector(selector) { return selector === "#fridge-marker" && markerMarkup.includes(marker.id) ? marker : null; },
           querySelectorAll(selector) {
+            if (selector === "time.wall-clock") return clocks;
             if (selector === "[data-signal]") {
               return [...markup.matchAll(/data-signal="([^"]+)"><time datetime="([^"]+)"/g)]
                 .map(([, signal, at]) => ({ dataset: { signal }, querySelector: () => ({ getAttribute: () => at }) }));
@@ -143,7 +153,17 @@ async function openShell(t, query, reply, withHouse = false) {
             }
             return [];
           },
-        }) };
+        });
+        Object.defineProperty(root, "outerHTML", {
+          get() {
+            let index = 0;
+            return markerMarkup.replace(clockTag, () => {
+              const clock = clocks[index++];
+              return JSON.stringify([clock.getAttribute("datetime"), clock.textContent]);
+            });
+          },
+        });
+        return { getElementById: () => root };
       }
     },
     getComputedStyle: () => ({ getPropertyValue: () => "" }),
@@ -200,6 +220,35 @@ async function openShell(t, query, reply, withHouse = false) {
     },
   };
 }
+
+test("clock-only viewer changes keep the marker tree and focused fridge node", async (t) => {
+  let second = 0;
+  const { episode, rationale, card, hub } = sceneFixture();
+  const shell = await openShell(t, "?episode=ep_9031&page=house", (path) => {
+    if (path === "/demo/api/config") return Response.json({ server: true, hub: true, household_id: "h_042" });
+    if (path === "/demo/api/hub") return Response.json(hub);
+    if (path.endsWith("/rationale")) return Response.json(rationale);
+    if (path.includes("/cards")) return Response.json({ cards: [card] });
+    if (path.endsWith("/ep_9031")) return Response.json(episode);
+    if (path === "/demo/api/sim/viewer") return new Response(
+      `<time class="wall-clock" datetime="2026-10-17T10:00:0${second}.123456+09:00">10:00</time>
+      <div id="viewer-markers"><article id="fridge-marker"></article>
+      <time class="wall-clock" datetime="2026-10-17T10:00:0${second}.123456+09:00">10:00:0${second}</time></div>`);
+    return new Response(null, { status: 404 });
+  });
+  const markers = shell.byId("viewer-markers");
+  const fridge = markers.querySelector("#fridge-marker");
+  document.activeElement = fridge;
+  const [clock] = markers.querySelectorAll("time.wall-clock");
+  second++;
+  await shell.runTimer(800);
+  assert.ok(fridge);
+  assert.equal(shell.byId("viewer-markers"), markers);
+  assert.equal(markers.querySelector("#fridge-marker"), fridge);
+  assert.equal(document.activeElement, fridge);
+  assert.equal(clock.textContent, "10:00:01");
+  assert.equal(clock.getAttribute("datetime"), "2026-10-17T10:00:01.123456+09:00");
+});
 
 test("the stage strip marks each stage done only when its own result arrives", async (t) => {
   const { episode, rationale, card, hubPlan } = birthday();
