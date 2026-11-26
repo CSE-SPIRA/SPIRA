@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     other_home: Literal["off"] = Field("off", alias="OTHER_HOME")
 
     demo_mode: bool = Field(False, alias="DEMO_MODE")
+    demo_home: str = Field("dev/home.yaml", alias="DEMO_HOME")    # demo reset source, relative to server/
     image_dir: str = Field("/tmp/spira-images", alias="IMAGE_DIR")
     calendar_hmac_key: str = Field(alias="CALENDAR_HMAC_KEY")
     tz: str = Field("Asia/Seoul", alias="TZ")

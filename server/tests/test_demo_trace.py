@@ -84,6 +84,41 @@ def test_live_and_replay():
     assert _trace(ep, at=999)["finished"]
 
 
+def test_results_are_stored_values_gated_by_stage():
+    household()
+    ep = episode()
+    ctx = {"for_intent": {"this_home": {"household_types": ["3~4인"], "calendar": [{"id": "c1", "tags": ["생일"]}],
+                                        "unusual_items": {"status": "list", "items": [{"item": "풍선", "why": "처음 산 물건"}]}},
+                          "kb_neighbors": {"similar_count": 12, "base_total": 1000, "note": None,
+                                           "intent_counts": [{"intent_id": "kid_birthday_party", "name": "아이 생일 파티",
+                                                              "n": 9, "share": 0.75, "base_share": 0.02}]}},
+           "snapshot": [], "kb_search": {"searched": 200, "sim_floor": 0.7, "above_floor": 126, "used": 50,
+                                         "sims": [0.86], "top": []}}
+    s4 = {"llm_called": True, "whens": {}, "skipped_bundles": {}, "drafts": [{"task_id": "t_clean#1"}], "dropped": []}
+    _set(ep, stage="s2", status="reading", context=ctx, s4=s4,
+         stage_times=_times(received=0, s1_start=0.2, s1=14.8, s2=16.1, s3=29.5, s4=50.2))
+    body = _trace(ep, at=20)
+    _validator().validate(body)
+    r1, r2, r3 = (x["result"] for x in body["stages"][:3])
+    assert len(r1["items"]) == 9 and r1["items"][0]["type"] and r1["error"] is None
+    assert r2["unusual_items"]["items"][0]["item"] == "풍선" and r2["kb"]["intent_counts"][0]["base_share"] == 0.02
+    assert r2["kb_search"]["above_floor"] == 126
+    assert r3 is None                                                       # S3 not done at 20 s
+    body = _trace(ep, at=60)
+    assert body["stages"][2]["result"]["bundles"][0]["intent_id"] == "kid_birthday_party"
+    assert body["stages"][3]["result"]["drafts"][0]["task_id"] == "t_clean#1"   # S4 before S5
+    assert body["stages"][4]["result"] is None
+    from spira_server.db.models import Task
+    with session_scope() as s:
+        s.add(Task(task_id="t_clean#1", episode_id=ep, source="situation", way="run", end={},
+                   actions=[{"device": "cleaner_01", "cmd": "clean"}], status="dropped", drop_reason="late",
+                   line="손님 오기 전 거실 청소", meta={}))
+    _set(ep, stage="done", stage_times=_times(received=0, s1_start=0.2, s1=14.8, s2=16.1, s3=29.5, s4=50.2, s5=51))
+    r5 = _trace(ep)["stages"][4]["result"]
+    assert r5["cards"] == [] and r5["dropped"] == [{"task_id": "t_clean#1", "source": "situation",
+                                                    "line": "손님 오기 전 거실 청소", "item": None, "reason": "late"}]
+
+
 def test_live_running_and_failures():
     household()
     ep = episode()
@@ -120,3 +155,65 @@ def test_route_demo_only(env, app_headers):
     assert client.get(f"/v1/demo/episodes/{ep}/trace", headers=app_headers, params={"at": -1}).status_code == 422
     assert client.get("/v1/demo/episodes/ep_404/trace", headers=app_headers).status_code == 404
     assert client.get(f"/v1/demo/episodes/{ep}/trace").status_code == 401
+
+
+def test_reset_keeps_the_hub_key_and_the_seeded_home(env, app_headers, tmp_path):
+    from spira_server.db.models import Household
+    text = (SERVER_DIR / "dev/home.example.yaml").read_text(encoding="utf-8")
+    text = text[: text.index("\ncalendar:")] + text[text.index("\npast_orders:"):]      # no LLM tagging in tests
+    text = text.replace("devices_from: ../../contracts", f"devices_from: {CONTRACTS}")
+    home = tmp_path / "home.yaml"
+    home.write_text(text, encoding="utf-8")
+    household()
+    ep = episode()
+    with session_scope() as s:
+        before = s.get(Household, "h_042").hub_key_hash
+    env(DEMO_MODE="1", DEMO_HOME=str(home))
+    client = TestClient(create_app(start_background=False))
+    r = client.post("/v1/demo/households/h_042/reset", headers=app_headers)
+    assert r.status_code == 200 and r.json()["past_orders"] == 12 and r.json()["household_id"] == "h_042"
+    with session_scope() as s:
+        assert s.get(Household, "h_042").hub_key_hash == before                 # a running hub keeps working
+        assert s.get(Episode, ep) is None                                        # test orders are gone
+        assert s.query(Episode).filter(Episode.household_id == "h_042").count() == 12
+    assert client.post("/v1/demo/households/h_404/reset", headers=app_headers).status_code == 404
+    env(DEMO_MODE="0")
+    client = TestClient(create_app(start_background=False))
+    assert client.post("/v1/demo/households/h_042/reset", headers=app_headers).status_code == 404
+
+
+def test_kept_episode_survives_reset_in_the_replay_archive(env, app_headers, tmp_path):
+    from spira_server.db.models import Task
+    text = (SERVER_DIR / "dev/home.example.yaml").read_text(encoding="utf-8")
+    text = text[: text.index("\ncalendar:")] + text[text.index("\npast_orders:"):]
+    text = text.replace("devices_from: ../../contracts", f"devices_from: {CONTRACTS}")
+    home = tmp_path / "home.yaml"
+    home.write_text(text, encoding="utf-8")
+    household()
+    kept, other = episode(), episode("ep_9032")
+    _set(kept, judged=True, status="notified", stage="done", stage_times=_times(**FULL))
+    with session_scope() as s:
+        s.add(Task(task_id="t_clean#1", episode_id=kept, source="situation", way="run", end={}, status="live",
+                   actions=[{"device": "cleaner_01", "cmd": "clean"}], line="거실 청소", meta={}))
+    env(DEMO_MODE="1", DEMO_HOME=str(home))
+    client = TestClient(create_app(start_background=False))
+    assert client.post(f"/v1/demo/episodes/{other}/keep", headers=app_headers).status_code == 400   # not judged
+    r = client.post(f"/v1/demo/episodes/{kept}/keep", headers=app_headers)
+    assert r.status_code == 200 and r.json() == {"episode_id": kept, "kept": True}
+    listed = client.get("/v1/demo/households/h_042/replays", headers=app_headers).json()["replays"]
+    assert [(x["episode_id"], x["duration_s"], x["parked"]) for x in listed] == [(kept, 51.0, False)]
+
+    r = client.post("/v1/demo/households/h_042/reset", headers=app_headers)
+    assert r.status_code == 200 and r.json()["replays_kept"] == 1
+    with session_scope() as s:
+        assert s.get(Episode, other) is None
+        assert s.get(Episode, kept).household_id == "h_042replay"          # out of the live household
+        assert s.get(Task, (kept, "t_clean#1")).status == "cancelled"      # nothing left to run or merge with
+    listed = client.get("/v1/demo/households/h_042/replays", headers=app_headers).json()["replays"]
+    assert [(x["episode_id"], x["parked"]) for x in listed] == [(kept, True)]
+    trace = client.get(f"/v1/demo/episodes/{kept}/trace", headers=app_headers, params={"at": 20}).json()
+    assert [x["state"] for x in trace["stages"]] == ["done", "done", "running", "pending", "pending"]
+    assert client.post("/v1/demo/households/h_042/reset", headers=app_headers).json()["replays_kept"] == 0
+    with session_scope() as s:
+        assert s.get(Episode, kept) is not None                              # the archive is never reset
+    assert client.post(f"/v1/demo/episodes/{kept}/keep", headers=app_headers, json={"keep": False}).json()["kept"] is False

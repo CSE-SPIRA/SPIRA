@@ -12,13 +12,13 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select, update
 
 from .. import clock
 from ..api.auth import new_hub_key
 from ..config import load_yaml
 from ..db.engine import session_scope
-from ..db.models import Case, DeviceList, Episode, Household, OrderItem
+from ..db.models import Case, DeviceList, Episode, EpisodeSource, Household, OrderItem, Task
 from ..kb.household import check_types
 from ..pipeline.s2_calendar import CalendarInput, receive_calendar, tag_events
 
@@ -79,9 +79,42 @@ def reset(household_id: str) -> None:
         s.execute(delete(Household).where(Household.id == household_id))       # cascades to episodes, plans, ...
 
 
+def replay_archive(household_id: str) -> str:
+    """The household that keeps a demo household's replays (spec §12.5): never reset, never pulled by a hub."""
+    return f"{household_id}replay"
+
+
+def park_replays(household_id: str) -> list[str]:
+    """Move the episodes kept for replay out of the household before a reset: into its replay archive, with every
+    task that could still run cancelled. Their items, context, intent, S4 result, cards and stage times stay, so the
+    trace replays them; the live household no longer sees them (history, merge, hub plans, cards)."""
+    archive = replay_archive(household_id)
+    with session_scope() as s:
+        kept = s.execute(select(Episode).where(Episode.household_id == household_id,
+                                               Episode.replay_kept.is_(True))).scalars().all()
+        if not kept:
+            return []
+        if s.get(Household, archive) is None:
+            s.add(Household(id=archive, household_types=[], paused=True, hub_key_hash=new_hub_key()[1]))
+            s.flush()
+        ids = [e.id for e in kept]
+        s.execute(update(Task).where(Task.episode_id.in_(ids), Task.status.in_(("live", "held")))
+                  .values(status="cancelled"))
+        s.execute(delete(EpisodeSource).where(EpisodeSource.episode_id.in_(ids)))
+        for e in kept:
+            e.household_id = archive
+        return ids
+
+
+def existing_hub_key_hash(household_id: str) -> str | None:
+    with session_scope() as s:
+        row = s.get(Household, household_id)
+        return row.hub_key_hash if row else None
+
+
 def seed(home: Home, now: datetime, hub_key_hash: str | None = None) -> dict:
-    """Returns what was written (for the run log). `hub_key_hash`: keep a key the caller made (the demo hub uses
-    it); default a random key nobody knows (dry runs have no hub)."""
+    """Returns what was written (for the run log). `hub_key_hash`: keep a key the caller made or the household's
+    current one (the demo hub uses it); default a random key nobody knows (dry runs have no hub)."""
     reset(home.household_id)
     with session_scope() as s:
         s.add(Household(id=home.household_id, household_types=home.household_types, paused=False,

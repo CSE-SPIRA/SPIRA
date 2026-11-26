@@ -28,6 +28,89 @@ paths:
         '401': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
+  /v1/demo/households/{household_id}/reset:
+    post:
+      summary: Write the demo home again from DEMO_HOME; test orders, tasks, cards, plans and memory go, the hub key stays.
+      description: >-
+        What the presenter put in the demo home on purpose stays (household types, devices, calendar re-based to now,
+        past orders). Takes a few seconds (the calendar is tagged again). Not while an order is being judged.
+      parameters:
+        - {name: household_id, in: path, required: true, schema: {$ref: '../schemas/common.json#/$defs/HouseholdId'}}
+      responses:
+        '200':
+          description: Written again
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [replays_kept, household_id, devices, calendar, calendar_tagged, past_orders, now]
+                properties:
+                  replays_kept: {type: integer, minimum: 0, description: Kept episodes moved to the replay archive.}
+                  household_id: {$ref: '../schemas/common.json#/$defs/HouseholdId'}
+                  devices: {type: integer, minimum: 0}
+                  calendar: {type: integer, minimum: 0}
+                  calendar_tagged: {type: boolean}
+                  past_orders: {type: integer, minimum: 0}
+                  now: {type: string, description: Server time the calendar was re-based to (ISO).}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '500': {$ref: '#/components/responses/Error'}
+  /v1/demo/episodes/{episode_id}/keep:
+    post:
+      summary: Keep a judged episode for the replay (body {keep:false} undoes it); it survives the next reset.
+      parameters:
+        - {name: episode_id, in: path, required: true, schema: {$ref: '../schemas/common.json#/$defs/EpisodeId'}}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, properties: {keep: {type: boolean, default: true}}}
+      responses:
+        '200':
+          description: Marked
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [episode_id, kept]
+                properties:
+                  episode_id: {$ref: '../schemas/common.json#/$defs/EpisodeId'}
+                  kept: {type: boolean}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /v1/demo/households/{household_id}/replays:
+    get:
+      summary: Episodes kept for the replay, newest first (in the household or already in its replay archive).
+      parameters:
+        - {name: household_id, in: path, required: true, schema: {$ref: '../schemas/common.json#/$defs/HouseholdId'}}
+      responses:
+        '200':
+          description: Replays
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [replays]
+                properties:
+                  replays:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [episode_id, started_at, duration_s, intents, items, parked]
+                      properties:
+                        episode_id: {$ref: '../schemas/common.json#/$defs/EpisodeId'}
+                        started_at: {type: [string, 'null'], description: stage_times.received (wall, ms).}
+                        duration_s: {type: [number, 'null'], description: Order received to S5 end.}
+                        intents: {type: array, items: {type: string}}
+                        items: {type: integer, minimum: 0}
+                        parked: {type: boolean, description: Already moved to the replay archive by a reset.}
+        '401': {$ref: '#/components/responses/Error'}
 components:
   securitySchemes:
     appToken: {type: http, scheme: bearer}
@@ -60,7 +143,7 @@ components:
     Stage:
       type: object
       additionalProperties: false
-      required: [name, state, done_s, llm]
+      required: [name, state, done_s, llm, result]
       properties:
         name: {type: string, enum: [s1, s2, s3, s4, s5]}
         state:
@@ -80,3 +163,16 @@ components:
                 ms: {type: integer, minimum: 0}
                 input_tokens: {type: integer, minimum: 0}
                 output_tokens: {type: integer, minimum: 0}
+        result:
+          description: >-
+            What the stage stored, once it is done or failed (else null); stored values only (server/spec.md §12.5).
+            s1 {items[{item_id, name, type, qty, attributes, masked}], error}; s2 {household_types, unusual_items,
+            calendar, kb {similar_count, base_total, intent_counts[{intent_id, name, n, share, base_share}], note},
+            kb_search {searched, sim_floor, above_floor, used, sims, top[{case_id, sim, score, intent_id, intent_text,
+            items, used}]}, error}; s3 {bundles[{intent_id, intent_text, situation, basis, calendar_event_id,
+            calendar_tags, use_window}], none_reason, unbundled, error}; s4 = episodes.s4 {llm_called, whens,
+            skipped_bundles, drafts, dropped}; s5 {cards (card.json), plan_version, dropped[{task_id, source, line, item,
+            reason}] = tasks S5 left out (safety net, notices, merge; Task.drop_reason)}. Masked items carry no name/type.
+          anyOf:
+            - {type: 'null'}
+            - {type: object}
