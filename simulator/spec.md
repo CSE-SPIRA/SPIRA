@@ -16,8 +16,9 @@ The Simulator is an independent household with three roles:
 
 1. **Stage:** accept device commands, change device state, and show the observed
    home by room and device.
-2. **People:** let the operator act as a resident, child, guest, or external
-   automation without telling the Hub which actor was chosen.
+2. **People:** let a person act from the house or the operator act as a
+   resident, child, guest, or external automation. The Hub observes device
+   effects without receiving the actor identity.
 3. **Judge:** privately compare who acted with the `by` value that the fixture
    Server actually received from the Hub.
 
@@ -104,7 +105,9 @@ Hub completion or changing Server result state.
 
 **SM-3.** A person MUST be able to switch off a running cleaner at the house.
 World MUST stop the cleaner and expose the device change for Hub observation.
-The Hub's user-attributed observation feeds the Server's card and memory.
+The Hub reports a user-attributed stop and an `unknown` result for the
+interrupted run. The card and memory demonstration MUST use person changes
+after a completed run, such as light colour or music.
 
 **SM-4.** The operator MUST offer music and light colour changes as named
 person actions on capable devices. These actions MUST use the same World and
@@ -114,7 +117,8 @@ Hub observation path as other person changes.
 
 ### E5. Household viewer (PC-2, PC-4, PC-5, PC-6)
 
-**E5-R1.** The stage viewer MUST fill in only observed device state. Planned or
+**E5-R1.** The stage viewer MUST show observed device state, with provisional
+feedback for person actions as specified in D-5-R2. Planned or
 waiting work MUST be shown only as a visually faint, distinct overlay. Stale,
 missing, or unavailable observations MUST remain visibly so; disconnection MUST
 NOT change World state.
@@ -126,8 +130,7 @@ aggregate claim that virtual success qualifies a physical device.
 
 **E5-R3.** A no-preparation episode, such as ordinary groceries, MUST be able to
 show no planned or applied household preparation. Viewer controls MUST NOT create
-execution success. Operator writes and judge output MUST remain on the operator
-side, not the household viewer.
+execution success. Faults and judge output MUST remain on the operator side.
 
 **E5-R4.** The household viewer MUST draw a 3D household with the
 profile's rooms, each device placed in its room, and the entrance as the place
@@ -162,14 +165,29 @@ lets a person change their values. A change from it MUST travel the
 `other_app` path (no local-operation report), so it reads as Class B to the Hub.
 
 **SM-1.** The default camera MUST frame the entire house prominently. Devices
-changed in the same moment MUST receive simultaneously visible markers. Off
-devices MUST remain free of device labels.
+changed in the same moment MUST receive simultaneously visible markers. A
+device starting a run MUST receive a marker. Off devices MUST remain free of
+device labels.
 
 **SM-2.** Selecting a change marker or its device MUST open a room or device
 close-up with a short explanation of the observed change. Selecting it again,
 pressing Escape, or advancing to another moment MUST restore the overview and
 hide the explanation. Markers MUST be keyboard-focusable buttons with Korean
 labels. Advancing MUST work without selecting a marker.
+
+**D-5-R1.** In the Simulator viewer and demo shell house, selecting a device
+MUST open its SM-2 close-up and an adjacent person-action panel. The panel MUST
+use the operator's device-specific controls and household people. The birthday
+house MUST offer mother, father, child, and guest, default to mother, and
+remember the last person selected. Actions MUST use the operator person-action
+path through World and the Hub's device observation. The operator page MUST
+remain available as a backup. Device selection and actions MUST work by
+keyboard. Escape MUST close both the panel and the close-up.
+
+**D-5-R2.** Choosing an action MUST update the house immediately and show that
+a World read-back is pending. A fresh World reading MUST replace the provisional
+state. If the read fails, the house MUST restore its last observed state and
+show the failure. The house MUST use actual data waits for action feedback.
 
 **SM-5.** The demo shell MUST keep the active card visible to the left of the
 house throughout the house stage. Server judgment text MUST stay out of
@@ -274,8 +292,11 @@ passing claim until an implementation change supplies bounded evidence.
 | SIM-AT-21 | Use a named person control, then change the same device from the appliance-app page | The control emits the panel path with the person's name; the appliance-app change uses `other_app` with `local_operation=false`; both are in the truth journal | E5-R8, E5-R9, E6-R2 | PC-5, PC-6 | **Provisional for the Class A panel signal, pending PQ-01** |
 | SM-AT-1 | Guests arrive and multiple devices change | The overview stays in place and all changed devices show markers together | SM-1 | PC-4 | Required |
 | SM-AT-2 | Select a marker, then select it again | The camera closes in and an explanation appears. The camera returns to the overview and the explanation disappears | SM-2 | PC-4 | Required |
-| SM-AT-3 | A person switches off the running cleaner | The cleaner is off in World, the Hub reports `by: user`, the App card line becomes `user_changed`, and memory records `changed` | SM-3 | PC-5 | **Provisional for the Class A panel signal, pending PQ-01** |
+| SM-AT-3 | A person switches off the running cleaner | The cleaner stops in World, the Hub reports `cleaner.stopped` with `by: user`, and the interrupted run has an `unknown` result | SM-3 | PC-5 | **Provisional for the Class A panel signal, pending PQ-01** |
 | SM-AT-4 | Inspect Simulator screens and World state | Server judgment text is absent | E5-R6, SM-5 | PC-4, PC-5 | Required |
+| SM-AT-5 | Start the cleaner at its scheduled time | The running cleaner has a change marker in the house overview | SM-1 | PC-4 | Required |
+| SIM-AT-22 | Select the light by mouse or keyboard and choose a person's yellow colour action | The close-up and its action panel open together. The house shows yellow immediately, then confirms yellow from World. Hub observes the change with `by: user`. Escape closes both views | D-5-R1, D-5-R2, SM-2, SM-4 | PC-4, PC-5 | **Provisional for the Class A panel signal, pending PQ-01** |
+| SIM-AT-23 | Choose a person action with an unavailable World read-back | The house shows pending feedback immediately, then restores the last observed value and reports the failure | D-5-R2 | PC-4 | Required |
 
 ## 4. Open items
 

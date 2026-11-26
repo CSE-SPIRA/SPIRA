@@ -25,9 +25,10 @@ registerHooks({
   },
 });
 const { buildChain: makeChain, houseDevicePresentation } = await import("../ui/chain.js");
+const { createHouseTimeline } = await import("../ui/house-timeline.js");
 const { HOUSE_DEVICES } = await import(new URL("devices.js", house));
 const buildChain = (options) => makeChain({ houseDevices: HOUSE_DEVICES, ...options });
-const { HOUSE_ROOM_VIEWS, layoutHouseLabels, orientHouseCamera, projectHouseLabels } = await import(new URL("house.js", house));
+const { HOUSE_ROOM_VIEWS, layoutHouseLabels, orientHouseCamera, personActionClient, projectHouseLabels } = await import(new URL("house.js", house));
 const { OrthographicCamera, Vector3 } = await import(new URL("vendor/three.module.min.js", house));
 
 const shellScenes = JSON.parse(readFileSync(
@@ -975,6 +976,54 @@ test("the live server advances its published moment through the next route", asy
   assert.deepEqual(writes, [[`/demo/api/clock/next?episode_id=${id}`, { over_seconds: 4 }]]);
 });
 
+test("the live house sends person actions to the configured World and reads back through the shell", async (t) => {
+  const origin = "http://127.0.0.1:8760";
+  const href = origin + "/demo";
+  const endpoint = "http://127.0.0.1:8730/operator/person";
+  for (const [key, value] of Object.entries({ location: { origin }, window: { location: { href } } })) {
+    const original = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { configurable: true, value });
+    t.after(() => original ? Object.defineProperty(globalThis, key, original) : delete globalThis[key]);
+  }
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (url, { method, body }) => {
+    requests.push([url.href, method, Object.fromEntries(body)]);
+    return Response.json({ applied: true });
+  });
+  const state = {
+    houseModule: { personActionClient },
+    house: {
+      setPersonActionClient(client) { this.act = client; },
+      setEntrance() {}, focus() {},
+    },
+  };
+  const markers = { personShellOrigin: "http://127.0.0.1:8761", personEndpoint: endpoint };
+  const snapshot = { world_revision: 2 };
+  const context = {
+    state, $: () => ({ dataset: markers, removeAttribute() {} }),
+    async observe(kind, path) {
+      requests.push([kind, path]);
+      return snapshot;
+    },
+  };
+  const documentBefore = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: { querySelectorAll: () => [] } });
+  t.after(() => documentBefore ? Object.defineProperty(globalThis, "document", documentBefore) : delete globalThis.document);
+  const ui = { surface: { async refreshHouseMarkers() { requests.push(["refresh markers"]); } } };
+  const live = createHouseTimeline(context, ui);
+  const moment = { id: "plan" };
+  live.directHouse(moment, true, [moment]);
+  assert.equal(state.house.act, undefined);
+  markers.personShellOrigin = origin;
+  live.directHouse(moment, true, [moment]);
+  assert.equal(await state.house.act({ target: "mqtt:light_01", person: "아빠", control: "color_yellow" }), snapshot);
+  assert.deepEqual(requests, [
+    [endpoint + "?target=mqtt%3Alight_01", "POST", { person: "아빠", control: "color_yellow" }],
+    ["snapshot", "/demo/api/sim/snapshot"],
+    ["refresh markers"],
+  ]);
+});
+
 test("clock advances visit and record timed moments when Hub read-backs arrive", async (t) => {
   const { episode, rationale, hub, facts, viewer, devices, relations } = sceneFixture();
   const { episode_id: id } = episode;
@@ -985,6 +1034,7 @@ test("clock advances visit and record timed moments when Hub read-backs arrive",
   const safetyReadBack = safe.observed;
   safe.observed = [];
   relations["t_oven#4"].observed = [];
+  let snapshot = { devices };
   const moments = [clean, safe].map(({ trigger }) => ({ at: trigger.time, kind: "time" }));
   const start = delivered.at;
   let clock = { version: 1, real_at: start, story_at: start, rate: 1 };
@@ -995,7 +1045,7 @@ test("clock advances visit and record timed moments when Hub read-backs arrive",
     if (path === "/demo/api/config") return Response.json({ server: true, hub: true, fixture: true, household_id: "h_042" });
     if (path === "/demo/api/hub") return Response.json(hub);
     if (path === "/demo/api/sim/viewer") return new Response(viewer(visible));
-    if (path === "/demo/api/sim/snapshot") return Response.json({ devices });
+    if (path === "/demo/api/sim/snapshot") return Response.json(snapshot);
     if (path.endsWith("/demo/clock")) return Response.json(clock);
     if (path.endsWith("/demo/moments")) return Response.json(moments);
     if (path === "/demo/api/clock") {
@@ -1031,6 +1081,13 @@ test("clock advances visit and record timed moments when Hub read-backs arrive",
   await advance(clean.trigger.time);
   assert.equal(shell.byId("home-title").textContent, "택배 들여옴");
   assert.match(shell.byId("timeline").innerHTML, /12:30<\/time>\s*<span>[^<]+<\/span><small>대기/);
+  snapshot = { devices: [...devices.filter(({ logical_id }) => logical_id !== "cleaner_01"), {
+    logical_id: "cleaner_01", available: true, observation: "current", occurred_at: clean.trigger.time,
+    values: { job_status: "running", in_use: true },
+  }] };
+  await shell.runTimer(800);
+  assert.deepEqual(shell.changeMarkers, ["fridge_01", "cleaner_01"]);
+  assert.equal(shell.byId("home-title").textContent, "택배 들여옴");
   clean.observed = [{
     device: "cleaner_01", cmd: "clean", at: "2026-10-17T12:30:00.038918+09:00",
     values: { job_status: "running" }, revisions: { job_status: "1" },

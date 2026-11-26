@@ -78,6 +78,7 @@ HOUSE_VISUAL_PROPERTIES = {
     "oven": ("preset", "in_use", "job_status"),
     "fridge": ("show_notice",),
     "smart_plug": ("power",),
+    "speaker": ("play",),
     "air_conditioner": ("mode", "target_temp"),
 }
 
@@ -388,6 +389,8 @@ def viewer_world(world: World) -> dict:
         if notice:
             device["notices"] = notices.get(report["target"]) or [notice]
     return {
+        "world_epoch": snapshot["world_epoch"],
+        "world_revision": snapshot["world_revision"],
         "clock": display_time(now),
         "clock_at": now.isoformat(),
         "tiles": devices,

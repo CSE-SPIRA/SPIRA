@@ -19,6 +19,21 @@ function changedDevices(moment, moments, hub, episodeId) {
 
 export function createHouseTimeline(context, ui) {
   const { state, RECORDING, $, notice, REPLAY, observe, sleep } = context;
+  let personEndpoint;
+
+  function connectPersonActions() {
+    const config = $("viewer-markers").dataset;
+    const endpoint = !REPLAY && config.personShellOrigin === location.origin ?
+      config.personEndpoint : undefined;
+    if (personEndpoint === endpoint) return;
+    const { personActionClient } = state.houseModule;
+    state.house.setPersonActionClient?.(endpoint && personActionClient(endpoint, async () => {
+      const snapshot = await observe("snapshot", "/demo/api/sim/snapshot", { signal: AbortSignal.timeout(2500) });
+      void ui.surface.refreshHouseMarkers().catch(() => {});
+      return snapshot;
+    }));
+    personEndpoint = endpoint;
+  }
 
   function canEnterHouse() {
     return Boolean(state.episodeId && state.runPath === "house" && state.chain.ready.hub &&
@@ -144,6 +159,7 @@ export function createHouseTimeline(context, ui) {
 
   function directHouse(moment, instant = false, moments = timeline()) {
     if (!state.house) return;
+    connectPersonActions();
     state.house.setEntrance({ signal: moment.signal ?? "", packagePresent: moment.signal === "package" });
     if (instant || state.cameraMoment !== moment.id) {
       state.cameraMoment = moment.id;
@@ -156,7 +172,12 @@ export function createHouseTimeline(context, ui) {
       $("view").toggleAttribute("data-closeup", Boolean(id));
       selectRoomCamera(null);
     });
-    state.house.showChangeMarkers?.(changedDevices(moment, moments, state.hub, state.episodeId), (id) => {
+    const changed = new Set(changedDevices(moment, moments, state.hub, state.episodeId));
+    for (const device of state.snapshot?.devices ?? []) {
+      if (device.observation === "current" && device.values?.job_status === "running" &&
+          Date.parse(device.occurred_at) >= Date.parse(state.episode?.shared_at)) changed.add(device.logical_id);
+    }
+    state.house.showChangeMarkers?.([...changed], (id) => {
       const device = state.chain.devices.find(({ logicalId }) => logicalId === id);
       const view = closeView({ ...moment, focusDevices: [id] }, state.chain.devices) ?? roomCamera(device?.room);
       return { view };

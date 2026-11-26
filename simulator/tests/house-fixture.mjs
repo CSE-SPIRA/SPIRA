@@ -24,6 +24,7 @@ export function houseHarness(t, { width = 680, height = 450, ...options } = {}) 
     return {
       children: [],
       append(...children) { this.children.push(...children); for (const child of children) child.parent = this; },
+      replaceChildren(...children) { this.children = []; this.append(...children); },
       addEventListener(type, callback) { this[`on${type}`] = callback; },
       focus() { document.activeElement = this; },
       remove() { this.parent.children = this.parent.children.filter(child => child !== this); },
@@ -32,6 +33,8 @@ export function houseHarness(t, { width = 680, height = 450, ...options } = {}) 
       hasAttribute: key => attributes.has(key),
       classList: { toggle: noop },
       style: { setProperty: noop },
+      offsetWidth: 210,
+      offsetHeight: 100,
     };
   };
   const globals = {
@@ -98,12 +101,17 @@ export function houseHarness(t, { width = 680, height = 450, ...options } = {}) 
       frame = undefined;
       next?.(at);
     },
-    markers(values, { guests, person, planned = false } = {}) {
+    markers(values, { guests, person, planned = false, dataset, controls } = {}) {
       const nodes = Object.entries(values).map(([device, reading]) => ({
-        ...element(), dataset: { device, values: JSON.stringify(reading), ...person?.[device] },
+        ...element(), dataset: {
+          device, values: JSON.stringify(reading), ...person?.[device], ...controls?.[device],
+        },
         hasAttribute: name => planned && name === "data-planned",
+        querySelector: () => null,
+        closest: () => null,
       }));
       house.setMarkers({
+        dataset,
         querySelectorAll: () => nodes,
         querySelector: () => ({ ...element(), dataset: { ...guests } }),
       });

@@ -13,7 +13,8 @@
 {% endmacro %}
 {% macro device_marker(device) %}
   {% set full = device.changed or device.planned %}
-  <div class="viewer-marker" data-device="{{ device.id }}" data-device-name="{{ device.name }}" data-values="{{ device.visual_values | tojson | forceescape }}"{% if device.change_at %} data-change-at="{{ device.change_at }}"{% endif %}{% if device.person_action %} data-person-at="{{ device.person_action.at }}" data-person-figure="{{ device.person_action.figure }}"{% endif %}{% if device.changed %} data-changed=""{% endif %}{% if not full %} data-resting=""{% endif %}{% if full or device.observation_label or device.physical %} data-required=""{% endif %}>
+  {% set target, actions = person_controls.get(device.id, ('', [])) %}
+  <div class="viewer-marker" data-device="{{ device.id }}" data-device-name="{{ device.name }}" data-values="{{ device.visual_values | tojson | forceescape }}"{% if device.change_at %} data-change-at="{{ device.change_at }}"{% endif %}{% if device.person_action %} data-person-at="{{ device.person_action.at }}" data-person-figure="{{ device.person_action.figure }}"{% endif %}{% if device.changed %} data-changed=""{% endif %}{% if not full %} data-resting=""{% endif %}{% if full or device.observation_label or device.physical %} data-required=""{% endif %}{% if target %} data-person-target="{{ target }}" data-person-actions="{{ actions | tojson | forceescape }}"{% endif %}>
     <article class="home-device" data-observation="{{ device.observation }}"{% if device.change %} data-change="{{ device.change[0] }}"{% endif %}>
       <h3{% if not full and device.content is not none %} title="{{ device.content }}"{% endif %}>{{ device.name }}
         {% if device.change and device.change[0] == "spira" %}<span class="spira-dot" role="img" aria-label="SPIRA가 설정했어요"></span>{% endif %}
@@ -68,7 +69,7 @@
     </figure>
     <p id="world-unavailable" class="observation-warning" role="status" hidden="">이 화면에서 입체 집을 열 수 없어요.</p>
     {% endif %}
-    <div id="viewer-markers" class="viewer-markers" data-live="">
+    <div id="viewer-markers" class="viewer-markers" data-live="" data-world-epoch="{{ world_epoch }}" data-world-revision="{{ world_revision }}"{% if person_names %} data-person-names="{{ person_names | tojson | forceescape }}"{% endif %}{% if person_endpoint %} data-person-endpoint="{{ person_endpoint }}" data-person-shell-origin="{{ person_shell_origin }}"{% endif %}>
       {% for room, devices in rooms.items() if room != "entrance" %}
       <section id="viewer-room-{{ room }}" class="viewer-room" data-room="{{ room }}">
         <h2>{{ room_names.get(room, room) }}</h2>
