@@ -29,6 +29,8 @@ SPIRA reads an order screenshot, finds similar cases in a synthetic purchase-int
 
 ## Run the demo
 
+See the [launcher specification](scripts/spec.md) for both peer modes and Android builds.
+
 Before the first run, install:
 
 | | macOS | Linux, or Windows through [WSL2](https://learn.microsoft.com/windows/wsl/install) |

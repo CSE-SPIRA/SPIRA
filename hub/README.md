@@ -15,6 +15,7 @@ Folder layout inside is decided by the owner. See [`spec.md`](spec.md).
 `hub/tests/fixture_server` is **non-inference test support** for the App, Hub,
 and Simulator. It replays committed payloads for H10-R1 and HUB-AT19. OCR, LLM,
 KB retrieval, device execution, and S7 inference are outside this test peer.
+See the [fixture specification](tests/fixture_server/spec.md) for live reads.
 
 From the repository root, run one episode with `uv` and Python 3.12.
 
@@ -34,8 +35,9 @@ emulator, configure the host and port with `--host` and `--port`.
 
 Add `--default-scene ep_9031` or set `SPIRA_FIXTURE_DEFAULT_SCENE=ep_9031`
 to start unpublished and run the live birthday replay on each new
-`POST /v1/orders` upload. The live replay keeps the recorded schedule and uses
-the Server's normal quiet window on the story clock.
+`POST /v1/orders` upload. The live replay keeps the recorded device schedule
+and publishes results one stage at a time on the story clock. The Server
+pace preset uses the normal quiet window.
 See the [live scene options](tests/fixture_server/README.md).
 
 Each instance starts at the first plan and card fixtures for its selected
@@ -52,11 +54,12 @@ an existing fixture task using a fresh task ID. For cancellation, a received
 cancellations. Order uploads and edits return acknowledgement for the selected
 episode. Profile writes and device registrations exercise their contract
 responses without re-planning the fixture. The onboarding response uses the
-selected household ID and the committed demo key. `ep_9150` starts with the
-clam and strawberry item notices and its no-intent rationale. Rationale returns
-404 when there is no committed snapshot for the published episode. The birthday
-and groceries episodes serve their committed rationale as soon as they are
-published. Memory is empty before the
+selected household ID and the committed demo key. In static replay `ep_9150`
+starts with the clam and strawberry item notices and its no-intent rationale.
+In live replay the episode is readable at acceptance, items appear at S1,
+and rationale starts with evidence at S2. Intents appear at S3, and task and
+card data at S5. The family scene has no committed rationale snapshot.
+Memory is empty before the
 birthday final snapshot and in the other episodes. The family episode detail
 uses the initial plan timestamp and held card ID with empty item lists.
 
