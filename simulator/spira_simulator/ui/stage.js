@@ -38,25 +38,29 @@ function renderHouse() {
   if (previousChanges) {
     const changed = [...changes].filter(([id, observation]) => observation !== previousChanges.get(id))
       .map(([id]) => id);
-    if (changed.length) {
-      house.focus();
-      house.showChangeMarkers(changed);
-    }
+    if (changed.length) house.showChangeMarkers(changed);
     for (const [id, observation] of changes) previousChanges.set(id, observation);
   } else {
     previousChanges = changes;
+    house.showChangeMarkers(devices.filter(({ dataset }) => JSON.parse(dataset.values).job_status === "running")
+      .map(({ dataset }) => dataset.device));
   }
 }
 
 async function openHouse() {
   const view = document.getElementById("viewer-house");
   try {
-    const { createHouse, replaceHouseMarkers, entrancePresentation: describeEntrance, HOUSE_ROOM_VIEWS } =
+    const { createHouse, personActionClient, replaceHouseMarkers, entrancePresentation: describeEntrance, HOUSE_ROOM_VIEWS } =
       await import("/sim/assets/house/house.js");
     replaceMarkers = replaceHouseMarkers;
     entrancePresentation = describeEntrance;
     roomViews = HOUSE_ROOM_VIEWS;
     house = createHouse(world, { viewer: true });
+    house.setPersonActionClient(personActionClient("/operator/person", async () => {
+      const response = await fetch("/sim/snapshot", { signal: AbortSignal.timeout(8000) });
+      if (!response.ok) throw new Error(response.status);
+      return response.json();
+    }));
     house.focus(roomViews[selectRoom()], { instant: true });
     renderHouse();
     view.classList.add("ready");

@@ -36,7 +36,7 @@ for (const [width, height] of [[1470, 824], [1226, 662], [372, 261]]) {
       resolve(specifier, context, nextResolve) {
         if (specifier !== "/sim/assets/house/house.js") return nextResolve(specifier, context);
         return nextResolve("data:text/javascript," + encodeURIComponent(
-          `export { HOUSE_ROOM_VIEWS, entrancePresentation, replaceHouseMarkers } from "${renderer}";
+          `export { HOUSE_ROOM_VIEWS, entrancePresentation, personActionClient, replaceHouseMarkers } from "${renderer}";
            export const createHouse = () => globalThis.testHouse;`), context);
       },
     });

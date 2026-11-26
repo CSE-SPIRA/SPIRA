@@ -3,9 +3,11 @@ import { createCeilingCove } from "./ceiling-cove.js";
 import { HOUSE_DEVICES } from "./devices.js";
 import { createCleanerBody, roundedGeometry } from "./geometry.js";
 import { createHousePeople } from "./people.js";
+import { createPersonPanel, keepSpaceForButton, optimisticReading } from "./person-actions.js";
 import { createSceneLayer, validateScene } from "./scene.js";
 
 export { validateScene };
+export { personActionClient } from "./person-actions.js";
 
 export const TV_SCENES = { kids_party: "어린이 파티", party: "파티", calm: "차분한 분위기", cinema: "영화" };
 const OVERVIEW = { eye: [8.5, 10.6, 17.4], aim: [-0.10, 0.76, 0], zoom: 1 };
@@ -62,6 +64,10 @@ export function createLivingLight(lamp, source, glowLevel, cove) {
       return false;
     },
     render(now, instant = false) {
+      if (instant) {
+        fromTint.copy(targetTint);
+        fromLevel = targetLevel;
+      }
       const mix = instant ? 1 : THREE.MathUtils.smoothstep(now - changedAt, 0, 1000);
       const level = THREE.MathUtils.lerp(fromLevel, targetLevel, mix);
       lamp.color.lerpColors(fromTint, targetTint, mix);
@@ -81,12 +87,6 @@ const TV_LOOKS = {
   calm: { sky: ["#314f5e", "#b3cdab"], spill: ["#66a29c", "#b3cdab"] },
   cinema: { sky: ["#13162d", "#545b93"], spill: ["#7776ba", "#a0a7ef"] },
 };
-
-export function tvSceneTransition(previous, mood) {
-  // An absent reading is unknown. The device reports null when it is off.
-  const scene = Object.hasOwn(TV_LOOKS, mood?.scene) ? mood.scene : mood === null ? null : undefined;
-  return { scene, poweringOn: previous === null && Boolean(scene) };
-}
 
 export function entrancePresentation(signals) {
   return {
@@ -585,6 +585,8 @@ export function createHouse(stage, {
   speaker.visible = false;
   box(.38,.72,.35,dark,0,.36,0,.06,speaker);
   box(.32,.62,.055,textile("#514a47","#a99989"),0,.36,.18,.035,speaker);
+  const speakerLed = new THREE.MeshBasicMaterial({ color: "#514a47", toneMapped: false });
+  sphere(.038,.038,.024,speakerLed,.10,.61,.209,speaker);
 
   box(2.27,.48,.60,oak,-.72,.35,-3.15,.055);
   for(let i=0;i<3;i++){
@@ -793,11 +795,13 @@ export function createHouse(stage, {
   changeDetail.setAttribute("role", "status");
   changeDetail.hidden = true;
   stage.append(changeLayer, changeDetail);
-  let describeChange, markerListener, selectedChange;
+  let describeChange, markerListener, selectedChange, actAsPerson, markerEpoch, markerRevision;
+  let personPanel, personNames = [], observedValues = new Map();
+  let personControls = new Map(), markedChanges = new Set();
+  const actions = new Map();
   let jobRunning = false, cleanSince = 0, tvScene;
-  let sceneTvImage, tvBootTimer, tvBootUntil = 0;
+  let sceneTvImage, sceneTvMood;
   let activeScene, sceneArtwork, sceneStartedAt;
-  const TV_BOOT_MS = 1800;
   let entranceSignal;
   let zoom = 1, targetZoom = 1, hasDirection = false, overviewFit = 1, targetFit = 1;
   let viewWidth = 0, viewHeight = 0, request = 0, readyAt = 0;
@@ -816,6 +820,7 @@ export function createHouse(stage, {
   function showArtwork(artwork) {
     if (sceneArtwork?.tv !== artwork?.tv) {
       sceneTvImage = null;
+      sceneTvMood = observedValues.get("display_01")?.play_mood?.scene ?? tvScene;
       if (artwork?.tv) {
         const image = new Image();
         sceneTvImage = image;
@@ -861,18 +866,8 @@ export function createHouse(stage, {
       ctx.fillStyle = "#17151f";
       ctx.fillRect(0, 0, w, h);
       if (!look) return;
-      // Like an LG TV, the set shows its logo for a moment when it is switched on.
-      if (performance.now() < tvBootUntil) {
-        ctx.fillStyle = "#0b0a0e";
-        ctx.fillRect(0, 0, w, h);
-        ctx.fillStyle = "#f4f1ea";
-        ctx.font = `700 ${Math.round(h * .16)}px "IBM Plex Sans KR", sans-serif`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText("LG", w / 2, h / 2);
-        return;
-      }
-      const image = sceneTvImage;
+      if (sceneTvImage) sceneTvMood ??= tvScene;
+      const image = sceneTvMood === tvScene ? sceneTvImage : null;
       if (image?.naturalWidth) {
         const scale = Math.max(w / image.naturalWidth, h / image.naturalHeight);
         const width = image.naturalWidth * scale, height = image.naturalHeight * scale;
@@ -955,21 +950,14 @@ export function createHouse(stage, {
   const fridgePanel = createFridgePanel(fridgeTexture.paint, queue);
 
   const painters = {
-    light_01(values) {
-      return livingLight.update(values, performance.now());
+    light_01(values, instant) {
+      const now = performance.now();
+      const themed = livingLight.update(values, now);
+      if (instant) livingLight.render(now, true);
+      return themed;
     },
     display_01({ play_mood }) {
-      const { scene: nextScene, poweringOn } = tvSceneTransition(tvScene, play_mood);
-      if (nextScene !== tvScene) {
-        if (!nextScene) {
-          clearTimeout(tvBootTimer);
-          tvBootUntil = 0;
-        } else if (poweringOn) {
-          tvBootUntil = performance.now() + TV_BOOT_MS;
-          tvBootTimer = setTimeout(() => { paintTv(); queue(); }, TV_BOOT_MS);
-        }
-        tvScene = nextScene;
-      }
+      tvScene = Object.hasOwn(TV_LOOKS, play_mood?.scene) ? play_mood.scene : undefined;
       musicCue.hidden = !tvScene;
       roomLighting.tvLevel.value = tvScene ? .72 : 0;
       if (tvScene) {
@@ -984,6 +972,9 @@ export function createHouse(stage, {
       return tvScene === "kids_party";
     },
     oven_01: paintOven,
+    speaker_01({ play }) {
+      speakerLed.color.set(play?.playlist === "calm" ? "#b3cfa4" : play ? "#ffcd99" : "#514a47");
+    },
     aircon_01({ mode }) {
       airconLed.color.set(AIRCON_LEDS[mode] ?? AIRCON_LEDS.off);
       queue();
@@ -1070,7 +1061,7 @@ export function createHouse(stage, {
     decorateLabel?.(label, appearance);
   }
 
-  function update(valuesById) {
+  function update(valuesById, instantId) {
     let changed = false;
     for (const [id, model] of Object.entries(models)) {
       if (model.visible !== valuesById.has(id)) {
@@ -1080,7 +1071,7 @@ export function createHouse(stage, {
     }
     for (const [id, paint] of Object.entries(painters)) {
       const values = valuesById.get(id) ?? {};
-      if (paintReading(id, paint, values)) changed = true;
+      if (paintReading(id, paint, values, id === instantId)) changed = true;
     }
     if (changed) {
       renderer.shadowMap.needsUpdate = true;
@@ -1088,10 +1079,10 @@ export function createHouse(stage, {
     }
   }
 
-  function paintReading(id, paint, values) {
+  function paintReading(id, paint, values, instant) {
     const key = JSON.stringify(values);
     if (readings.get(id)?.key === key) return false;
-    const theme = paint(values) === true;
+    const theme = paint(values, instant) === true;
     readings.set(id, { key, values, theme });
     return true;
   }
@@ -1161,7 +1152,18 @@ export function createHouse(stage, {
     inlineDevices = placeDevices;
     const devices = [...root.querySelectorAll("[data-device][data-values]")];
     labels = new Map(devices.map((node) => [node.dataset.device, node]));
-    update(new Map(devices.map((node) => [node.dataset.device, JSON.parse(node.dataset.values)])));
+    const epoch = root.dataset?.worldEpoch;
+    if (epoch !== markerEpoch) actions.clear();
+    markerEpoch = epoch;
+    markerRevision = Number(root.dataset?.worldRevision);
+    observedValues = new Map(devices.map(({ dataset }) => [dataset.device, JSON.parse(dataset.values)]));
+    personNames = JSON.parse(root.dataset?.personNames ?? "[]");
+    personControls = new Map(devices.filter(({ dataset }) => dataset.personActions)
+      .map(({ dataset }) => [dataset.device, {
+        target: dataset.personTarget,
+        choices: JSON.parse(dataset.personActions),
+      }]));
+    renderReadings();
     for (const id of labels.keys()) decorateDeviceLabel(id, presentation.get(id));
     const entrance = root.querySelector("#entrance-observations");
     if (entrance) labels.set("entrance", entrance);
@@ -1169,8 +1171,59 @@ export function createHouse(stage, {
     setEntrance({ guests: arrival ? { arrival, count: entrance.dataset.guestCount } : null });
     people.setActions(new Map(devices.filter(({ dataset }) => dataset.personAt)
       .map(({ dataset }) => [dataset.device, { at: dataset.personAt, kind: dataset.personFigure }])));
-    syncChangeMarkers();
+    syncDeviceButtons();
     queue();
+  }
+
+  function renderReadings(instantId) {
+    const visible = new Map(observedValues);
+    for (const [id, action] of actions) {
+      if (visible.has(id) && action.values && (action.pending || action.revision > markerRevision)) {
+        visible.set(id, action.values);
+      }
+    }
+    update(visible, instantId);
+  }
+
+  function setPersonActionClient(client) {
+    if (actAsPerson === client) return;
+    actAsPerson = client;
+    if (client) personPanel ??= createPersonPanel(stage, runPersonAction);
+    syncDeviceButtons();
+  }
+
+  async function runPersonAction(id, person, choice) {
+    if (!actAsPerson || actions.get(id)?.pending) return;
+    const current = readings.get(id)?.values ?? observedValues.get(id);
+    const action = {
+      pending: true, message: "집 상태 확인 중…", label: choice.label,
+      values: optimisticReading(current, choice),
+    };
+    actions.set(id, action);
+    renderReadings(id);
+    syncChangeMarkers();
+    try {
+      const snapshot = await actAsPerson({ target: personControls.get(id).target, person, control: choice.key });
+      const reading = snapshot.devices.find(device => device.logical_id === id);
+      if (snapshot.world_epoch !== markerEpoch || !Number.isSafeInteger(snapshot.world_revision) ||
+          !reading?.available || reading.observation !== "current") throw new Error("World read-back unavailable");
+      action.revision = snapshot.world_revision;
+      action.values = reading.values;
+      const matches = Object.entries(choice.values).every(([key, value]) =>
+        JSON.stringify(reading.values[key]) === JSON.stringify(value)) &&
+        (!choice.start || reading.values.job_status === "running");
+      if (!matches) action.label = "";
+      action.message = matches ? "집 상태를 확인했어요." : "선택한 동작을 확인하지 못했어요.";
+    } catch {
+      action.values = undefined;
+      action.message = "집 상태를 확인하지 못했어요.";
+    } finally {
+      if (actions.get(id) === action) {
+        action.pending = false;
+        renderReadings(id);
+        syncChangeMarkers();
+      }
+    }
   }
 
   function describeDevice(id) {
@@ -1189,19 +1242,35 @@ export function createHouse(stage, {
         button.hidden = true;
         continue;
       }
-      button.setAttribute("aria-label", selectedChange === id ? `${name} · 집 전체 보기` : `${name} · 변경 보기`);
+      const expanded = selectedChange === id;
+      const label = expanded ? "집 전체 보기" : markedChanges.has(id) ? "변경 보기" : "조작 보기";
+      button.setAttribute("aria-label", `${name} · ${label}`);
+      button.setAttribute("data-changed", String(markedChanges.has(id)));
       button.setAttribute("aria-expanded", String(selectedChange === id));
       button.hidden = false;
     }
     if (selectedChange) {
       const { name, observed } = describeDevice(selectedChange);
-      changeDetail.textContent = `${name} · ${observed || "상태가 바뀌었어요"}`;
+      const action = actions.get(selectedChange);
+      const current = action?.pending || action?.revision > markerRevision ? action.label : observed;
+      changeDetail.textContent = `${name} · ${current || (markedChanges.has(selectedChange) ? "상태가 바뀌었어요" : "상태 보기")}`;
+      const controls = personControls.get(selectedChange);
+      if (actAsPerson && personNames.length && controls) {
+        personPanel.open(selectedChange, name, personNames, controls.choices);
+        personPanel.sync(action);
+      } else personPanel?.close();
     }
   }
 
   function showChangeMarkers(ids, describe) {
     describeChange = describe;
-    const next = new Set(ids.filter(id => Object.hasOwn(models, id) || labels.has(id)));
+    markedChanges = new Set(ids);
+    syncDeviceButtons();
+  }
+
+  function syncDeviceButtons() {
+    const next = new Set([...markedChanges, ...(actAsPerson && personNames.length ? personControls.keys() : [])]
+      .filter(id => Object.hasOwn(models, id) || labels.has(id)));
     if (selectedChange && !next.has(selectedChange)) focus();
     let layoutChanged = false;
     for (const [id, button] of changeButtons) {
@@ -1215,6 +1284,7 @@ export function createHouse(stage, {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "house-change-marker";
+      button.addEventListener("keydown", keepSpaceForButton);
       button.addEventListener("click", () => selectChange(id));
       changeButtons.set(id, button);
       changeLayer.append(button);
@@ -1249,6 +1319,7 @@ export function createHouse(stage, {
     selectedChange = id;
     syncChangeMarkers();
     changeDetail.hidden = false;
+    if (actAsPerson && personControls.has(id)) personPanel.focus();
     stage.ownerDocument.addEventListener("keydown", escapeChange);
     moveCamera(view ?? HOUSE_ROOM_VIEWS[room]);
     markerListener?.(id);
@@ -1271,6 +1342,10 @@ export function createHouse(stage, {
 
   function placeChangeMarkers() {
     const size = 26;
+    if (selectedChange) {
+      const roomAnchor = HOUSE_ROOM_VIEWS[describeDevice(selectedChange).room]?.aim ?? OVERVIEW.aim;
+      personPanel?.place(project(selectedChange, roomAnchor), viewWidth, viewHeight);
+    }
     const boxes = [...changeButtons].flatMap(([id, button]) => {
       if (button.hidden) return [];
       const roomAnchor = Object.hasOwn(LABEL_ANCHORS, id) ? undefined
@@ -1306,6 +1381,7 @@ export function createHouse(stage, {
   function focus(setting, options) {
     if (selectedChange) {
       selectedChange = undefined;
+      personPanel?.close();
       changeDetail.hidden = true;
       changeDetail.textContent = "";
       stage.ownerDocument.removeEventListener("keydown", escapeChange);
@@ -1456,5 +1532,5 @@ export function createHouse(stage, {
   }
   new ResizeObserver(resize).observe(stage);
   return { resize, setPresentation, setMarkers, focus, showChangeMarkers, clearChangeMarkers, onMarker,
-    setEntrance, setScene, clearScene, setSampleReading, anchor: project };
+    setEntrance, setScene, clearScene, setSampleReading, setPersonActionClient, anchor: project };
 }

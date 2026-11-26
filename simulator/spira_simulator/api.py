@@ -1,4 +1,4 @@
-"""HTTP composition for the read-only stage and private operator."""
+"""HTTP composition for the household stage and private operator."""
 
 import asyncio
 import logging
@@ -187,6 +187,9 @@ def create_app(
         redoc_url=None,
     )
 
+    def shell_origin():
+        return os.getenv("WORLD_HOUSE_SHELL_ORIGIN", "").rstrip("/")
+
     async def require_operator(request: Request):
         if not request.app.state.operator_enabled:
             raise HTTPException(404, "Operator disabled")
@@ -249,6 +252,22 @@ def create_app(
             {
                 **display,
                 "fragment": fragment,
+                "person_names": [person.name for person in world.profile.demo_people]
+                if request.app.state.operator_enabled else [],
+                "person_controls": {
+                    device.logical_id: (
+                        device.target,
+                        [
+                            {"key": control.key, "label": control.label,
+                             "values": control.values, "start": control.start}
+                            for control in device_controls(device, appliance=False)
+                        ],
+                    )
+                    for device in world.devices.values()
+                } if request.app.state.operator_enabled else {},
+                "person_endpoint": str(request.base_url).rstrip("/") + "/operator/person"
+                if fragment and shell_origin() else "",
+                "person_shell_origin": shell_origin() if fragment else "",
                 "home": world.profile.display_name or "우리 집",
                 "peers": request.app.state.peer_viewers,
                 "rooms": rooms,
@@ -353,11 +372,12 @@ def create_app(
         person: str = Form(),
         control: str = Form(),
     ):
-        origin = request.headers.get("origin")
-        if origin is not None and origin != str(request.base_url).rstrip("/"):
-            raise HTTPException(403, "이 화면에서 기기를 조작해 주세요")
         world = request.app.state.world
         appliance = request.scope["route"].name == "appliance_action"
+        origin = request.headers.get("origin")
+        shell_request = not appliance and bool(origin) and origin == shell_origin()
+        if origin is not None and origin != str(request.base_url).rstrip("/") and not shell_request:
+            raise HTTPException(403, "이 화면에서 기기를 조작해 주세요")
         profile_person = next(
             (entry for entry in world.profile.demo_people if entry.name == person), None
         )
@@ -386,6 +406,8 @@ def create_app(
             actor_name=profile_person.name,
             action_path="other_app" if appliance else "device_panel",
         )
+        if not appliance and request.headers.get("accept") == "application/json":
+            return {"applied": True}
         destination = (
             "/app?" + urlencode({"person": profile_person.name})
             if appliance
@@ -500,6 +522,11 @@ def create_app(
     @application.middleware("http")
     async def prevent_caching(request: Request, call_next):
         response = await call_next(request)
+        origin = request.headers.get("origin")
+        if request.url.path == "/operator/person" and origin and origin == shell_origin():
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Vary"] = "Origin"
         if request.url.path.startswith(
             (
                 "/operator",

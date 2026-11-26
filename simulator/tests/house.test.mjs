@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createFridgePanel, createLivingLight, entrancePresentation, fitViewerCamera, layoutViewerLabels, orientHouseCamera, projectHouseLabels, tvSceneTransition } from "../spira_simulator/ui/house/house.js";
+import { setImmediate as settle } from "node:timers/promises";
+import { createFridgePanel, createLivingLight, entrancePresentation, fitViewerCamera, hsvColor, layoutViewerLabels, orientHouseCamera, personActionClient, projectHouseLabels } from "../spira_simulator/ui/house/house.js";
 import { MeshStandardMaterial, OrthographicCamera, PointLight, SRGBColorSpace, Vector3 } from "../spira_simulator/ui/house/vendor/three.module.min.js";
 import { houseHarness } from "./house-fixture.mjs";
 
@@ -46,6 +47,95 @@ test("change markers stay together until selected and toggle the close-up by cli
   house.clearChangeMarkers();
   assert.ok(detail.hidden);
   assert.deepEqual(layer.children, []);
+});
+
+test("a house device opens its person controls and confirms or reverts the optimistic effect", async (t) => {
+  const view = houseHarness(t);
+  const { house, stage } = view;
+  const names = ["엄마", "아빠", "지아", "손님"];
+  const pink = { hue: 330, saturation: 60, brightness: 70 };
+  const yellow = { ...pink, hue: 55 };
+  const choices = [
+    { key: "color_pink", label: "조명 색 바꾸기 · 분홍", values: { color: pink } },
+    { key: "color_yellow", label: "조명 색 바꾸기 · 노랑", values: { color: yellow } },
+    { key: "power_off", label: "끄기", values: { power: false } },
+  ];
+  const marker = (color, revision) => view.markers({ light_01: { power: true, color } }, {
+    dataset: { worldEpoch: "test-world", worldRevision: String(revision), personNames: JSON.stringify(names) },
+    controls: { light_01: { personTarget: "mqtt:light_01", personActions: JSON.stringify(choices) } },
+  });
+  const post = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    post.push([url.href, options.method, Object.fromEntries(options.body)]);
+    return Response.json({ applied: true });
+  });
+  Object.defineProperty(globalThis, "window", {
+    configurable: true, value: { location: { href: "http://localhost:8730/sim/viewer" } },
+  });
+  t.after(() => delete globalThis.window);
+  let finishRead;
+  house.setPersonActionClient(personActionClient("/operator/person", () =>
+    new Promise(resolve => { finishRead = resolve; })));
+  const readBack = (color, revision, observation = "current") => finishRead({
+    world_epoch: "test-world", world_revision: revision,
+    devices: [{ logical_id: "light_01", values: { power: true, color }, observation, available: true }],
+  });
+  marker(pink, 1);
+  view.draw(1100);
+  const lamp = view.scene.children.find(node => node.isPointLight);
+  const tint = color => hsvColor({ ...color, brightness: 100 });
+  const layer = stage.children.find(({ className }) => className === "house-change-markers");
+  const detail = stage.children.find(({ className }) => className === "house-change-detail");
+  const panel = stage.children.find(({ className }) => className === "house-person-panel");
+  const [light] = layer.children;
+  const [who, actions, status] = panel.children;
+  const [select] = who.children;
+  assert.ok(panel.hidden);
+  assert.equal(light.getAttribute("data-changed"), "false");
+  light.onclick();
+  assert.equal(panel.hidden, false);
+  assert.equal(detail.hidden, false);
+  assert.equal(document.activeElement, select);
+  assert.deepEqual(select.children.map(option => option.value), names);
+  assert.equal(select.value, "엄마");
+  assert.deepEqual(actions.children.map(button => button.textContent), choices.map(choice => choice.label));
+  let stopped = false;
+  actions.children[1].onkeydown({ key: " ", stopPropagation() { stopped = true; } });
+  assert.ok(stopped);
+  select.value = "지아";
+  select.onchange();
+
+  actions.children[1].onclick();
+  assert.deepEqual(post, [[
+    "http://localhost:8730/operator/person?target=mqtt%3Alight_01", "POST",
+    { person: "지아", control: "color_yellow" },
+  ]]);
+  assert.equal(status.textContent, "집 상태 확인 중…");
+  assert.equal("#" + lamp.color.getHexString(), tint(yellow));
+  marker(pink, 1);
+  view.draw(1116);
+  assert.equal("#" + lamp.color.getHexString(), tint(yellow));
+  await settle();
+  readBack(yellow, 2);
+  await settle();
+  assert.equal(status.textContent, "집 상태를 확인했어요.");
+  assert.equal("#" + lamp.color.getHexString(), tint(yellow));
+  marker(yellow, 2);
+
+  actions.children[0].onclick();
+  assert.equal("#" + lamp.color.getHexString(), tint(pink));
+  await settle();
+  readBack(yellow, 2, "stale");
+  await settle();
+  assert.equal(status.textContent, "집 상태를 확인하지 못했어요.");
+  assert.equal("#" + lamp.color.getHexString(), tint(yellow));
+
+  document.onkeydown({ key: "Escape", preventDefault() {} });
+  assert.ok(panel.hidden);
+  assert.ok(detail.hidden);
+  assert.equal(document.activeElement, light);
+  light.onclick();
+  assert.equal(select.value, "지아");
 });
 
 test("observed light values drive the pendant, point light, and room glow", () => {
@@ -118,13 +208,21 @@ test("a guest departure leaves the latest entrance signal in place", () => {
     { packagePresent: false, signal: undefined });
 });
 
-test("the TV logo starts only after an observed off-to-on transition", () => {
-  const on = { scene: "kids_party" };
-  assert.deepEqual(tvSceneTransition(undefined, on), { scene: on.scene, poweringOn: false });
-  assert.deepEqual(tvSceneTransition(null, on), { scene: on.scene, poweringOn: true });
-  assert.deepEqual(tvSceneTransition(on.scene, { scene: "calm" }), { scene: "calm", poweringOn: false });
-  assert.deepEqual(tvSceneTransition(on.scene, null), { scene: null, poweringOn: false });
-  assert.deepEqual(tvSceneTransition(on.scene, undefined), { scene: undefined, poweringOn: false });
+test("the TV paints the new scene as soon as an on reading arrives", (t) => {
+  const view = houseHarness(t);
+  view.markers({ display_01: { play_mood: null } });
+  view.draw(100);
+  const tv = view.canvas(1024);
+  const before = tv.length;
+  view.markers({ display_01: { play_mood: { scene: "calm" } } });
+  assert.ok(tv.slice(before).some(([kind, gradient]) => kind === "fill" && gradient.stops?.[0][1] === "#314f5e"));
+  view.house.setScene({ slots: [], artwork: { tv: "/calm.jpg" } });
+  view.load(view.images.at(-1));
+  assert.deepEqual(tv.at(-1), ["image", "/calm.jpg"]);
+  const withArtwork = tv.length;
+  view.markers({ display_01: { play_mood: { scene: "party" } } });
+  assert.ok(tv.slice(withArtwork).some(([kind, gradient]) => kind === "fill" && gradient.stops?.[0][1] === "#5a204b"));
+  assert.ok(!tv.slice(withArtwork).some(([kind]) => kind === "image"));
 });
 
 test("the TV and fridge panel bypass the active room wash and keep their canvas colors", (t) => {
