@@ -1,6 +1,6 @@
 const STAGES = [
-  ["extract", "추출"], ["context", "맥락"], ["intent", "의도"],
-  ["tasks", "할 일"], ["plan", "계획"], ["hub", "집"], ["record", "기록"],
+  ["extract", "주문 추출"], ["context", "맥락 검색"], ["intent", "의도 추론"],
+  ["tasks", "할 일 생성"], ["plan", "계획 확정"], ["hub", "집 실행"], ["record", "기억 저장"],
 ];
 
 export const STAGE_NAMES = Object.fromEntries(STAGES);
