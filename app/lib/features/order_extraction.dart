@@ -69,50 +69,60 @@ class OrderExtraction extends StatelessWidget {
           : hasItems
           ? 1
           : 0;
-      final labels = [
+      final lines = [
         '받았어요',
-        if (hasItems) '품목 ${order!.itemCount}개를 읽었어요' else '품목 읽기',
-        if (hasContext) '일정과 지난 주문을 살펴봤어요' else '일정과 지난 주문 살펴보기',
-        if (current == 3) intent! else '주문에 담긴 준비 살펴보기',
+        if (current >= 1) '품목 ${order!.itemCount}개를 읽었어요',
+        if (current >= 2) '일정과 지난 주문을 살펴봤어요',
+        if (current >= 3) intent!,
       ];
+      const working = [
+        '주문을 읽고 있어요',
+        '일정과 지난 주문을 살펴보고 있어요',
+        '어떤 준비인지 보고 있어요',
+        '집에서 할 일을 정리하고 있어요',
+      ];
+      final still =
+          MediaQuery.disableAnimationsOf(context) ||
+          MediaQuery.reduceMotionOf(context);
       return Column(
         key: const ValueKey('order-progress'),
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        spacing: 8,
+        spacing: 12,
         children: [
+          _LoadingPanel(
+            status: working[current],
+            progress: (current + 1) / (working.length + 1),
+            still: still,
+          ),
           if (images.isNotEmpty) photos,
-          for (final (index, label) in labels.indexed)
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              spacing: 8,
-              children: [
-                _StepIndicator(
-                  done: index < current,
-                  current: index == current,
-                ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    spacing: 4,
-                    children: [
-                      KoreanText(
-                        label,
-                        style: TextStyle(
-                          color: index > current
-                              ? Theme.of(context).colorScheme.onSurfaceVariant
-                              : null,
-                        ),
-                      ),
-                      if (index == 1 && hasItems)
-                        OrderItems(
-                          episode: order!,
-                          showGuidance: true,
-                          showHeading: false,
-                        ),
-                    ],
+          for (final (index, line) in lines.indexed)
+            _Appear(
+              key: ValueKey('order-progress-line-$index'),
+              still: still,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                spacing: 8,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 3),
+                    child: Icon(
+                      Icons.check,
+                      size: 16,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
                   ),
-                ),
-              ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      spacing: 6,
+                      children: [
+                        KoreanText(line),
+                        if (index == 1) _ItemNames(episode: order!),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
         ],
       );
@@ -226,34 +236,134 @@ class _ItemGuidance extends StatelessWidget {
   }
 }
 
-class _StepIndicator extends StatelessWidget {
-  const _StepIndicator({required this.done, required this.current});
+class _LoadingPanel extends StatelessWidget {
+  const _LoadingPanel({
+    required this.status,
+    required this.progress,
+    required this.still,
+  });
 
-  final bool done;
-  final bool current;
+  final String status;
+  final double progress;
+  final bool still;
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final icon = Icon(
-      done
-          ? Icons.check
-          : current
-          ? Icons.circle
-          : Icons.circle_outlined,
-      size: 16,
-      color: done || current ? colors.primary : colors.outlineVariant,
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final label = Row(
+      spacing: 12,
+      children: [
+        SizedBox.square(
+          dimension: 18,
+          child: still
+              ? Icon(Icons.hourglass_top, size: 18, color: colors.primary)
+              : CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  color: colors.primary,
+                ),
+        ),
+        Expanded(child: KoreanText(status, style: theme.textTheme.titleSmall)),
+      ],
     );
-    return Padding(
-      padding: const EdgeInsets.only(top: 3),
-      child:
-          current &&
-              !MediaQuery.disableAnimationsOf(context) &&
-              !MediaQuery.reduceMotionOf(context)
-          ? _StepPulse(child: icon)
-          : icon,
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        spacing: 12,
+        children: [
+          Semantics(
+            liveRegion: true,
+            child: still ? label : _StepPulse(child: label),
+          ),
+          TweenAnimationBuilder<double>(
+            tween: Tween(end: progress),
+            duration: still ? Duration.zero : const Duration(milliseconds: 400),
+            curve: Curves.easeOut,
+            builder: (context, value, _) => ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: value,
+                minHeight: 4,
+                color: colors.primary,
+                backgroundColor: colors.surfaceContainerHighest,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
+}
+
+class _ItemNames extends StatelessWidget {
+  const _ItemNames({required this.episode});
+
+  final wire.Episode episode;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        for (final item in episode.items)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: KoreanText(item.name, style: theme.textTheme.bodySmall),
+          ),
+      ],
+    );
+  }
+}
+
+class _Appear extends StatefulWidget {
+  const _Appear({required this.still, required this.child, super.key});
+
+  final bool still;
+  final Widget child;
+
+  @override
+  State<_Appear> createState() => _AppearState();
+}
+
+class _AppearState extends State<_Appear> with SingleTickerProviderStateMixin {
+  late final _animation = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 350),
+  )..forward();
+  late final _curve = CurvedAnimation(
+    parent: _animation,
+    curve: Curves.easeOut,
+  );
+
+  @override
+  void dispose() {
+    _animation.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.still
+      ? widget.child
+      : FadeTransition(
+          opacity: _curve,
+          child: SlideTransition(
+            position: _curve.drive(
+              Tween(begin: const Offset(0, 0.25), end: Offset.zero),
+            ),
+            child: widget.child,
+          ),
+        );
 }
 
 class _StepPulse extends StatefulWidget {

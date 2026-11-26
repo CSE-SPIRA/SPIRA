@@ -439,20 +439,20 @@ void main() {
     expect(find.text('설향 딸기 500g (냉장)'), findsOneWidget);
     expect(find.text(context), findsNothing);
     expect(find.text(intent), findsNothing);
-    expect(find.byIcon(Icons.check), findsOneWidget);
+    expect(find.byIcon(Icons.check), findsNWidgets(2));
 
     peer.rationales['ep_9031'] = rationale..['intents'] = [];
     await app.sync();
     await tester.pumpAndSettle();
     expect(find.text(context), findsOneWidget);
     expect(find.text(intent), findsNothing);
-    expect(find.byIcon(Icons.check), findsNWidgets(2));
+    expect(find.byIcon(Icons.check), findsNWidgets(3));
 
     rationale['intents'] = intents;
     await app.sync();
     await tester.pumpAndSettle();
     expect(find.text(intent), findsOneWidget);
-    expect(find.byIcon(Icons.check), findsNWidgets(3));
+    expect(find.byIcon(Icons.check), findsNWidgets(4));
     expect(
       tester.getTopLeft(find.text(items)).dy,
       lessThan(tester.getTopLeft(find.text(context)).dy),
