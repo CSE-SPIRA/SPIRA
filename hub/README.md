@@ -92,7 +92,8 @@ PYTHONPATH=contracts/generated/python uv run --no-project --python 3.12 \
   --installation hub/installation.example.json --db hub/hub.sqlite3
 ```
 
-The dashboard listens on loopback at port 8088. Use `--home-name` to name the
+The engineering dashboard is served at `/` on loopback port 8088. Its health
+and state routes support local diagnostics. Use `--home-name` to name the
 household on the ledger. It defaults to **우리 집**. The ledger groups activity by
 preparation and shows the installed device list alongside it on desktop.
 Open **자세한 기록** for waiting work, command receipts and read-backs, C-3 delivery,
@@ -114,8 +115,11 @@ PYTHONPATH=contracts/generated/python uv run --no-project --python 3.12 \
 ```
 
 Tests use the committed fixture Server, targeted HTTP fault stubs, and a fake
-device implementing the MQTT protocol. The real-broker transport test runs when
-Mosquitto is installed. The Class A cases are provisional pending O-01/PQ-01.
+device implementing the MQTT protocol. The Simulator light test uses the
+Simulator's device protocol to check that the Server receives a person-made
+change and the Hub preserves it at restoration. The real-broker transport test
+runs when Mosquitto is installed. The Class A cases are provisional pending
+O-01/PQ-01.
 
 ### Contract fixture Server tests
 

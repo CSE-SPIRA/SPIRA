@@ -88,10 +88,8 @@ belong in a local secret-store abstraction or environment reference, never plans
 SQLite evidence, fixtures, or logs. HTTPS is appropriate outside loopback test
 peers.
 
-The earlier one-time App provisioning idea can be implemented as a local setup
-port that stores the household/key in the secret store. Its local wire,
-authentication, and rotation remain joint design work rather than a Hub product
-requirement.
+A person enters the household connection code in local Hub setup. The Hub
+process reads it from `SPIRA_HUB_KEY` and uses it to authenticate to the Server.
 
 ## 4. Durable-store sketch
 
@@ -253,8 +251,6 @@ Reasonable engineering guidance retained from the earlier spec:
 
 - bind local APIs to loopback/private interfaces and authenticate control/state
   surfaces; health should expose no secrets;
-- separate provisioning credentials from Server credentials and compare tokens
-  in constant time;
 - keep tokens, raw orders, fabric keys, and full DB bundles out of logs/evidence;
 - isolate virtual fault APIs from normal and physical-device paths;
 - report process liveness separately from Server/device readiness;
@@ -279,8 +275,8 @@ Narrow internal ports remain useful:
 
 The Server adapter should own C-1/C-2/C-3/C-4 DTO conversion and use generated
 `spira_contracts` models. Internal models need not import wire DTOs. The fixture
-Server is a replaceable test peer, not a second contract owner. App-to-Hub setup
-and Hub-to-device transport remain joint boundaries.
+Server is a replaceable test peer, not a second contract owner. Hub-to-device
+transport follows the Simulator protocol.
 
 ## 12. Additional implementation checks
 
