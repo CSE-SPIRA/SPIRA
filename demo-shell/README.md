@@ -13,9 +13,9 @@ Hub receives its plan. A plan run ends at 계획.
 The stage strip follows the episode status and arriving items, evidence,
 intents, tasks and cards. A Hub plan receipt for the active episode at or
 after its share time marks 집 done. The extraction table shows fields supplied
-by the Server. The context stage shows order time, household context and
-similar cases on one card. The intent stage keeps the situation, verdict and
-their source labels in view.
+by the Server, with empty cells for unexported fields. The context stage
+shows order time, household context and similar cases on one card. The
+intent stage keeps the situation, verdict and their source labels in view.
 
 | Check | Expected behaviour |
 | --- | --- |
@@ -57,8 +57,11 @@ clock and moments when available. Without a rehearsal clock, the cue skips
 clock advances and shows a notice. Text tags and illustrated device displays are
 disabled for these runs. The run logs include the selected Server URL.
 
-In a live run, press 다음 once per judgment stage. A waiting stage shows its
-skeleton while the Server prepares the data.
+In a live run, press 다음 to move to the next stage. A waiting stage shows its
+skeleton, then fills in place. The intent stage has separate situation and
+intent views. Add `?auto=1` for the optional timed judgment rehearsal.
+If you have a Server dashboard URL, pass it URL-encoded as the
+`dashboard` query parameter to display a link in the presenter header.
 
 The launcher starts with an empty fixture and fresh Hub and World databases.
 To start a fresh take, choose **새로 시작** in **진행자 조작** or in the notice
@@ -109,14 +112,12 @@ Story time follows the available Server clock or wall time on the ordinary live 
 
 Open `/demo?recordings` or press **R** to name, star or play a run. Starred runs
 come first, newest first within each group. The index is also available at
-`GET /demo/api/recordings`. A recording link (`/demo?recording=<id>`) plays from
-the shell with saved data and tags. Judgment stages advance without dwell
-holds. House scenes
-play in order from saved observations and use locally cached renderer assets
-when the Simulator is offline. Older recordings need the Simulator to supply
-renderer assets that have yet to be cached. Playback redraws TV and fridge
-artwork from recorded template, palette, and motif codes. Earlier recordings
-with embedded artwork still play. Add `&auto=0` to step by hand.
+`GET /demo/api/recordings`. Open `/demo?recording=<id>` and press 다음
+(Space/→) to advance immediately through the saved stages and house moments.
+The house uses locally cached renderer assets when the Simulator is offline.
+Older recordings may need the Simulator to supply assets that have yet to be
+cached. Playback redraws TV and fridge artwork from recorded template,
+palette, and motif codes. Earlier recordings with embedded artwork still play.
 
 The old `/demo?episode=ep_9031&replay=1` link redirects to a completed local recording
 when available. Otherwise it keeps its read-only rehearsal behavior against the
@@ -138,8 +139,9 @@ floor, up to each slot's count limit. The shell scene rules omit garland and con
 palette can recolour the balloons after that line is observed.
 
 After the last house moment, the phone shows the Server's verdict and line
-feedback when available. When the episode closes, open the calendar and
-select the dot to show the memory sheet.
+feedback when available. When the episode closes, the card leaves the main
+screen. Open 캘린더 and select the dot for the execution day to show the
+memory sheet. The sheet uses the episode, card and rationale observations.
 
 Deep links include `/demo?episode=ep_9031&step=3` and
 `/demo?episode=ep_9031&page=house`. They require a readable Server episode.
@@ -151,10 +153,9 @@ Add `owners=1` to the query string to show the owner tags. They are hidden by de
 | --- | --- |
 | Phone order screen and share stage | 앱 · 공유 |
 | Phone preparation screen and plan stage | 앱 · 카드 |
-| 추출, 맥락, 의도, 할 일 stages | 서버 |
+| 추출, 맥락, 의도, 할 일 stages | 서버 창 |
 | Phone calendar and memory sheet | 앱 · 캘린더 |
 | 3D house, device labels and house timeline | 시뮬레이터 · 집 |
-| Similar cases in the judgment scene | 서버 창 |
 
 ## Where to change what
 
