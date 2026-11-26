@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { expectedAction, lineReaction, readProblem, rehearsalControls, shareControls, stageNotice, startedLines } from "../ui/wire.js";
+import { lineReaction, reactionConfirmed, readProblem, rehearsalControls, shareControls, stageNotice, startedLines } from "../ui/wire.js";
 import { replayFrames } from "../ui/run.js";
-
-const episodeId = "ep_9031";
 
 test("a real run renders only screenshot upload and never generates the sample order", () => {
   const markup = shareControls(false, () => assert.fail("sample generated"), "", "");
@@ -38,18 +36,14 @@ test("the advance control needs both clock and moments and stays hidden on repla
   assert.equal(rehearsalControls({}, true, false, true).advance, false);
 });
 
-test("a next action appears only when the phone can use it", () => {
-  const order = { episodeId, page: "reason" };
-  assert.equal(expectedAction({}), "share");
-  assert.equal(expectedAction({ busy: true }), null);
-  assert.equal(expectedAction(order), null);
-  assert.equal(expectedAction({ ...order, notification: true }), "card");
-  assert.equal(expectedAction({ ...order, cardOpen: true }), "house");
-  assert.equal(expectedAction({ ...order, cardless: true }), "house");
-  assert.equal(expectedAction({ ...order, cardOpen: true, replay: true }), null);
-  assert.equal(expectedAction({ ...order, page: "house" }), null);
-  assert.equal(expectedAction({ ...order, page: "house", line: true, mapOpen: true }), "preparations");
-  assert.equal(expectedAction({ ...order, page: "house", line: true }), "line_off");
+test("a pending line-on is confirmed only by the Server's replacement task", () => {
+  const old = { task_id: "t_clean#1", checked: false, state: "off" };
+  const active = { task_id: "t_clean#7", checked: true, state: "scheduled" };
+  const other = { task_id: "t_mood#3", checked: true, state: "scheduled" };
+  const pending = { reaction: "line_on", taskId: old.task_id, before: [old, other], ack: { lines: [active, other] } };
+  assert.equal(reactionConfirmed({ lines: [old, other] }, pending), false);
+  assert.equal(reactionConfirmed({ lines: [other] }, pending), false);
+  assert.equal(reactionConfirmed({ lines: [active, other] }, pending), true);
 });
 
 test("card switches follow the App's started, ended and stopped rules", () => {

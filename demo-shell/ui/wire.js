@@ -23,7 +23,7 @@ export function shareControls(fixture, capture, buttonState, inputState) {
   return `${fixture ? `<div class="scan-picture"><img src="${capture()}" alt="공유할 주문 화면"></div>` : ""}
     <div class="phone-share order-actions">
       ${fixture ? `<button type="button" id="sample"${buttonState}>예시 주문으로 공유 <span aria-hidden="true">↗</span></button>` : ""}
-      <label>스크린샷 공유<input type="file" id="files" accept="image/png,image/jpeg" multiple${inputState}></label>
+      <label>주문 분석하기<input type="file" id="files" accept="image/png,image/jpeg" multiple${inputState}></label>
     </div>`;
 }
 
@@ -47,12 +47,15 @@ export function lineReaction(card, line, started = new Set(), episodeStatus) {
   return null;
 }
 
-export function expectedAction({ episodeId, notification, cardOpen, cardless, page, mapOpen, line, busy, replay }) {
-  if (busy || replay) return null;
-  if (!episodeId) return "share";
-  if (page === "house" && line) return mapOpen ? "preparations" : "line_off";
-  if (mapOpen) return null;
-  if (notification) return "card";
-  if (page === "reason" && (cardOpen || cardless)) return "house";
-  return null;
+export function reactionConfirmed(card, pending) {
+  if (!card || !pending?.ack) return false;
+  if (pending.reaction === "stop") return card.stopped;
+  if (card.stopped) return false;
+  if (pending.reaction === "line_off") {
+    return card.lines.some(({ task_id, state }) => task_id === pending.taskId && state === "off");
+  }
+  const previousTask = card.lines.some(({ task_id }) => task_id === pending.taskId);
+  const priorIds = new Set(pending.before.map(({ task_id }) => task_id));
+  const newLine = pending.ack.lines.find(({ task_id, checked }) => !priorIds.has(task_id) && checked);
+  return !previousTask && Boolean(newLine && card.lines.some(({ task_id, checked }) => task_id === newLine.task_id && checked));
 }

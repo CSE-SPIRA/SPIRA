@@ -9,3 +9,7 @@ export function setMarkup(node, markup) {
     node.innerHTML = markup;
   }
 }
+
+export function skeletonBars(count) {
+  return '<span class="skeleton-bar" aria-hidden="true"></span>'.repeat(count);
+}

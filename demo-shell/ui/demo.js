@@ -17,18 +17,17 @@ document.querySelector('meta[name="theme-color"]').content =
 
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const motion = matchMedia("(prefers-reduced-motion: reduce)");
 const query = new URLSearchParams(location.search);
 const RECORDING = query.get("recording");
 const REPLAY = Boolean(RECORDING) || query.get("replay") === "1";
 const QUIET_END = { event: "judgment.quiet_end" };
-const OWNERS = { share: "앱 · 공유", card: "앱 · 카드", reasoning: "앱 · 판단 근거", home: "앱 · 우리 집", server: "서버 창" };
+const OWNERS = { share: "앱 · 공유", card: "앱 · 카드", calendar: "앱 · 캘린더", server: "서버 창" };
 
 const defaultPath = (episode) => episode === "ep_9031" ? "house" : "plan";
 
 const state = {
   config: null, scenes: null, flow: null, house: null, scale: 1, page: "reason",
-  order: "birthday", draft: false, step: 0, mapOpen: false, sharing: false,
+  order: "birthday", draft: false, step: 0, sharing: false,
   runPath: null, draftPath: null, tags: [],
   episodeId: null, episode: null, rationale: null, rationaleMissing: false, judgment: [], cards: [], capture: null, reader: null,
   cardOpen: false, notifications: new Set(), dismissed: new Set(), started: new Set(),
@@ -81,12 +80,7 @@ async function exchange(path, options) {
   return { status: response.status, ok: response.ok, body };
 }
 
-// The scene clock measures audience dwell. It does not drive the Server.
-const dwellParam = query.get("dwell");
-const requestedDwell = dwellParam === null ? NaN : Number(dwellParam) * 1000;
-const DWELL_MS = Number.isFinite(requestedDwell) ? Math.max(0, requestedDwell) : null;
-const auto = query.get("auto");
-const AUTO_PLAY = RECORDING ? auto !== "0" : auto === "1";
+const AUTO_PLAY = !RECORDING && query.get("auto") === "1";
 
 const PHONE_CLOCK = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 
@@ -272,6 +266,7 @@ async function boot() {
   state.flow = createFlow($("stage-steps"), $("stage-beat"));
   ui.presenter.bindControls();
 
+  $("frame").toggleAttribute("data-recording", Boolean(RECORDING));
   $("frame").toggleAttribute("data-owners", query.get("owners") === "1");
   // Rehearsal aid: ?camera=<name> holds a named camera (for framing close-ups).
   if (query.get("camera")) setTimeout(() => {
@@ -286,7 +281,6 @@ async function boot() {
     ui.recording.applyReplayFrame(state.replay.judgment);
     ui.reasoning.setStep(ui.reasoning.reasonStep("extract"));
     if (!state.episode) notice("이 녹화에는 받은 주문 결과가 없어요.");
-    ui.reasoning.autoAdvance();
     ui.presenter.tickClock();
     return;
   }
@@ -306,7 +300,7 @@ async function boot() {
 }
 
 const context = {
-  OWNERS, state, $, AUTO_PLAY, motion, sleep, REPLAY, RECORDING, DWELL_MS, PHONE_CLOCK, notice, exchange,
+  OWNERS, state, $, AUTO_PLAY, sleep, REPLAY, RECORDING, PHONE_CLOCK, notice, exchange,
   defaultPath, api, QUIET_END, observe,
 };
 // Each viewer run owns its state and timers. Controllers call through this table after setup.

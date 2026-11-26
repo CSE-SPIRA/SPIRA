@@ -27,10 +27,6 @@
       "lead": "무엇을 할지, 언제 할지 확인해요."
     }
   ],
-  "record": {
-    "id": "record",
-    "title": "집에서 일어난 일로 판단을 확인해요"
-  },
   "cameras": {
     "overview": {
       "eye": [
