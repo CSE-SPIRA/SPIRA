@@ -499,6 +499,7 @@ export function createPresenter(context, ui) {
       }
       const { status } = await exchange("/demo/api/reset", { method: "POST" });
       if (status === 204) {
+        ui.appPhone?.clearStore();
         location.replace("/demo");
         reloading = true;
         return;

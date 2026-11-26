@@ -1,5 +1,5 @@
-"""App routes (contracts/openapi/app.yaml). This batch: households, profile, calendar, cards, orders, one episode and
-its rationale. Pause, the episode list, order edit, reactions and memory come with the rest of S6."""
+"""App routes (contracts/openapi/app.yaml): households, profile, calendar, cards, reactions, orders, the episode list,
+one episode and its rationale. Pause, order edit and memory come with the rest of S6."""
 
 from __future__ import annotations
 
@@ -11,14 +11,15 @@ from fastapi.responses import JSONResponse
 from spira_contracts.calendar import Calendar
 from spira_contracts.household_create import HouseholdCreate
 from spira_contracts.profile import Profile
-from sqlalchemy import select
+from spira_contracts.reaction import Reaction
+from sqlalchemy import func, select
 
 from .. import clock
 from ..config import get_config
 from ..db.engine import lock_household, next_id, session_scope
-from ..db.models import Card, Episode, Household
+from ..db.models import Card, Episode, Household, OrderItem
 from ..kb.household import check_types
-from ..pipeline import s1_extract, s2_calendar
+from ..pipeline import s1_extract, s2_calendar, s5_reactions
 from ..pipeline.s5_cards import card_body
 from ..store.images import image_kind
 from .auth import new_hub_key, require_app
@@ -101,6 +102,14 @@ def get_cards(household_id: str = Path(pattern=HOUSEHOLD), since: str | None = Q
     return {"cards": cards, "server_time": clock.iso(now)}
 
 
+@router.post("/v1/cards/{card_id}/reactions")
+def post_reaction(card_id: str = Path(pattern=r"^nc_[0-9]+$"), data: dict = body(Reaction, "reaction.json")) -> dict:
+    try:
+        return s5_reactions.react(card_id, data["reaction"], data.get("task_id"))
+    except s5_reactions.ReactionError as error:
+        raise ApiError(error.code, str(error)) from None
+
+
 # ---------------------------------------------------------------------------------------------------- orders
 
 @router.post("/v1/orders")
@@ -161,3 +170,27 @@ def get_rationale(episode_id: str = Path(pattern=EPISODE)) -> dict:
         if body is None:
             raise ApiError("not_found", "No rationale yet: S2 has not stored its context.")
         return body
+
+
+@router.get("/v1/households/{household_id}/episodes")
+def get_episodes(household_id: str = Path(pattern=HOUSEHOLD), limit: int = Query(20, ge=1, le=100),
+                 before: str | None = Query(None)) -> dict:
+    """Order history, newest first by shared_at (§12.2); next_before pages to older ones."""
+    cursor = _time(before, "before")
+    with session_scope() as s:
+        if s.get(Household, household_id) is None:
+            raise ApiError("not_found", "Unknown household.")
+        q = select(Episode).where(Episode.household_id == household_id)
+        if cursor is not None:
+            q = q.where(Episode.shared_at < cursor)
+        rows = s.execute(q.order_by(Episode.shared_at.desc(), Episode.id.desc()).limit(limit + 1)).scalars().all()
+        page = rows[:limit]
+        counts = dict(s.execute(select(OrderItem.episode_id, func.count()).where(
+            OrderItem.episode_id.in_([e.id for e in page])).group_by(OrderItem.episode_id)).all())
+        cards: dict[str, list[str]] = {}
+        for c in s.execute(select(Card).where(Card.episode_id.in_([e.id for e in page]), Card.archived.is_(False))
+                           .order_by(Card.ordinal)).scalars():
+            cards.setdefault(c.episode_id, []).append(c.id)
+        return {"episodes": [{"episode_id": e.id, "shared_at": clock.iso(e.shared_at), "status": e.status,
+                              "item_count": counts.get(e.id, 0), "card_ids": cards.get(e.id, [])[:2]} for e in page],
+                "next_before": clock.iso(page[-1].shared_at) if len(rows) > limit else None}

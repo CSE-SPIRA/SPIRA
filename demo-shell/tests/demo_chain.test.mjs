@@ -721,6 +721,28 @@ test("the presenter log moves on to the plan once the Server finished S5, withou
   assert.equal(shell.byId("path-control").hidden, true);
 });
 
+test("the right panel follows a new order of the household from any phone", async (t) => {
+  const { episode, rationale, card } = birthday();
+  const id = episode.episode_id;
+  let list = [{ episode_id: "ep_old", shared_at: "2026-10-14T10:00:00+09:00", status: "judged", item_count: 3, card_ids: [] }];
+  const reads = [];
+  const shell = await openShell(t, "", (path) => {
+    if (path === "/demo/api/config") return Response.json({ server: true, household_id: "h_042", reset: true, app: true });
+    if (path.includes("/episodes?limit=")) return Response.json({ episodes: list, next_before: null });
+    if (path.includes("/trace")) { reads.push(path); return new Response(null, { status: 404 }); }
+    if (path.endsWith("/rationale")) return Response.json(rationale);
+    if (path.includes("/cards")) return Response.json({ cards: [card] });
+    if (path.endsWith(id)) return Response.json(episode);
+    return new Response(null, { status: 404 });
+  });
+  assert.ok(shell.byId("frame").classList.contains("app-phone"));
+  await shell.runFor(4000);
+  assert.equal(reads.length, 0);                       // the order that was there before the page is not followed
+  list = [{ episode_id: id, shared_at: episode.shared_at, status: "received", item_count: 0, card_ids: [] }, ...list];
+  await shell.runFor(2000);
+  assert.ok(reads.some((path) => path.includes(`/episodes/${id}/trace`)), reads.join(","));
+});
+
 test("a finished live run can be kept for the replay from the log head", async (t) => {
   const { episode, rationale, card } = birthday();
   const id = episode.episode_id;

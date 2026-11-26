@@ -70,6 +70,22 @@ With sample schedules, Calendar opens to the fixture's birthday month.
 **오늘** jumps to the current month. Android share and Google sign-in require
 Android.
 
+## Phone in demo-shell
+
+The same App code runs in the phone of the presenter page (`demo-shell`) as a
+web build. `app/scripts/demo-shell-web` builds it into `app/build/web` with
+`--base-href /demo/app/`, `SPIRA_PEER=server`, `SPIRA_HOUSEHOLD_ID` (default
+`h_demo`, or `DEMO_HOUSEHOLD`) and `SPIRA_BASE_URL` = the shell origin +
+`/demo/app-api` (default `http://127.0.0.1:8733`, or `DEMO_ORIGIN`). The shell
+serves the build at `/demo/app/` and forwards the App's contract calls to the
+Server with its own App token, so the web build holds no token. **주문 분석하기**
+opens the browser file picker there; on Android it opens the gallery
+(`image_picker`). Rebuild after App changes; restart is not needed.
+
+```sh
+app/scripts/demo-shell-web
+```
+
 ## Tests
 
 From `app/`:

@@ -67,6 +67,19 @@ intent shares now vs usual; S4: tasks, fridge notices, dropped tasks), and the
 next stage shows its real Server state (`의도 추론 중 … 12s`). A stage is ready
 when the trace says the Server finished it, so S4 shows before S5.
 
+App in the phone (`ui/app-phone.js`). With a Server and no fixture, when
+`app/build/web/index.html` exists (or `DEMO_APP_WEB` points at a build), the
+phone shows the App itself in an iframe (`/demo/app/`) instead of the upload
+panel; build it with `app/scripts/demo-shell-web`. The App calls
+`/demo/app-api/…`: loopback only, the App routes of
+`contracts/openapi/app.yaml` for the active household (no household creation,
+no hub routes), forwarded with `DEMO_APP_TOKEN`. The right panel follows any
+**new** order of the household (`GET …/episodes?limit=5` every 1.5 s; orders
+already there when the page opened are not followed), so an order sent from a
+real phone to the same household shows here too. **새로 시작** also clears the
+App's saved state (`flutter.spira.*` in this origin's local storage). A replay
+hides the phone.
+
 Server replay (`ui/replays.js`, server/spec.md 12.5). When a live run has
 finished S5, **재현용 보관** in the log head keeps it (`POST /demo/api/keep/{id}`,
 forwarded to `POST /v1/demo/episodes/{id}/keep`); a kept run survives

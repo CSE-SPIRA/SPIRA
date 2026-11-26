@@ -1,0 +1,13 @@
+#!/bin/sh
+# Build the App for the phone in demo-shell (demo-shell/README.md, App in the phone).
+# The shell serves app/build/web at /demo/app/ and forwards /demo/app-api/ to the Server with the App token.
+set -eu
+cd "$(dirname "$0")/.."
+origin="${DEMO_ORIGIN:-http://127.0.0.1:8733}"
+household="${DEMO_HOUSEHOLD:-h_demo}"
+flutter pub get
+flutter build web --release --base-href /demo/app/ \
+  --dart-define=SPIRA_BASE_URL="$origin/demo/app-api" \
+  --dart-define=SPIRA_PEER=server \
+  --dart-define=SPIRA_HOUSEHOLD_ID="$household"
+echo "App web build for $household at $origin/demo/app/ -> app/build/web"
