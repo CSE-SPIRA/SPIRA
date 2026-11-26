@@ -421,7 +421,9 @@ def run(args, mosquitto, directory, requests, hub_key, app_token, defines, clock
                WORLD_PROFILE=str(profile),
                WORLD_OPERATOR="1", WORLD_OPERATOR_TOKEN=operator_token,
                WORLD_PLANS=f"{server}/v1/hub/plans?household={args.household}", WORLD_PLANS_TOKEN=hub_key,
-               WORLD_HUB_STATE_URL=f"{urls['hub']}/state")
+               WORLD_HUB_STATE_URL=f"{urls['hub']}/state",
+               # The shell's house sends person actions to the Simulator.
+               **({"WORLD_HOUSE_SHELL_ORIGIN": urls["shell"]} if "shell" in urls else {}))
         wait("Simulator", lambda: read_json(urls["sim"] + "/health")["mqtt"]["connected"])
         wait("Hub", lambda: read_json(urls["hub"] + "/health")["device_online"], seconds=30)
         if initial_clock is not None:
