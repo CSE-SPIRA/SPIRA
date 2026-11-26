@@ -117,7 +117,8 @@ LLM output is read by a program. A question, request for confirmation, refusal, 
 | `spira_server/pipeline/s3_intent.py` | Message, schema, call, format check, fill windows/tags |
 | `spira_server/pipeline/s4_time.py` | `find_time`, holiday calendar, habit |
 | `spira_server/pipeline/s4_tasks.py` | Stop check, item tasks, reactions, LLM call, post-processing |
-| `spira_server/pipeline/s5_plan.py` | Safety net, merge, fridge notices, confirm, publish, reactions, held expiry |
+| `spira_server/pipeline/s5_plan.py` | Safety net, merge, fridge notices, confirm, publish, held expiry |
+| `spira_server/pipeline/s5_reactions.py` | Card reactions stop / line_off / line_on (§11.7) |
 | `spira_server/pipeline/s5_cards.py` | Card creation, text templates, line states (C-7) |
 | `spira_server/pipeline/s6_release.py` | Package-arrival linking |
 | `spira_server/pipeline/s7_observe.py` | Windows, signals, verdict, task feedback |
@@ -942,7 +943,7 @@ Recompute a line whenever an ack, execution result, user event or reaction for i
 | `line_off` (task_id) | That task cancelled (restore = started). Line `checked: false`, `off`. Publish |
 | `line_on` (task_id) | Started (§5.2) → `409 line_started`. Else the task gets a **new id** (`t_{slug}#{next n}`, same actions, trigger and end; the old id stays in `cancelled`); the line now points to the new id, `checked: true`; status live, or held if the card is held. Publish |
 
-Each change records `checked_changed_at`. Switching every line off is not stop. Return the updated card.
+Each change records `checked_changed_at`. Switching every line off is not stop. Return the updated card. A reaction that changes nothing (`line_off` on a line already off, `line_on` on a checked line) returns the card without a new plan version. "The card is held" = the card has no `starts_at` (no time found, §11.6). Unknown card, or a `task_id` that is not a line of the card → `404`. Code: `pipeline/s5_reactions.py` (household lock first, §2.4; the card is touched with `notify: false`, §11.2).
 
 ### 11.8 Task and episode end
 
@@ -992,7 +993,7 @@ The API surface, paths, bodies and status codes are in `contracts/openapi/app.ya
 | `PUT …/profile` | Validate types (§12.3) → 422 `household_types_invalid` if blocked; store; affects later orders only |
 | `PUT …/calendar` | §8.5 |
 | `POST …/pause` | Household lock. true: cancel not-started tasks of every open episode (publish each, same transaction); later orders become `paused_skip` (§7.1); re-runs and S5 add nothing while paused (§11.1). false: later orders judged again. Return the state |
-| `GET …/episodes` | Newest first by `shared_at`, `limit` (≤ 100), `before` cursor |
+| `GET …/episodes` | Newest first by `shared_at` (then id), `limit` (≤ 100), `before` cursor = episodes with `shared_at` strictly before it; `next_before` = `shared_at` of the last row when more remain, else null. `item_count` counts all items (masked too), `card_ids` the non-archived cards (≤ 2), as in `GET /v1/episodes/{id}` |
 | `GET …/cards?since=` | `since` with a `+` left unencoded (arrives as a space) is accepted. Every card write takes the household lock and sets `updated_at = now()` and `seq` inside it; this read takes the same lock (shared), so no write can commit with an `updated_at` at or before the returned `server_time`. Return cards with `updated_at > since` (or all non-archived cards of open episodes), `server_time` = the time read under the lock. Archived cards are returned once more with their final state, then never |
 | `GET …/memory`, `DELETE …/memory/{case_id}` | §13.5 |
 | `POST /v1/orders` | §7.1 |

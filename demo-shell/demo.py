@@ -54,7 +54,23 @@ SERVER_READS = (
     re.compile(r"^v1/demo/episodes/ep_[A-Za-z0-9_]+/trace$"),
     re.compile(r"^v1/demo/households/h_[A-Za-z0-9_]+/replays$"),
     re.compile(r"^v1/households/h_[A-Za-z0-9_]+/memory$"),
+    re.compile(r"^v1/households/h_[A-Za-z0-9_]+/episodes$"),
 )
+# The App's web build in the phone (app/build/web, built with --base-href /demo/app/) and the contract routes it may
+# call through /demo/app-api/ (contracts/openapi/app.yaml). The shell adds the app token; the browser never holds it.
+APP_ROUTES = (
+    ("GET", re.compile(r"^health$")),
+    ("PUT", re.compile(r"^v1/households/h_[A-Za-z0-9_]+/(profile|calendar)$")),
+    ("GET", re.compile(r"^v1/households/h_[A-Za-z0-9_]+/(episodes|cards|memory)$")),
+    ("GET", re.compile(r"^v1/episodes/ep_[A-Za-z0-9_]+(/rationale)?$")),
+    ("POST", re.compile(r"^v1/cards/nc_[0-9]+/reactions$")),
+    ("POST", re.compile(r"^v1/orders$")),
+)
+APP_FORWARD_HEADERS = ("content-type", "accept")
+
+
+def app_web() -> Path:
+    return Path(os.getenv("DEMO_APP_WEB") or DEMO_UI.parents[1] / "app/build/web")
 SAMPLE_EPISODES = {"birthday": "ep_9031", "groceries": "ep_9150"}
 HOME_ACTIONS = {"delivery", "guests_arrive", "event_end"}
 # A resident's own change at the device panel, as the operator page sends it.
@@ -334,7 +350,42 @@ def create_app():
             result["reset"] = True
         # The Server's demo home is written again too (contracts/openapi/demo.yaml); the page says so.
         result["server_reset"] = bool(cfg["server"] and not cfg["fixture"])
+        # The App in the phone, when its web build is there (README: App in the phone).
+        result["app"] = bool(cfg["server"] and not cfg["fixture"] and (app_web() / "index.html").is_file())
         return result
+
+    @application.get("/demo/app/{asset:path}")
+    def app_asset(asset: str):
+        root = app_web().resolve()
+        path = (root / (asset or "index.html")).resolve()
+        if not path.is_relative_to(root) or not path.is_file():
+            raise HTTPException(404, "No App web build here (flutter build web --base-href /demo/app/)")
+        return FileResponse(path, headers={"Cache-Control": "no-cache"})
+
+    @application.api_route("/demo/app-api/{path:path}", methods=["GET", "POST", "PUT"])
+    async def app_api(path: str, request: Request):
+        if request.client is None or request.client.host not in LOOPBACK:
+            raise HTTPException(403, "Use the demo page on loopback")
+        cfg = demo_config()
+        if not cfg["server"] or cfg["fixture"]:
+            raise HTTPException(503, "The App in the phone needs DEMO_SERVER_URL without a fixture")
+        if not any(method == request.method and rule.match(path) for method, rule in APP_ROUTES):
+            raise HTTPException(404, "Not an App route")
+        if path.startswith("v1/households/") and path.split("/")[2] != cfg["household"]:
+            raise HTTPException(404, "Not the active household")
+        headers = {key: value for key, value in request.headers.items() if key.lower() in APP_FORWARD_HEADERS}
+        headers.update(server_headers(cfg))
+        try:
+            async with httpx.AsyncClient(timeout=40) as client:
+                upstream = await client.request(request.method, f"{cfg['server']}/{path}",
+                                                params=dict(request.query_params), headers=headers,
+                                                content=await request.body())
+        except httpx.TimeoutException as error:
+            raise HTTPException(504, "Server timed out") from error
+        except httpx.HTTPError as error:
+            raise HTTPException(502, "Server is unavailable") from error
+        kept = {key: value for key, value in upstream.headers.items() if key.lower() == "content-type"}
+        return Response(upstream.content, status_code=upstream.status_code, headers=kept)
 
     @application.post("/demo/api/reset", status_code=204)
     async def reset_demo(request: Request):
@@ -596,7 +647,7 @@ def create_app():
     @application.middleware("http")
     async def prevent_api_caching(request: Request, call_next):
         response = await call_next(request)
-        if request.url.path.startswith("/demo/api/") or request.url.path == "/demo/tags":
+        if request.url.path.startswith(("/demo/api/", "/demo/app-api/")) or request.url.path == "/demo/tags":
             response.headers["Cache-Control"] = "no-store"
         return response
 

@@ -25,6 +25,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.delenv("DEMO_FIXTURE_EPISODE", raising=False)
     monkeypatch.setenv("DEMO_HOUSEHOLD", "h_042")
     monkeypatch.setenv("DEMO_SIMULATOR_URL", "http://sim.test")
+    monkeypatch.setenv("DEMO_APP_WEB", str(tmp_path / "app-web"))
     with TestClient(demo.create_app()) as test_client:
         yield test_client
 
@@ -32,7 +33,7 @@ def client(monkeypatch, tmp_path):
 def test_page_assets_and_config(client):
     page = client.get("/demo").raise_for_status().text
     for name in ("demo.js", "chain.js", "flow.js", "story-time.js", "wire.js", "judgment.js",
-                 "judgment-view.js", "markup.js", "scenes.json", "item-types.json", "tags.js", "serverlog.js", "replays.js"):
+                 "judgment-view.js", "markup.js", "scenes.json", "item-types.json", "tags.js", "serverlog.js", "replays.js", "app-phone.js"):
         assert client.get(f"/demo/assets/{name}").status_code == 200, name
     for name in ("tokens.css", "fonts.css"):
         assert f'href="/demo/shared/{name}"' in page
@@ -47,7 +48,7 @@ def test_page_assets_and_config(client):
     assert client.get("/demo/assets/..%2Fdemo.py").status_code == 404
     assert client.get("/demo/api/config").json() == {
         "household_id": "h_042", "server": True, "hub": False, "fixture": False, "story_timing": None, "tagger": False,
-        "reset": True, "server_reset": True,
+        "reset": True, "server_reset": True, "app": False,
     }
 
 
@@ -578,3 +579,44 @@ def test_tagger_calls_once_on_complete_rationale_and_saves_tags_after_recording_
         assert replay.get(read_path, headers={"X-SPIRA-Demo-Replay": "1"}).status_code == 200
         assert replay.get(f"/demo/tags?episode={episode}").json() == unavailable
         assert len(calls) == 1
+
+
+def test_app_web_build_is_served_and_its_server_calls_carry_the_shell_token(client, monkeypatch, tmp_path):
+    assert client.get("/demo/app/").status_code == 404
+    web = tmp_path / "app-web"
+    (web / "assets").mkdir(parents=True)
+    (web / "index.html").write_text('<base href="/demo/app/">', encoding="utf-8")
+    (web / "main.dart.js").write_text("main()", encoding="utf-8")
+    (tmp_path / "secret.txt").write_text("no", encoding="utf-8")
+    assert client.get("/demo/api/config").json()["app"] is True
+    assert client.get("/demo/app/").text == '<base href="/demo/app/">'
+    assert client.get("/demo/app/main.dart.js").text == "main()"
+    assert client.get("/demo/app/..%2Fsecret.txt").status_code == 404
+    seen = []
+
+    async def request(self, method, url, *, params, headers, content):
+        seen.append((method, url, params, headers, content))
+        return httpx.Response(200, json={"ok": True})
+
+    monkeypatch.setattr(httpx.AsyncClient, "request", request)
+    with TestClient(client.app, client=("127.0.0.1", 1)) as local:
+        r = local.get("/demo/app-api/v1/households/h_042/episodes", params={"limit": 5},
+                      headers={"Authorization": "Bearer from-browser"})
+        assert r.json() == {"ok": True}
+        assert local.post("/demo/app-api/v1/cards/nc_331/reactions", json={"reaction": "stop"}).status_code == 200
+        assert local.post("/demo/app-api/v1/orders", content=b"--x--", headers={"Content-Type": "multipart/form-data; boundary=x"}).status_code == 200
+        assert local.get("/demo/app-api/health").status_code == 200
+        assert local.get("/demo/app-api/v1/households/h_043/cards").status_code == 404
+        assert local.post("/demo/app-api/v1/households", json={}).status_code == 404
+        assert local.get("/demo/app-api/v1/hub/plans").status_code == 404
+        assert local.delete("/demo/app-api/v1/orders").status_code == 405
+        monkeypatch.setenv("DEMO_FIXTURE_EPISODE", "ep_9031")
+        assert local.get("/demo/app-api/health").status_code == 503
+    with TestClient(client.app, client=("192.0.2.1", 1)) as remote:
+        assert remote.get("/demo/app-api/health").status_code == 403
+    method, url, params, headers, _ = seen[0]
+    assert (method, url, params) == ("GET", "http://server.test/v1/households/h_042/episodes", {"limit": "5"})
+    assert headers["Authorization"] == "Bearer t"                 # the shell's token, never the browser's
+    assert seen[2][3]["content-type"].startswith("multipart/form-data") and seen[2][4] == b"--x--"
+    assert len(seen) == 4
+    assert any(rule.match("v1/households/h_042/episodes") for rule in demo.SERVER_READS)   # the panel's follow

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { serverLog, stageFinished } from "../ui/serverlog.js";
+import { clearAppStore, newestNew } from "../ui/app-phone.js";
 import { replayAt, replayFromQuery, replayHref, replayMenu } from "../ui/replays.js";
 
 const trace = {
@@ -97,4 +98,17 @@ test("S1 attributes show key and value, not an object", () => {
       attributes: [{ key: "보관", value: "냉장", source: "냉장" }] }] } } : s) }, "s1", 20);
   assert.match(html, /보관 냉장/);
   assert.doesNotMatch(html, /object Object/);
+});
+
+test("app phone: only orders after the first list are followed, and only the App's own keys are cleared", () => {
+  const known = new Set(["ep_1"]);
+  assert.equal(newestNew([{ episode_id: "ep_1" }], known, null), null);
+  assert.equal(newestNew([{ episode_id: "ep_3" }, { episode_id: "ep_2" }, { episode_id: "ep_1" }], known, null), "ep_3");
+  assert.equal(newestNew([{ episode_id: "ep_3" }], known, null), null);
+  assert.equal(newestNew([{ episode_id: "ep_4" }], known, "ep_4"), null);
+  const data = new Map([["flutter.spira.setup", "1"], ["flutter.spira.server-token.v1.x", "t"], ["demo.keep", "1"]]);
+  const storage = { get length() { return data.size; }, key: (i) => [...data.keys()][i],
+    removeItem: (key) => data.delete(key) };
+  assert.equal(clearAppStore(storage), 2);
+  assert.deepEqual([...data.keys()], ["demo.keep"]);
 });

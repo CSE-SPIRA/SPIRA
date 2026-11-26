@@ -12,6 +12,7 @@ import { createHouseTimeline } from "./house-timeline.js";
 import { createPresenter } from "./presenter.js";
 import { createRecordingPlayback } from "./recording.js";
 import { createReplays, replayFromQuery } from "./replays.js";
+import { createAppPhone } from "./app-phone.js";
 
 document.querySelector('meta[name="theme-color"]').content =
   getComputedStyle(document.documentElement).getPropertyValue("--paper").trim();
@@ -300,6 +301,8 @@ async function boot() {
   state.houseLink = inHouse ? { record: requested === 7 } : null;
   state.cardOpen = Boolean(id && (inHouse || step >= ui.reasoning.reasonStep("plan")));
   if (id) ui.episode.readEpisode(id);
+  ui.appPhone.mount();
+  ui.appPhone.watch(id);
   ui.reasoning.setStep(step);
   if (id && !inHouse && (REPLAY || !query.has("step"))) ui.reasoning.autoAdvance();
   if (!state.config.server) notice("서버 연결 없음");
@@ -322,6 +325,7 @@ ui.house = createHouseTimeline(context, ui);
 ui.presenter = createPresenter(context, ui);
 ui.recording = createRecordingPlayback(context, ui);
 ui.replays = createReplays(context, ui);
+ui.appPhone = createAppPhone(context, ui);
 
 boot().catch((error) => {
   notice("시연 화면을 불러오지 못했어요.");
