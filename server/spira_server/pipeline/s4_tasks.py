@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import clock
+from . import stage_times
 from ..config import Config, get_config
 from ..db.engine import session_scope
 from ..db.models import Card, CardLine, Case, DeviceList, Episode, Household, OrderItem, Task
@@ -112,6 +113,7 @@ class S4Result:
     whens: dict[int, When | None] = field(default_factory=dict)       # bundle index -> time
     skipped_bundles: dict[int, str] = field(default_factory=dict)     # bundle index -> stopped_before / stopped_card
     dropped: list[dict] = field(default_factory=list)                 # {slug|item, reason}
+    dropped_detail: dict[str, dict] = field(default_factory=dict)     # slug -> {line, way, need, actions} (display)
     next_task_n: int = 1
     llm_called: bool = False
     revision: int | None = None
@@ -558,11 +560,17 @@ def generate(episode_id: str, *, now: datetime | None = None) -> S4Result:
         bad = {i for i, _ in task_errors(plan, active_bundles) if i is not None} if plan else set()
         for slug in invalid:
             result.dropped.append({"slug": slug, "reason": "schema"})
+        for entry in (last["raw"].get("tasks") or []) if isinstance(last["raw"], dict) else []:
+            if isinstance(entry, dict) and entry.get("slug") in invalid:
+                result.dropped_detail.setdefault(entry["slug"], {
+                    "line": entry.get("line"), "way": entry.get("way"), "need": None,
+                    "actions": [a.get("key") for a in entry.get("actions") or [] if isinstance(a, dict)]})
     notices: dict[str, dict] = {}
     situation: list[Draft] = []
     if plan is not None:
         for i in sorted(bad):
             result.dropped.append({"slug": plan.tasks[i].slug, "reason": "format"})
+            _detail(result, plan.tasks[i], plan)
         whens = {k: result.whens.get(i) for k, i in enumerate(p.active)}
         situation = _situation_drafts(plan, bad, p.active, active_bundles, whens, p.reactions, p.catalog, cfg,
                                       result)
@@ -609,6 +617,7 @@ def _situation_drafts(plan: BaseModel, bad: set[int], active: list[int], bundles
         bundle = bundles[k]
         if bundle["intent_id"] == "unclassified" and t.way == "run":
             result.dropped.append({"slug": t.slug, "reason": "unclassified_run"})
+            _detail(result, t, plan)
             continue
         r = reactions.get(k, Reactions())
         actions = []
@@ -624,6 +633,7 @@ def _situation_drafts(plan: BaseModel, bad: set[int], active: list[int], bundles
             actions.append(action)
         if not actions:
             result.dropped.append({"slug": t.slug, "reason": "switched_off"})
+            _detail(result, t, plan)
             continue
         w = whens.get(k)
         trigger, end = _trigger_end(t, actions, w, catalog, n, cfg)
@@ -638,9 +648,38 @@ def _situation_drafts(plan: BaseModel, bad: set[int], active: list[int], bundles
         per_bundle[k] = per_bundle.get(k, 0) + 1
         if per_bundle[k] > n.max_lines:
             result.dropped.append({"slug": d.task_id, "reason": "max_lines"})
+            result.dropped_detail[d.task_id] = {"line": d.line, "way": d.way, "need": d.need,
+                                                "actions": [f"{a['device']}.{a['cmd']}" for a in d.actions]}
             continue
         out.append(d)
     return out
+
+
+def _detail(result: S4Result, t: BaseModel, plan: BaseModel) -> None:
+    """Keep what a task dropped inside S4 said, for display (the drop list keeps only slug and reason)."""
+    need = next((x.need for x in getattr(plan, "needs", []) or [] if x.id == getattr(t, "need_id", None)), None)
+    result.dropped_detail[t.slug] = {"line": getattr(t, "line", None), "way": getattr(t, "way", None), "need": need,
+                                     "actions": [getattr(a, "key", None) for a in getattr(t, "actions", []) or []]}
+
+
+def store_result(episode_id: str, result: S4Result) -> None:
+    """Store what S4 produced when it ends (`episodes.s4`, stage time `s4`), before S5 confirms it: display and
+    replay only. S5 still gets the drafts in memory and confirms from them (spec §2.4)."""
+    record = {
+        "llm_called": result.llm_called,
+        "whens": {str(k): ({"start": clock.iso(w.start), "end": clock.iso(w.end), "source": w.source} if w else None)
+                  for k, w in result.whens.items()},
+        "skipped_bundles": {str(k): v for k, v in result.skipped_bundles.items()},
+        "drafts": [{**d.contract(), "need": d.need, "line": d.line, "target_room": d.target_room, "bundle": d.bundle,
+                    "meta": {k: v for k, v in d.meta.items() if k in ("item", "kind", "slug")}} for d in result.drafts],
+        "dropped": [{**x, **result.dropped_detail.get(x.get("slug") or "", {})} for x in result.dropped],
+    }
+    with session_scope() as s:
+        ep = s.execute(select(Episode).where(Episode.id == episode_id).with_for_update()).scalar_one_or_none()
+        if ep is None:
+            return
+        ep.s4 = record
+        stage_times.mark(ep, "s4")
 
 
 def _slug(slug: str) -> str:

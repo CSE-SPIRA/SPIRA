@@ -106,6 +106,16 @@ def test_kb_neighbours_counts_and_examples(kb):
                        "case_household_types"}       # R49: no exact-name overlap
     assert ex["calendar_tags"] == ["생일"]                    # the c1 tag bonus puts a tagged case first
     assert len(ctx["snapshot"]) == 12 and not any(c.startswith("syn_T9") for c in ctx["snapshot"])
+    rec = ctx["kb_search"]                                   # display and replay only (§8.3 step 9)
+    assert (rec["searched"], rec["sim_floor"], rec["used"]) == (len(rec["sims"]), 0.70, 12)
+    assert rec["above_floor"] == sum(1 for x in rec["sims"] if x > 0.70) >= 12
+    assert rec["sims"] == sorted(rec["sims"], reverse=True) and len(rec["top"]) == min(10, rec["searched"])
+    assert [r["sim"] for r in rec["top"]] == rec["sims"][: len(rec["top"])]
+    assert {r["case_id"] for r in rec["top"] if r["used"]} <= set(ctx["snapshot"])
+    assert set(rec["top"][0]) == {"case_id", "sim", "score", "intent_id", "intent_text", "items", "used"}
+    from spira_server.pipeline.s3_intent import build_intent_message
+    items = [{"item_id": "it_1", "type": "딸기", "qty": 2, "attributes": []}]
+    assert build_intent_message(ctx, items) == build_intent_message({"for_intent": ctx["for_intent"]}, items)
 
 
 def test_t9_few_similar_cases(kb):
@@ -116,6 +126,7 @@ def test_t9_few_similar_cases(kb):
     ctx = s2_context.build_context(ep)
     assert ctx["for_intent"]["kb_neighbors"] == {"similar_count": 4, "note": "비슷한 사례가 거의 없음"}
     assert ctx["snapshot"] == []
+    assert ctx["kb_search"]["above_floor"] == 4 and ctx["kb_search"]["used"] == 0
 
 
 def test_r48_floor_070_drops_cases_sharing_few_items(kb):
@@ -213,6 +224,7 @@ def test_run_stores_context():
     with session_scope() as s:
         e = s.get(Episode, ep)
         assert e.stage == "s2" and e.context["for_intent"]["order_time"]["weekday"] == "목"
+        assert "kb_search" not in e.context and set(e.stage_times) == {"s2"}       # KB_MODE=off
 
 
 @pytest.mark.parametrize("counts,expected", [

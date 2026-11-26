@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field, create_model
 from sqlalchemy import select
 
 from .. import clock
+from . import stage_times
 from ..config import get_config
 from ..db.engine import session_scope
 from ..db.models import Episode
@@ -299,4 +300,5 @@ def run(episode_id: str) -> dict:
     with session_scope() as s:
         ep = s.execute(select(Episode).where(Episode.id == episode_id).with_for_update()).scalar_one()
         ep.intent = intent
+        stage_times.mark(ep, "s3")
     return intent

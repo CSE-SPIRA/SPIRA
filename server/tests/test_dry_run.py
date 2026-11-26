@@ -88,6 +88,16 @@ def test_dry_run_end_to_end(tmp_path, monkeypatch, env):
     io = [json.loads(x) for x in (out / "llm_io.jsonl").read_text(encoding="utf-8").splitlines()]
     assert [x["stage"] for x in io] == ["cal", "s1", "s3", "s4"]
     assert "[ok] resend: same episode, 200" in checks
+    from spira_server.db.engine import session_scope
+    from spira_server.db.models import Episode
+    with session_scope() as s:
+        ep = s.query(Episode).filter(Episode.household_id == "h_dry").order_by(Episode.created_at.desc()).first()
+        keys = ["received", "s1_start", "s1", "s2", "s3", "s4", "s5"]
+        assert list(ep.stage_times) == keys or sorted(ep.stage_times) == sorted(keys)
+        times = [ep.stage_times[k] for k in keys]
+        assert times == sorted(times)                        # wall times, in stage order
+        assert [d["task_id"] for d in ep.s4["drafts"]] == [t["task_id"] for t in plan["tasks"]]
+        assert ep.s4["llm_called"] is True and "0" in ep.s4["whens"]
 
 
 def test_answer_mismatch_fails(tmp_path, env):

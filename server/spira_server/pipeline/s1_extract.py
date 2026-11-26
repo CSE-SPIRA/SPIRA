@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import clock, scheduler
+from . import stage_times
 from ..config import Config, get_config
 from ..db.engine import lock_household, next_id, session_scope
 from ..db.models import Episode, EpisodeImage, EpisodeSource, Household, Order, OrderItem
@@ -72,6 +73,8 @@ def receive_capture(household_id: str, images: list[bytes], shared_at: datetime 
             return Accepted(ep.id, ep.status, duplicate=False)
 
         ep = _open_group(s, household_id, at, cfg) or _new_episode(s, household_id, at, now, status="received")
+        if "received" not in (ep.stage_times or {}):
+            stage_times.mark(ep, "received")
         for data in images:
             s.add(EpisodeImage(episode_id=ep.id, path=image_store.save(ep.id, data), read=False))
         _add_source(s, ep, source_id)
@@ -331,6 +334,8 @@ def _start_pass(episode_id: str, cfg: Config, first: bool) -> tuple[list[int], l
             return None
         if not ep.judged:
             ep.status = "reading"
+            if "s1_start" not in (ep.stage_times or {}):
+                stage_times.mark(ep, "s1_start")
         return [i.id for i in imgs], [i.path for i in imgs], ep.household_id
 
 
@@ -429,6 +434,7 @@ def _finish(episode_id: str) -> None:
         items = s.execute(select(OrderItem).where(OrderItem.episode_id == episode_id)).scalars().all()
         if ep.judged:
             return                                    # re-run of a judged episode: spec §14 (next batch)
+        stage_times.mark(ep, "s1")
         if not items:
             ep.status = "read_failed"
             ep.stage = "done"

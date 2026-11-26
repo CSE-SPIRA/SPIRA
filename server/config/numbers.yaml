@@ -17,6 +17,7 @@ w_cal: 0.05             # tuned
 w_house: 0.03           # tuned
 search_limit: 200
 max_use: 50
+search_record_top: 10
 cover: 0.8
 none_min: 0.10
 max_reps: 3
@@ -42,7 +43,8 @@ quiet_hours: [22, 8]
 llm_timeout_s: 60
 device_event_keep_d: 14
 demo:
-  quiet_s: 30
+  group_window_h: 0
+  quiet_s: 0
   before_start_default_min: 3
   guest_window_before_min: 1
   end_fallback_min: 10
