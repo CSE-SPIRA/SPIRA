@@ -15,8 +15,7 @@ def loopback_port(value):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for peer in ("fixture", "hub"):
-        parser.add_argument(f"--{peer}", type=loopback_port, required=True)
+    parser.add_argument("--fixture", type=loopback_port, required=True)
     parser.add_argument("--port", type=int, default=8731)
     parser.add_argument("--web-port", type=int, default=8732)
     args = parser.parse_args()
@@ -35,8 +34,8 @@ def main():
                 self.send_error(403)
                 return
             self.send_response(204)
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE")
-            self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-API-Key")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT")
+            self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
             self.end_headers()
 
         def forward(self):
@@ -44,15 +43,9 @@ def main():
                 self.send_error(403)
                 return
             path = self.path.split("?", 1)[0]
-            if self.command == "GET" and path == "/home/onboarding/devices":
-                port, auth = args.hub, "X-API-Key"
-            elif self.command == "POST" and path == "/v1/orders":
-                port, auth = args.fixture, "Authorization"
-            elif re.fullmatch(r"/v1/(households|episodes|cards)(/[A-Za-z0-9_-]+)*", path):
-                port, auth = args.fixture, "Authorization"
-            elif self.command == "GET" and path == "/health":
-                port, auth = args.fixture, None
-            else:
+            app_api = path == "/v1/orders" and self.command == "POST"
+            app_api |= bool(re.fullmatch(r"/v1/(households|episodes|cards)(/[A-Za-z0-9_-]+)*", path))
+            if not app_api and (self.command != "GET" or path != "/health"):
                 self.send_error(404)
                 return
 
@@ -65,11 +58,12 @@ def main():
                 self.send_error(413)
                 return
             headers = {"Accept": "application/json"}
-            for name in ("Content-Type", auth):
-                if name and name in self.headers:
-                    headers[name] = self.headers[name]
+            if "Content-Type" in self.headers:
+                headers["Content-Type"] = self.headers["Content-Type"]
+            if app_api and "Authorization" in self.headers:
+                headers["Authorization"] = self.headers["Authorization"]
 
-            connection = HTTPConnection("127.0.0.1", port, timeout=35)
+            connection = HTTPConnection("127.0.0.1", args.fixture, timeout=35)
             try:
                 connection.request(self.command, self.path, self.rfile.read(size), headers)
                 upstream = connection.getresponse()
@@ -86,10 +80,10 @@ def main():
             self.end_headers()
             self.wfile.write(body)
 
-        do_GET = do_POST = do_PUT = do_DELETE = forward
+        do_GET = do_POST = do_PUT = forward
 
     with ThreadingHTTPServer(("127.0.0.1", args.port), Proxy) as server:
-        print(f"SPIRA_BASE_URL and SPIRA_HUB_URL: http://127.0.0.1:{args.port}", flush=True)
+        print(f"SPIRA_BASE_URL: http://127.0.0.1:{args.port}", flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:

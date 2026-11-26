@@ -7,12 +7,14 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 
 import '../contracts.dart' as wire;
+import '../platform/gallery.dart';
 
 class AppApiException implements Exception {
-  const AppApiException(this.status, this.code);
+  const AppApiException(this.status, this.code, {this.reason});
 
   final int status;
   final wire.ErrorCode? code;
+  final String? reason;
 }
 
 bool isServerUnavailable(Object error) => switch (error) {
@@ -82,13 +84,22 @@ class AppApi {
         .then(http.Response.fromStream)
         .timeout(const Duration(seconds: 25));
     if (!statuses.contains(response.statusCode)) {
-      wire.ErrorCode? code;
+      wire.Error? error;
       try {
-        code = wire.errorFromJson(utf8.decode(response.bodyBytes)).code;
+        final body =
+            jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+        // The generated decoder expects a map for optional details.
+        body['details'] ??= <String, dynamic>{};
+        error = wire.Error.fromJson(body);
       } catch (_) {
         // A proxy may send a non-contract error response.
       }
-      throw AppApiException(response.statusCode, code);
+      final detail = error?.details?['reason'];
+      throw AppApiException(
+        response.statusCode,
+        error?.code,
+        reason: detail is String ? detail : error?.message,
+      );
     }
     return response;
   }
@@ -124,14 +135,6 @@ class AppApi {
     body: body.toJson(),
   );
 
-  Future<wire.Pause> pause(String household, wire.Pause body) => _json(
-    'POST',
-    '${_household(household)}/pause',
-    {200},
-    wire.pauseFromJson,
-    body: body.toJson()..remove('household_id'),
-  );
-
   Future<wire.EpisodeList> episodes(
     String household, {
     String? before,
@@ -152,30 +155,8 @@ class AppApi {
     query: since == null ? null : {'since': since},
   );
 
-  Future<wire.Memory> memory(String household) => _json(
-    'GET',
-    '${_household(household)}/memory',
-    {200},
-    wire.memoryFromJson,
-  );
-
-  Future<void> deleteCase(String household, String id) => _json(
-    'DELETE',
-    '${_household(household)}/memory/${Uri.encodeComponent(id)}',
-    {204},
-    (_) {},
-  );
-
   Future<wire.Episode> episode(String id) =>
       _json('GET', _episode(id), {200}, wire.episodeFromJson);
-
-  Future<wire.OrderAccepted> editOrder(String id, wire.OrderEdit body) => _json(
-    'PUT',
-    '${_episode(id)}/order',
-    {202},
-    wire.orderAcceptedFromJson,
-    body: body.toJson(),
-  );
 
   Future<wire.Rationale> rationale(String id) =>
       _json('GET', '${_episode(id)}/rationale', {200}, wire.rationaleFromJson);
@@ -217,6 +198,21 @@ class AppApi {
       filename: 'example-order.png',
       contentType: MediaType('image', 'png'),
     ),
+  ]);
+
+  Future<ShareReceipt> shareGallery(
+    String household,
+    String sourceId,
+    String sharedAt,
+    List<GalleryImage> images,
+  ) => _share(household, sourceId, sharedAt, [
+    for (final (index, image) in images.indexed)
+      http.MultipartFile.fromBytes(
+        'images',
+        image.bytes,
+        filename: 'order-${index + 1}.${image.png ? 'png' : 'jpg'}',
+        contentType: MediaType('image', image.png ? 'png' : 'jpeg'),
+      ),
   ]);
 
   Future<ShareReceipt> _share(

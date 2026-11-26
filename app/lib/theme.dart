@@ -10,23 +10,6 @@ const appEase = DesignTokens.ease;
 const appSettle = DesignTokens.settle;
 const appCardRadius = DesignTokens.radius16;
 
-TextSpan highlightTheme(String text, String? phrase, Color color) {
-  if (phrase == null || phrase.trim().isEmpty) return TextSpan(text: text);
-  final start = text.indexOf(phrase);
-  if (start < 0) return TextSpan(text: text);
-  final end = start + phrase.length;
-  return TextSpan(
-    children: [
-      TextSpan(text: text.substring(0, start)),
-      TextSpan(
-        text: phrase,
-        style: TextStyle(color: color),
-      ),
-      TextSpan(text: text.substring(end)),
-    ],
-  );
-}
-
 ThemeData buildAppTheme({bool reduceMotion = false}) {
   final colors = ColorScheme.fromSeed(
     seedColor: appGreen,
