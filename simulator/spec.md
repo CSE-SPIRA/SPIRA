@@ -102,6 +102,14 @@ judge to evaluate the corresponding received C-3 event.
 accepted-but-unchanged effect, and unavailable readback without manufacturing a
 Hub completion or changing Server result state.
 
+**SM-3.** A person MUST be able to switch off a running cleaner at the house.
+World MUST stop the cleaner and expose the device change for Hub observation.
+The Hub's user-attributed observation feeds the Server's card and memory.
+
+**SM-4.** The operator MUST offer music and light colour changes as named
+person actions on capable devices. These actions MUST use the same World and
+Hub observation path as other person changes.
+
 <a id="e5"></a>
 
 ### E5. Household viewer (PC-2, PC-4, PC-5, PC-6)
@@ -152,6 +160,20 @@ oven"), built from the profile's people and device commands, never from a plan.
 openable on its own URL on another phone, that lists the household's devices and
 lets a person change their values. A change from it MUST travel the
 `other_app` path (no local-operation report), so it reads as Class B to the Hub.
+
+**SM-1.** The default camera MUST frame the entire house prominently. Devices
+changed in the same moment MUST receive simultaneously visible markers. Off
+devices MUST remain free of device labels.
+
+**SM-2.** Selecting a change marker or its device MUST open a room or device
+close-up with a short explanation of the observed change. Selecting it again,
+pressing Escape, or advancing to another moment MUST restore the overview and
+hide the explanation. Markers MUST be keyboard-focusable buttons with Korean
+labels. Advancing MUST work without selecting a marker.
+
+**SM-5.** The demo shell MUST keep the active card visible to the left of the
+house throughout the house stage. Server judgment text MUST stay out of
+Simulator screens and World state.
 
 <a id="e6"></a>
 
@@ -250,6 +272,10 @@ passing claim until an implementation change supplies bounded evidence.
 | SIM-AT-19 | Open both households' viewers during the birthday scene | Each shows a 3D household with devices in their rooms and home events at the entrance; device labels read as content (oven temperature and time, light colour, display scene, fridge notice); weekday and wall-clock time are shown; a link reaches the other home | E5-R4, E5-R5, E5-R7 | PC-4 | Required |
 | SIM-AT-20 | Inspect the viewer page and its data during an active plan | Order details, intent, rationale, card text, Hub `by` and judge verdict stay private. Overlays show the planned action and trigger, including any guest window. Fridge notice labels come from observed device values. | E5-R6 | PC-4, PC-5 | Required |
 | SIM-AT-21 | Use a named person control, then change the same device from the appliance-app page | The control emits the panel path with the person's name; the appliance-app change uses `other_app` with `local_operation=false`; both are in the truth journal | E5-R8, E5-R9, E6-R2 | PC-5, PC-6 | **Provisional for the Class A panel signal, pending PQ-01** |
+| SM-AT-1 | Guests arrive and multiple devices change | The overview stays in place and all changed devices show markers together | SM-1 | PC-4 | Required |
+| SM-AT-2 | Select a marker, then select it again | The camera closes in and an explanation appears. The camera returns to the overview and the explanation disappears | SM-2 | PC-4 | Required |
+| SM-AT-3 | A person switches off the running cleaner | The cleaner is off in World, the Hub reports `by: user`, the App card line becomes `user_changed`, and memory records `changed` | SM-3 | PC-5 | **Provisional for the Class A panel signal, pending PQ-01** |
+| SM-AT-4 | Inspect Simulator screens and World state | Server judgment text is absent | E5-R6, SM-5 | PC-4, PC-5 | Required |
 
 ## 4. Open items
 

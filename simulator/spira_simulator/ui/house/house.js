@@ -1,5 +1,6 @@
 import * as THREE from "./vendor/three.module.min.js";
 import { createCeilingCove } from "./ceiling-cove.js";
+import { HOUSE_DEVICES } from "./devices.js";
 import { createCleanerBody, roundedGeometry } from "./geometry.js";
 import { createHousePeople } from "./people.js";
 import { createSceneLayer, validateScene } from "./scene.js";
@@ -121,10 +122,10 @@ const HOUSE_OUTLINE = [
   [-6.72, 2.73, -3.96], [6.72, 2.73, -3.96], [-6.72, 2.73, -1.63],
 ].map(position => new THREE.Vector3(...position));
 
-export function fitViewerCamera(camera, width, height) {
+export function fitViewerCamera(camera, width, height, amount = 1) {
   const compact = width < 720;
-  const sides = compact ? 10 : width * .045;
-  const top = compact ? 42 : 54;
+  const sides = compact ? 10 : width * .025;
+  const top = compact ? 42 : 48;
   const bottom = compact ? 36 : 24;
   const bounds = new THREE.Box3().setFromPoints(
     HOUSE_OUTLINE.map(point => point.clone().applyMatrix4(camera.matrixWorldInverse)));
@@ -133,10 +134,11 @@ export function fitViewerCamera(camera, width, height) {
   if (scale <= 0) return;
   const center = bounds.getCenter(new THREE.Vector3());
   center.y += (top - bottom) / (2 * scale);
-  Object.assign(camera, {
-    left: center.x - width / (2 * scale), right: center.x + width / (2 * scale),
-    top: center.y + height / (2 * scale), bottom: center.y - height / (2 * scale),
-  });
+  const lerp = THREE.MathUtils.lerp;
+  camera.left = lerp(camera.left, center.x - width / (2 * scale), amount);
+  camera.right = lerp(camera.right, center.x + width / (2 * scale), amount);
+  camera.top = lerp(camera.top, center.y + height / (2 * scale), amount);
+  camera.bottom = lerp(camera.bottom, center.y - height / (2 * scale), amount);
   camera.updateProjectionMatrix();
 }
 
@@ -352,6 +354,7 @@ export function createHouse(stage, {
   renderer.shadowMap.needsUpdate = true;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.16;
+  renderer.domElement?.setAttribute("aria-hidden", "true");
   stage.append(renderer.domElement);
 
   const scene = new THREE.Scene();
@@ -780,13 +783,23 @@ export function createHouse(stage, {
   const observedSurfaces = new Set([lampFace, tvScreen, ovenDoor, ovenScreen, noticeScreen]);
   const readings = new Map();
   let labels = new Map();
+  let inlineDevices = true;
   let presentation = new Map();
+  const changeButtons = new Map();
+  const changeLayer = document.createElement("div");
+  changeLayer.className = "house-change-markers";
+  const changeDetail = document.createElement("p");
+  changeDetail.className = "house-change-detail";
+  changeDetail.setAttribute("role", "status");
+  changeDetail.hidden = true;
+  stage.append(changeLayer, changeDetail);
+  let describeChange, markerListener, selectedChange;
   let jobRunning = false, cleanSince = 0, tvScene;
   let sceneTvImage, tvBootTimer, tvBootUntil = 0;
   let activeScene, sceneArtwork, sceneStartedAt;
   const TV_BOOT_MS = 1800;
   let entranceSignal;
-  let zoom = 1, targetZoom = 1, hasDirection = false, fitOverview = true;
+  let zoom = 1, targetZoom = 1, hasDirection = false, overviewFit = 1, targetFit = 1;
   let viewWidth = 0, viewHeight = 0, request = 0, readyAt = 0;
 
   parcel.visible = false;
@@ -1088,9 +1101,9 @@ export function createHouse(stage, {
         paintReading(id, painters[id], values)) queue();
   }
 
-  function project(id) {
+  function project(id, roomAnchor) {
     if (id === "cleaner_01" && jobRunning) projected.set(cleaner.position.x, .50, cleaner.position.z);
-    else projected.fromArray(LABEL_ANCHORS[id]);
+    else projected.fromArray(LABEL_ANCHORS[id] ?? roomAnchor);
     projected.project(camera);
     return { x: (projected.x + 1) / 2, y: (1 - projected.y) / 2 };
   }
@@ -1107,10 +1120,10 @@ export function createHouse(stage, {
     };
     if (viewer) clearance.table = table;
     for (const [id, label] of labels) {
-      if (Object.hasOwn(anchors, id)) label.classList.toggle("anchored", inline);
+      label.classList.toggle("anchored", inline && Object.hasOwn(anchors, id) && (inlineDevices || id === "entrance"));
     }
     const markers = Array.from(labels).flatMap(([id, label]) => {
-      if (!Object.hasOwn(anchors, id)) return [];
+      if (!Object.hasOwn(anchors, id) || (!inlineDevices && id !== "entrance") || !label.offsetWidth) return [];
       const focused = presentation.get(id)?.focused;
       return [{ id, label, focused, required: focused || label.hasAttribute("data-required"),
         ...anchors[id], width: label.offsetWidth, height: label.offsetHeight }];
@@ -1144,7 +1157,8 @@ export function createHouse(stage, {
     }
   }
 
-  function setMarkers(root) {
+  function setMarkers(root, { placeDevices = true } = {}) {
+    inlineDevices = placeDevices;
     const devices = [...root.querySelectorAll("[data-device][data-values]")];
     labels = new Map(devices.map((node) => [node.dataset.device, node]));
     update(new Map(devices.map((node) => [node.dataset.device, JSON.parse(node.dataset.values)])));
@@ -1155,7 +1169,120 @@ export function createHouse(stage, {
     setEntrance({ guests: arrival ? { arrival, count: entrance.dataset.guestCount } : null });
     people.setActions(new Map(devices.filter(({ dataset }) => dataset.personAt)
       .map(({ dataset }) => [dataset.device, { at: dataset.personAt, kind: dataset.personFigure }])));
+    syncChangeMarkers();
     queue();
+  }
+
+  function describeDevice(id) {
+    const label = labels.get(id);
+    const observed = label?.querySelector(".observation-warning")?.textContent.trim() ||
+      label?.querySelector(".device-value")?.textContent.trim();
+    const name = label?.dataset.deviceName || HOUSE_DEVICES[id]?.label;
+    const room = label?.closest(".viewer-room")?.dataset.room || HOUSE_DEVICES[id]?.room;
+    return { name, observed, room, ...describeChange?.(id) };
+  }
+
+  function syncChangeMarkers() {
+    for (const [id, button] of changeButtons) {
+      const { name } = describeDevice(id);
+      if (!name || models[id]?.visible === false || (selectedChange && selectedChange !== id)) {
+        button.hidden = true;
+        continue;
+      }
+      button.setAttribute("aria-label", selectedChange === id ? `${name} · 집 전체 보기` : `${name} · 변경 보기`);
+      button.setAttribute("aria-expanded", String(selectedChange === id));
+      button.hidden = false;
+    }
+    if (selectedChange) {
+      const { name, observed } = describeDevice(selectedChange);
+      changeDetail.textContent = `${name} · ${observed || "상태가 바뀌었어요"}`;
+    }
+  }
+
+  function showChangeMarkers(ids, describe) {
+    describeChange = describe;
+    const next = new Set(ids.filter(id => Object.hasOwn(models, id) || labels.has(id)));
+    if (selectedChange && !next.has(selectedChange)) focus();
+    let layoutChanged = false;
+    for (const [id, button] of changeButtons) {
+      if (next.has(id)) continue;
+      button.remove();
+      changeButtons.delete(id);
+      layoutChanged = true;
+    }
+    for (const id of next) {
+      if (changeButtons.has(id)) continue;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "house-change-marker";
+      button.addEventListener("click", () => selectChange(id));
+      changeButtons.set(id, button);
+      changeLayer.append(button);
+      layoutChanged = true;
+    }
+    syncChangeMarkers();
+    if (layoutChanged && changeButtons.size) queue();
+  }
+
+  function clearChangeMarkers() {
+    showChangeMarkers([]);
+  }
+
+  function onMarker(callback) {
+    markerListener = callback;
+  }
+
+  function escapeChange(event) {
+    if (event.key !== "Escape" || event.defaultPrevented) return;
+    event.preventDefault();
+    const button = changeButtons.get(selectedChange);
+    focus();
+    button?.focus({ preventScroll: true });
+  }
+
+  function selectChange(id) {
+    if (id === selectedChange) {
+      focus();
+      return;
+    }
+    const { view, room } = describeDevice(id);
+    selectedChange = id;
+    syncChangeMarkers();
+    changeDetail.hidden = false;
+    stage.ownerDocument.addEventListener("keydown", escapeChange);
+    moveCamera(view ?? HOUSE_ROOM_VIEWS[room]);
+    markerListener?.(id);
+  }
+
+  const ray = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+  renderer.domElement?.addEventListener("click", event => {
+    if (!changeButtons.size) return;
+    const { left, top, width, height } = renderer.domElement.getBoundingClientRect();
+    pointer.set((event.clientX - left) * 2 / width - 1, 1 - (event.clientY - top) * 2 / height);
+    ray.setFromCamera(pointer, camera);
+    const candidates = [...changeButtons].filter(([id, button]) => !button.hidden && Object.hasOwn(models, id));
+    const hit = ray.intersectObjects(candidates.map(([id]) => models[id]))[0];
+    if (!hit) return;
+    let model = hit.object;
+    while (model && !changeButtons.has(model.name)) model = model.parent;
+    if (model) selectChange(model.name);
+  });
+
+  function placeChangeMarkers() {
+    const size = 26;
+    const boxes = [...changeButtons].flatMap(([id, button]) => {
+      if (button.hidden) return [];
+      const roomAnchor = Object.hasOwn(LABEL_ANCHORS, id) ? undefined
+        : HOUSE_ROOM_VIEWS[describeDevice(id).room]?.aim ?? OVERVIEW.aim;
+      const { x, y } = project(id, roomAnchor);
+      // The layout function places labels just above an anchor.
+      return [{ id, button, x: x * viewWidth, y: y * viewHeight + size, width: size, height: size, required: true }];
+    });
+    for (const { button, left, top } of layoutHouseLabels(boxes, viewWidth, viewHeight, {})) {
+      button.style.left = `${left}px`;
+      button.style.top = `${top}px`;
+    }
   }
 
   function syncViewport() {
@@ -1176,15 +1303,28 @@ export function createHouse(stage, {
     queue();
   }
 
-  function focus(setting = OVERVIEW, { instant = false } = {}) {
+  function focus(setting, options) {
+    if (selectedChange) {
+      selectedChange = undefined;
+      changeDetail.hidden = true;
+      changeDetail.textContent = "";
+      stage.ownerDocument.removeEventListener("keydown", escapeChange);
+      syncChangeMarkers();
+      markerListener?.(null);
+    }
+    moveCamera(setting, options);
+  }
+
+  function moveCamera(setting = OVERVIEW, { instant = false } = {}) {
     goalCamera.fromArray(setting.eye);
     goalTarget.fromArray(setting.aim);
     targetZoom = setting.zoom;
-    fitOverview = setting === OVERVIEW;
+    targetFit = Number(setting === OVERVIEW);
     if (!hasDirection || instant || motion.matches) {
       currentCamera.copy(goalCamera);
       currentTarget.copy(goalTarget);
       zoom = targetZoom;
+      overviewFit = targetFit;
       orient();
     }
     hasDirection = true;
@@ -1264,7 +1404,7 @@ export function createHouse(stage, {
 
   function orient() {
     orientHouseCamera(camera, currentCamera, currentTarget, zoom, viewHeight ? viewWidth / viewHeight : 1);
-    if (viewer && fitOverview && viewWidth && viewHeight) fitViewerCamera(camera, viewWidth, viewHeight);
+    if (overviewFit && viewWidth && viewHeight) fitViewerCamera(camera, viewWidth, viewHeight, overviewFit);
   }
 
   function frame(now) {
@@ -1275,6 +1415,7 @@ export function createHouse(stage, {
     currentCamera.lerp(goalCamera, amount);
     currentTarget.lerp(goalTarget, amount);
     zoom = THREE.MathUtils.lerp(zoom, targetZoom, amount);
+    overviewFit = THREE.MathUtils.lerp(overviewFit, targetFit, amount);
     orient();
     livingLight.render(now, motion.matches);
     renderParty(now);
@@ -1303,6 +1444,7 @@ export function createHouse(stage, {
     if (peopleMoving) renderer.shadowMap.needsUpdate = true;
     renderer.render(scene, camera);
     if (labels.size) placeLabels();
+    if (changeButtons.size) placeChangeMarkers();
     const partyMoving = party.level > .01 || party.level !== party.target;
     if (sceneMoving || peopleMoving || (!motion.matches && (now < readyAt || jobRunning || partyMoving))) {
       request = requestAnimationFrame(frame);
@@ -1313,5 +1455,6 @@ export function createHouse(stage, {
     setSampleReading(id, values);
   }
   new ResizeObserver(resize).observe(stage);
-  return { resize, setPresentation, setMarkers, focus, setEntrance, setScene, clearScene, setSampleReading, anchor: project };
+  return { resize, setPresentation, setMarkers, focus, showChangeMarkers, clearChangeMarkers, onMarker,
+    setEntrance, setScene, clearScene, setSampleReading, anchor: project };
 }

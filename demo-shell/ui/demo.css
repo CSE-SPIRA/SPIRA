@@ -290,11 +290,11 @@ h1{font-size:var(--size-60);line-height:1.11;letter-spacing:-.065em;font-weight:
 
 .house-head h1{font-size:var(--size-38)}
 .house-head .lead{font-size:var(--size-19);max-width:43%}
-/* House: only the moment's devices speak, as a callout that fades after about ten seconds. */
-#view .viewer-marker:not(.focused){opacity:0;visibility:hidden;transition:opacity .4s var(--ease),visibility 0s .4s}
-#view:not([data-closeup]) .viewer-marker.focused > .home-device{animation:callout 10s var(--ease) both;transform-origin:bottom left;box-shadow:0 10px 30px #24382b40}
-@keyframes callout{0%{opacity:0;transform:scale(.82)}4%{opacity:1;transform:scale(1.08)}8%{transform:scale(1)}88%{opacity:1}100%{opacity:0;transform:scale(.96)}}
-@media(prefers-reduced-motion:reduce){#view .viewer-marker.focused > .home-device{animation:none}}
+/* House: changed devices use the shared house markers and on-demand detail. */
+#view #viewer-markers{pointer-events:none}
+#view .viewer-marker[data-device],#view .viewer-room > h2{display:none}
+#view #entrance-observations:not([data-resting]){pointer-events:auto}
+#view #entrance-observations[data-resting],#view[data-closeup] #entrance-observations{visibility:hidden}
 .mast-clock{font-size:var(--size-24);font-weight:600;color:var(--green-deep);font-variant-numeric:tabular-nums;min-width:7.5em;text-align:right}
 .line-state{color:var(--green-deep);font-weight:600}
 .app-review{margin-top:12px;padding:12px;border-radius:12px;background:var(--green-soft);font-size:var(--size-15);line-height:1.4}
@@ -305,7 +305,6 @@ h1{font-size:var(--size-60);line-height:1.11;letter-spacing:-.065em;font-weight:
 .memory-intent p{padding:10px 0;border-top:1px solid var(--soft);color:var(--muted)}
 .memory-intent p b{color:var(--ink)}
 .memory-intent small{display:block}
-#view[data-closeup] .viewer-marker{opacity:0;visibility:hidden}
 
 /* The phone's next action gets the same treatment in the order, card and tab bar. */
 .phone-share button,.phone-action{min-height:60px;align-items:center;font-size:var(--size-22)}
