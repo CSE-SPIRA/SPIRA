@@ -1,81 +1,100 @@
 # App
 
-Owner: Yejoon Kim
+Status: ACTIVE. This is the entry point for running and testing SPIRA's Android
+App. [App behavior and acceptance](spec.md) and
+[shared payloads](../contracts/README.md) have their own specifications.
 
-SPIRA's Android app receives shared order screenshots, shows the Server's
-preparation cards and rationale, and sends card Stop, line off/on, and household
-pause/resume. Settings contains this-home memory and case deletion.
+[Screen reference](screens.md)
+
+Main shows the Server's progress and the full order until its preparation card
+arrives. Cards and known episode history stay available when the Server has no
+episode list. Tap the order
+summary to see items and guidance. The final memory stays on Main until
+**확인** or a new accepted order. Its Calendar marker remains available.
+Calendar shows a month of events and memory markers. Select a day to see its
+agenda and open a memory. Our Home shows rooms with devices, controls for
+matching preparation lines, household types, and Google connection.
 
 ## Run locally
 
-Use Flutter 3.50 and the Android SDK. Start the contract fixture Server from its
-own checkout using the Hub owner's launcher and expose its App API to Android.
-For G0, that process belongs to `hub/tests/fixture_server`. The App has no
-bundled fixture Server. The fixture launch command is provided with H10-R1.
-
-From `app/`, set `SPIRA_BASE_URL` in a local `.env` to the peer's Android-accessible
-origin. Set `SPIRA_PEER=fixture` for H10-R1 or `SPIRA_PEER=server` for a team Server
-profile. Emulator hosts use `10.0.2.2` for a peer bound to the development
-machine. A connected physical device needs a reachable address. HTTP is enabled
-in debug builds.
+Use Flutter 3.50 and the Android SDK. Start the
+[contract fixture Server](../hub/README.md#contract-fixture-server) from the same
+checkout. In a local `.env` under `app/`, set `SPIRA_BASE_URL` to its
+Android-accessible origin and `SPIRA_PEER=fixture`. Use `SPIRA_PEER=server`
+for a qualified team Server. An Android emulator can reach a local peer
+through `10.0.2.2`. Debug builds allow HTTP.
 
 ```sh
 flutter run -d <android-device-id> --dart-define-from-file=.env
 ```
 
-If the peer returns 401, open the key button and enter the App's bearer token
-for that session. The token stays in memory. Keep tokens out of the Dart defines.
-Use Android's share menu to send one to three JPG or PNG screenshots to SPIRA.
+If the peer requires authentication, enter the App bearer token via the
+toolbar key. Set `SPIRA_HOUSEHOLD_ID` to open the household created by
+`server/scripts/demo_home.py` directly. The App needs the Server URL and App
+credentials to open that household. Set `SPIRA_FIRST_RUN=1` to run onboarding
+even with a configured household.
+Share one to three JPG or PNG screenshots from Android or
+choose them from **주문 분석하기** on Main. During onboarding, copy the
+connection code and enter it on the home Hub.
 
-Optional Dart defines:
+To enable Google Calendar, register `org.cse_spira.spira_app` and the signing
+SHA-1 as an Android OAuth client, enable Calendar API, and set the Web client
+ID in `SPIRA_GOOGLE_CLIENT_ID`. Connected events are read from the primary
+calendar for 14 days and synced to the Server. Disconnect Google from **우리 집**
+to replace the synchronized list with **예시 일정**. Fixture and preview use
+the replay dates. With `SPIRA_PEER=server`, the sample birthday starts 20
+minutes after the first cards response's `server_time` and lasts one hour.
+The App sends the events and keeps the anchor for that household across
+restarts. When the birthday has ended or starts in less than 10 minutes, a
+cards refresh renews the sample if no card is open. The Server tags the
+events after accepting the calendar.
+[Flutter Android sign-in setup](https://pub.dev/packages/google_sign_in_android)
 
-- `SPIRA_HOUSEHOLD_ID` opens an already created household, useful for a scripted
-  fixture demo. Omit it to exercise initial setup.
-- `SPIRA_DISCOVERY_JSON` supplies a C-2 device manifest for reviewing available
-  actions. The demo can use `contracts/fixtures/ep_9031/devices.json`.
-  Selections stay on this device. The App contract has no discovery or
-  delegation-publishing route.
-- `SPIRA_GOOGLE_CLIENT_ID` enables Google Calendar setup. Register
-  `org.cse_spira.spira_app` and the build's signing SHA-1 as an Android OAuth
-  client, enable Calendar API, and set the Web client ID used by the Android
-  sign-in plugin. After connection, the App rereads primary-calendar events
-  for now through the next 14 days at startup, on return to the foreground,
-  and from **캘린더 다시 보내기** in settings. It sends the full list when it
-  changes, including while automatic preparation is paused. The App saves only
-  the connection flag and the last accepted list's hash for calendar sync.
-  [Flutter Android sign-in setup](https://pub.dev/packages/google_sign_in_android)
-  [Google Calendar events API](https://developers.google.com/workspace/calendar/api/v3/reference/events/list)
+## Local preview
 
-## Checks
+From the repository root, use `app/scripts/browser-demo` for the fixture
+preview. It requires Flutter, Python, `uv`, and `mosquitto`. The launcher
+starts or reuses the demo stack and connects the App preview to the fixture
+Server. Use **예시 주문으로 공유** or **주문 분석하기** to send an order.
+Use `--build-serve` to serve a built preview. Add `--first-run` to start
+onboarding from an empty App, including when the fixture already has a
+household. The first-run build skips Google, collects household types, shows
+the connection code, and lets the user review the sample devices before
+saving.
+
+```sh
+app/scripts/browser-demo --build-serve --first-run
+```
+
+With sample schedules, Calendar opens to the fixture's birthday month.
+**오늘** jumps to the current month. Android share and Google sign-in require
+Android.
+
+## Tests
+
+From `app/`:
 
 ```sh
 flutter test
-flutter analyze
-flutter build apk --debug
+flutter analyze --no-pub
 ```
 
-The Flutter tests drive the UI and typed HTTP client with small in-test peers.
-They read the shared fixture payloads directly. Build verification covers the
-Android manifest, Kotlin share inbox and notification bridge. Android share
-delivery, process recreation, and TalkBack still require an Android runtime.
+Widget and unit tests use typed fake Server responses. Android delivery and
+TalkBack require an Android runtime.
 
 ## Contract boundaries
 
-- Android share intents have no delivery ID. The inbox uses the ordered content
-  URIs and image bytes to identify redelivery. Sharing the exact same URIs with
-  the exact same bytes is indistinguishable from redelivery. A newly captured
-  screenshot can be shared again after a read failure. Pending uploads bind to
-  the first ready profile and household that takes them.
-- C-6 carries no explicit line-start history or planned end condition.
-  Interventions use the supplied line state and previously observed starts.
-  Missing guidance release and closure fields are projected from item task
-  states and the episode's `closed` status. The App consumes only App API data.
-- The App displays the Server's per-line `end_state` and `note`.
-  Device-level restore items, including `withheld_end_not_observed`, travel
-  from the Hub to the Server in C-4. A card line reports `withheld` when the
-  Server projects that outcome.
-- App API has no pause status read route. Settings uses the last successful
-  pause/resume response and shows an unknown state before one is available.
-- Creating a household returns a one-time Hub key. Hub provisioning and
-  publishing delegation require an agreed handoff. The App does not contact the
-  Hub or the Simulator.
+- Android share redelivery is identified by its ordered content URIs and
+  bytes. Gallery selection uses a distinct source identity per selection.
+- Our Home and onboarding show the fixed installation as **예시 집** with
+  delegation disabled. The inventory test compares the bundled device IDs,
+  types, rooms, and names with the Hub example installation.
+- **끄기** on a device sends the matching card's line reaction to the Server.
+  The App keeps accepted reactions pending until a card refresh confirms them.
+  A reaction 404 restores the control and shows a message.
+- A missing episode list falls back to direct reads of shared and known
+  episodes. The App waits 60 seconds before trying the list again.
+- Episode history omits card start and end timestamps. Calendar can locate
+  a closed preparation by a start supplied by the card poll, or by the share
+  day when the App never saw the card.
+  Memory content comes from fresh episode and rationale reads.

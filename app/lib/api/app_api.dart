@@ -1,17 +1,27 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 
 import '../contracts.dart' as wire;
+import '../platform/gallery.dart';
 
 class AppApiException implements Exception {
-  const AppApiException(this.status, this.code);
+  const AppApiException(this.status, this.code, {this.reason});
 
   final int status;
   final wire.ErrorCode? code;
+  final String? reason;
 }
+
+bool isServerUnavailable(Object error) => switch (error) {
+  AppApiException(:final status) => status == 408 || status >= 500,
+  http.ClientException() || SocketException() || TimeoutException() => true,
+  _ => false,
+};
 
 /// The files have already been copied to the Android app's private inbox.
 class SharedOrder {
@@ -29,7 +39,7 @@ class AppApi {
   final Uri baseUrl;
   final http.Client _client;
 
-  /// Entered at runtime when the peer requires a bearer token.
+  /// In-memory bearer token for the active peer.
   String? token;
 
   String _household(String id) => '/v1/households/${Uri.encodeComponent(id)}';
@@ -55,31 +65,43 @@ class AppApi {
       request.headers['Content-Type'] = 'application/json';
       request.body = jsonEncode(body);
     }
-    return decode(await _send(request, statuses));
+    final response = await _send(request, statuses);
+    return decode(utf8.decode(response.bodyBytes));
   }
 
-  Future<String> _send(http.BaseRequest request, Set<int> statuses) async {
+  Future<http.Response> _send(
+    http.BaseRequest request,
+    Set<int> statuses,
+  ) async {
     request.followRedirects = false;
     request.headers['Accept'] = 'application/json';
     final bearer = token;
-    if (bearer != null && request.url.path != _uri('/health').path) {
+    if (bearer != null && request.url.path.startsWith(_uri('/v1/').path)) {
       request.headers['Authorization'] = 'Bearer $bearer';
     }
     final response = await _client
         .send(request)
         .then(http.Response.fromStream)
         .timeout(const Duration(seconds: 25));
-    final body = utf8.decode(response.bodyBytes);
     if (!statuses.contains(response.statusCode)) {
-      wire.ErrorCode? code;
+      wire.Error? error;
       try {
-        code = wire.errorFromJson(body).code;
+        final body =
+            jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+        // The generated decoder expects a map for optional details.
+        body['details'] ??= <String, dynamic>{};
+        error = wire.Error.fromJson(body);
       } catch (_) {
         // A proxy may send a non-contract error response.
       }
-      throw AppApiException(response.statusCode, code);
+      final detail = error?.details?['reason'];
+      throw AppApiException(
+        response.statusCode,
+        error?.code,
+        reason: detail is String ? detail : error?.message,
+      );
     }
-    return body;
+    return response;
   }
 
   Future<wire.Health> health() =>
@@ -113,14 +135,6 @@ class AppApi {
     body: body.toJson(),
   );
 
-  Future<wire.Pause> pause(String household, wire.Pause body) => _json(
-    'POST',
-    '${_household(household)}/pause',
-    {200},
-    wire.pauseFromJson,
-    body: body.toJson()..remove('household_id'),
-  );
-
   Future<wire.EpisodeList> episodes(
     String household, {
     String? before,
@@ -141,30 +155,8 @@ class AppApi {
     query: since == null ? null : {'since': since},
   );
 
-  Future<wire.Memory> memory(String household) => _json(
-    'GET',
-    '${_household(household)}/memory',
-    {200},
-    wire.memoryFromJson,
-  );
-
-  Future<void> deleteCase(String household, String id) => _json(
-    'DELETE',
-    '${_household(household)}/memory/${Uri.encodeComponent(id)}',
-    {204},
-    (_) {},
-  );
-
   Future<wire.Episode> episode(String id) =>
       _json('GET', _episode(id), {200}, wire.episodeFromJson);
-
-  Future<wire.OrderAccepted> editOrder(String id, wire.OrderEdit body) => _json(
-    'PUT',
-    '${_episode(id)}/order',
-    {202},
-    wire.orderAcceptedFromJson,
-    body: body.toJson(),
-  );
 
   Future<wire.Rationale> rationale(String id) =>
       _json('GET', '${_episode(id)}/rationale', {200}, wire.rationaleFromJson);
@@ -177,16 +169,11 @@ class AppApi {
     body: body.toJson()..removeWhere((key, value) => value == null),
   );
 
-  Future<wire.OrderAccepted> share(String household, SharedOrder order) async {
-    final request = http.MultipartRequest('POST', _uri('/v1/orders'));
-    request.fields.addAll({
-      'household_id': household,
-      'source_id': order.sourceId,
-      'shared_at': order.sharedAt,
-    });
+  Future<ShareReceipt> share(String household, SharedOrder order) async {
+    final images = <http.MultipartFile>[];
     for (final image in order.images) {
       final png = image.path.endsWith('.png');
-      request.files.add(
+      images.add(
         http.MultipartFile(
           'images',
           image.openRead(),
@@ -196,6 +183,57 @@ class AppApi {
         ),
       );
     }
-    return wire.orderAcceptedFromJson(await _send(request, {200, 202}));
+    return _share(household, order.sourceId, order.sharedAt, images);
+  }
+
+  Future<ShareReceipt> shareExample(
+    String household,
+    String sourceId,
+    String sharedAt,
+    Uint8List image,
+  ) => _share(household, sourceId, sharedAt, [
+    http.MultipartFile.fromBytes(
+      'images',
+      image,
+      filename: 'example-order.png',
+      contentType: MediaType('image', 'png'),
+    ),
+  ]);
+
+  Future<ShareReceipt> shareGallery(
+    String household,
+    String sourceId,
+    String sharedAt,
+    List<GalleryImage> images,
+  ) => _share(household, sourceId, sharedAt, [
+    for (final (index, image) in images.indexed)
+      http.MultipartFile.fromBytes(
+        'images',
+        image.bytes,
+        filename: 'order-${index + 1}.${image.png ? 'png' : 'jpg'}',
+        contentType: MediaType('image', image.png ? 'png' : 'jpeg'),
+      ),
+  ]);
+
+  Future<ShareReceipt> _share(
+    String household,
+    String sourceId,
+    String sharedAt,
+    List<http.MultipartFile> images,
+  ) async {
+    final request = http.MultipartRequest('POST', _uri('/v1/orders'))
+      ..fields.addAll({
+        'household_id': household,
+        'source_id': sourceId,
+        'shared_at': sharedAt,
+      })
+      ..files.addAll(images);
+    final response = await _send(request, {200, 202});
+    final accepted = wire.orderAcceptedFromJson(
+      utf8.decode(response.bodyBytes),
+    );
+    return (accepted: accepted, isNew: response.statusCode == 202);
   }
 }
+
+typedef ShareReceipt = ({wire.OrderAccepted accepted, bool isNew});

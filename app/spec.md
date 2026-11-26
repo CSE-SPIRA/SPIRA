@@ -1,190 +1,175 @@
 # App product specification
 
-This is the normative Gate G0 specification for `app/`. `MUST` and `MUST NOT`
-are requirements. Every requirement is tied to one or more product claims
-(`PC-1`–`PC-6`). Implementation guidance is deliberately outside this document
-in [`design-notes.md`](design-notes.md).
+Status: ACTIVE. This document owns App behavior and acceptance. Shared HTTP
+bodies, enum values, identifiers, and time rules remain under
+[contracts](../contracts/README.md). The App MUST use generated contract models.
 
-Shared HTTP bodies, identifiers, enum values, limits, and state meanings are
-owned by [`contracts/`](../contracts/README.md). The App uses the generated
-contract models and does not redefine those shapes. If this document and a
-contract differ, the contract wins and the difference remains an Open item.
+The [screen reference](screens.md) describes each screen, its states, words,
+data and controls.
 
 ## 1. Purpose and boundaries
 
-The App is intentionally thin. A person delegates once, shares an order, and
-intervenes only when needed; their main judgment happens by living in the home.
-The App shows Server decisions and observed home results. It does not infer an
-intent, create preparation work or device commands, contact the Simulator, or
-treat command acceptance as completion. The current product platform is Android.
+**P-R1.** The App MUST center on one preparation's lifecycle, from an order
+capture through execution, intervention, and memory. Main, Calendar, and Our
+Home MUST be the three tabs after first-run onboarding. No plan approval is
+required. (PC-1, PC-3, PC-5, PC-6)
 
-**P-R1.** The App MUST limit its product role to initial delegation, Android
-order sharing, presentation of Server-provided preparations and rationale, and
-the three interventions in A5. It MUST NOT add a per-plan approval step or turn
-the App into the primary place where the user judges the preparation. (PC-1,
-PC-3, PC-5, PC-6)
+**P-R2.** The App MUST use the Server for household, order, preparation, and
+memory data. It MUST make zero requests to the Hub or Simulator. Google
+Calendar is read on the phone. A command receipt MUST NOT be shown as a
+confirmed effect. (PC-4, PC-5)
 
-**P-R2.** The App MUST derive product state only from contract values received
-from the Server and MUST distinguish observed results from acknowledgements,
-unknown facts from success, and virtual, physical, fixture, and real-Server
-qualification. It MUST NOT read or control the Hub or Simulator directly.
-(PC-4, PC-5)
-
-**P-R3.** Until the real Server implements the App contract, the local App peer
-MUST be the contract fixture Server at `hub/tests/fixture_server`. A run against
-that peer MUST remain visibly qualified as fixture evidence and MUST NOT be
-presented as real-Server interoperability. (PC-4)
+**P-R3.** The App MUST support both the real Server and the contract fixture Server at
+`hub/tests/fixture_server`. Runs against that fixture MUST be visibly labeled. (PC-4)
 
 ## 2. Requirements
 
-### A1. Initial delegation
+### A1. Main lifecycle
 
-**A1-R1.** Initial setup MUST let the user create the home, choose one or more
-household types, and connect Google Calendar or skip it. These values are inputs
-to Server judgment, not App inference. This setup is the App's single delegation
-flow. (PC-1, PC-3)
+Main MUST keep the order above the preparation area. Both areas remain in
+place as Server state changes. Up to two cards for the same order can appear
+together. Only Server-issued cards can appear. The presentation shell MUST
+embed the App's actual web build when it shows the App.
 
-### A2. Devices and delegated actions
+| ID | Required presentation | Contract source |
+| --- | --- | --- |
+| M1 | The App MUST accept one to three ordered images from Android share or the gallery. Each selection MUST have one stable `source_id` for retry. After acceptance, show the submitted thumbnails and `받았어요`. | `POST /v1/orders`, `received` |
+| M2 | While the shared order is being processed, the order area MUST show a loading panel (an activity indicator, one line naming the stage in progress, and a progress bar that moves only when a stage is stored) and, below it, one short line per stored stage that fades in when that stage is stored. Upcoming stages MUST NOT be listed. Reduced motion MUST render the panel and lines without animation. | Episode and rationale detail |
+| M3 | The order area MUST show names and quantities, plus only a count for masked items. Read failure MUST prompt the user to send again. | Episode `items`, `item_count`, `masked_count`, `read_failed` |
+| M4a | The order MUST remain visible with an empty preparation area when no card was produced. In the full order, the App MUST show each item task under the first item of its type, with a label for its kind, the Server text, and its state. Scheduled guidance MUST say when it will appear and completed guidance MUST say where it was shown. | Episode `judged`, empty `card_ids`, `item_tasks[].item`, `kind`, `text`, `state` |
+| M4b | A held card MUST show the Server's text verbatim. | Episode `held`, card held template |
+| M5 | With a card present, the order MUST default to one tappable row with a thumbnail, item count, first visible item and remaining count, and a chevron. Tapping MUST reveal or hide the full order. A preparation card MUST show the Server's text verbatim, schedule, timed or triggered lines, progress, and applicable controls. The App MUST deduplicate local notifications by `card_id` and `updated_at`, and honor `notify` for new and newly timed cards. | Card poll `text`, `starts_at`, `lines`, `summary`, `notify` |
+| M6 | The App MUST show each supplied line state distinctly, including the Server's note and any awaited event. | Card poll `lines[].state`, `note`, `summary.waiting_for` |
+| M7a | Line off MUST remain available while a line runs. Line on MUST be available only before start. A 409 indicating start MUST remove that control. Stop applies only to its card. Accepted requests MUST remain pending until refreshed card state confirms the change. A reaction 404 MUST show one message, `아직 이 서버에서는 끌 수 없어요`, and restore the control without retrying. | Card `line_off`, `line_on`, `stop` reactions |
+| M7b | A human change MUST show the changed state and Server note. A person-started standby task uses the Server's resulting state. | Card `user_changed`, `note`, `done` |
+| M8 | The App MUST show the supplied restoration outcome and note per line. | Card `lines[].end_state`, `note` |
+| M9 | When the observation window closes, the card MUST become a memory sheet with the intent, lines and states, verdict, and task feedback. | Episode rationale `intents[].intent_text`, `tasks`, `observations` |
+| M10 | At episode close, live cards MUST leave Main and the latest memory sheet MUST stay until the next accepted order or acknowledgment. Calendar MUST keep the closed episode marker regardless of acknowledgment. | Episode `closed`, last card update, episode history |
 
-**A2-R1.** For each discovered device, setup MUST distinguish discovery from
-delegation, identify its room, type, and virtual or physical substrate, and let
-the user choose delegated `commands` and non-delegated `never` actions. The App
-MUST NOT represent an undisclosed or unselected action as delegated. (PC-3,
-PC-5)
+The App MUST use the card poll's `server_time` cursor, reconcile cached cards
+with the Server after startup or reconnect, and avoid inventing a planned
+end condition. Poll every 30 seconds, with a three-second foreground cadence
+during active preparation or intake. Show the last known state and a connection
+notice while reads fail.
 
-### A3. Shared orders
+The App MUST poll the shared episode and its rationale during intake. It MUST
+show the item count and list when S1 items are present, the calendar and past
+order check when S2 rationale is available, and the Server's short intent text
+when S3 intents are present. A rationale 404 before S2 is expected. Changes
+MUST follow stored data, with no timed advancement. The preparation card
+replaces the progress block when it arrives.
 
-**A3-R1.** The only order input MUST be an Android OS share containing one to
-three ordered screenshots. The App MUST NOT provide an image picker, form, or
-follow-up question. It MUST preserve one share identity so redelivery or retry
-does not create a second episode. (PC-1, PC-3, PC-4)
+If the household episode list returns 404, 405, or 501, card refresh MUST
+continue using episode detail for the open cards, the newly shared order, and
+previously seen episodes. The App MUST defer retrying the list until a later
+poll interval. Calendar MUST retain markers for episodes observed closing.
 
-**A3-R2.** An HTTP 202 MUST be shown only as intake acceptance, never as a
-finished judgment or preparation. The App MUST use the episode contract to show
-reading, the number of read items, failure with instructions to share again, and
-the absence of preparation. Before any line has started, the user MUST be able to
-correct read product names and quantities; after a line starts, that correction
-affordance MUST be absent. (PC-1, PC-2, PC-4)
+Memory MUST render `match`, `stopped`, and `unconfirmed` distinctly, and
+`off`, `changed`, and `kept` as per-line results. If no observation is
+available, show that the verdict is pending. The App MUST exclude evidence,
+KB comparisons, unusual items, unbundled items, and explanatory prose.
 
-### A4. Preparation cards
+### A2. Calendar
 
-**A4-R1.** One preparation MUST be shown as one card, with no approval button.
-For each order the App MUST show no more than the contract maximum of two cards.
-Each card MUST show the understood situation in one line (`text`), its schedule,
-up to four lines, `done / total`, the awaited event, and for every line its
-contract state and `when`. After a line ends, it MUST show the supplied
-`end_state` and Server display `note`. (PC-1, PC-3, PC-4, PC-5)
+Calendar MUST show a month grid with month navigation and a today marker.
+Event bars MUST carry labels. Memory dots MUST appear on their dates. Selecting
+a day MUST list its events and memories. Selecting a memory MUST open the
+same sheet as M9, including purchased items, masked count, and start/end times
+when supplied. Preparation plans remain on Main.
 
-**A4-R2.** A line's planned end condition MUST be shown only when a future
-contract field explicitly supplies it. The App MUST NOT infer one from `when`,
-`end_state`, `note`, a timer, or fixture knowledge. The missing field remains
-Open item O-04/SP-09. (PC-4, PC-5)
+The App MUST read the next 14 days of Google events on the phone. A connected
+Google calendar MUST replace the samples, including when it has no events.
+While Google is disconnected, Calendar MUST show `예시 일정` and the App MUST
+send those same events with `PUT …/calendar`. Fixture and preview use the
+bundled replay dates. With `SPIRA_PEER=server`, the App MUST anchor a one-hour
+birthday 20 minutes after the cards response's `server_time` and put ordinary
+events on later days. It MUST persist the sample anchor for the household.
+It MUST send the sample once on opening the household and only replace it when
+the birthday has ended or starts in less than 10 minutes and there is no open
+card. It MUST send no sample while Google is connected.
 
-**A4-R3.** The App MUST follow the contract's card polling and `notify` rules and
-show at most one local notification for each (`card_id`, `updated_at`) for which
-`notify` is true. Other card updates MUST be silent. (PC-3, PC-4)
+Calendar MUST use the household episode listing when available and known
+closed episodes otherwise. It MUST date a
+closed episode in the household time zone using the last observed card
+`starts_at`, with `shared_at` as the fallback for a card the App never saw.
+A card seen only in the held state has no marker. The App MUST reconstruct the
+sheet from episode detail and rationale without cached card bodies.
 
-### A5. Interventions
+### A3. Our Home and onboarding
 
-**A5-R1.** The App MUST expose exactly these three intervention scopes:
+Our Home MUST show editable household types via `PUT …/profile`, Google
+connect/disconnect, and the device list on one page. Until the App device
+routes exist, Our Home and onboarding MUST show the fixed demo inventory
+from the example Hub installation, labeled `예시 집`. It MUST show only rooms with devices, grouped by
+room, with a name and type icon per device. Each delegation control MUST remain
+disabled and labeled `집 연결 후`. The App needs a Server device list including
+rooms and a Server write route for per-device delegation. The Hub needs that
+delegation before execution.
 
-1. one **Stop** on each card;
-2. line off/on on that card before the line starts; and
-3. household pause/resume in settings.
+Our Home MUST match open card lines to devices through
+`GET /v1/episodes/{id}/rationale`, using the task's card and task identifiers
+and its `devices` identifiers, types, and rooms. The row MUST display the card
+line's text and state and use the card's `line_off` reaction when available.
+Onboarding MUST show the device list read-only. `SPIRA_HOUSEHOLD_ID` MUST
+open an existing household directly, including one created by the Server's demo
+home script. `SPIRA_FIRST_RUN=1` MUST start at Google setup with no household,
+even when a household is configured or setup was previously completed. Opening
+a household MUST require only the Server connection.
 
-It MUST NOT expose Stop All, a house-wide immediate stop, a Server-bypassing
-App-to-Hub stop, or a wrong-judgment label. Switching off every line MUST NOT be
-presented as Stop. (PC-5, PC-6)
+| ID | Requirement |
+| --- | --- |
+| ON-1 | First-run setup MUST start with optional Google sign-in. Connected events MUST sync to `PUT …/calendar` after the household exists. |
+| ON-2 | The user MUST be able to select multiple household types. A 422 `household_types_invalid` response MUST show the Server's reason inline. |
+| ON-3 | Household creation MUST display the returned `hub_api_key` as a copyable connection code, with instructions for entering it on the Hub. |
+| ON-4, ON-5 | The device step MUST show the same grouped sample inventory as Our Home, with delegation disabled. |
+| ON-6 | Saving MUST complete onboarding and open Main. |
 
-**A5-R2.** Card Stop MUST send the existing contract `stop` reaction and mean
-“end this preparation now”: cancel unstarted lines, undo changes still owned by
-SPIRA, and preserve changes or jobs made or started by a person. It applies only
-to that card, does not affect item guidance, and MUST NOT ask the user for a
-reason. The App MUST show the request as pending until refreshed contract state
-confirms the result. It MUST NOT decide how one Stop affects future Server
-judgment; that remains O-02/SP-01. (PC-5, PC-6)
+### A4. The three ways to turn something off
 
-**A5-R3.** Household pause MUST cancel not-started work across orders, leave
-running effects to their existing lifecycle, and keep newly shared orders
-without judging them, as defined by the contract. Resume MUST affect future
-eligibility only and MUST NOT silently revive cancelled work. (PC-5, PC-6)
+Future non-delegation is a per-device setting and requires the Server routes
+described above. App intervention sends card-scoped line off/on or stop from Main, or line off
+from the matched device in Our Home. A press MUST show its pending state
+immediately and let the Server confirm the effect. A change made at home is reported through the Server and shown
+with the resulting state and note. Switching off all lines does not count as
+Stop. The App MUST provide no Stop All control.
 
-### A6. WHY
+### A5. Presentation
 
-**A6-R1.** WHY MUST render the stored rationale without starting a new
-inference. Its presentation is a whitelist:
+The App MUST use shared design tokens and IBM Plex Sans KR. The preparation
+card MUST lead with its title and place line timing on the left and state on
+the right. Each screen MUST distinguish one primary action when available.
+Fixture builds MUST use a small qualifier. User-facing copy MUST use concise,
+natural Korean and omit internal diagnostics.
 
-- understood `intent_text`;
-- situation slots and, for each slot, its evidence items or calendar event;
-- deliberately excluded `unbundled` items; and
-- for each preparation line, `need` → device room/type → current contract state.
+### A6. Removed surfaces
 
-For no-intent episodes it MUST show the stored no-intent fact. It MUST NOT render
-purchase-history comparison (`unusual_items`), `kb_counts`, `kb_examples`, or
-other KB examples/counts. Missing rationale MUST remain unavailable rather than
-being invented locally. (PC-1, PC-2)
-
-### A7. Item guidance
-
-**A7-R1.** Item guidance MUST be a separate episode area, outside every card and
-outside Stop scope. Before release it MUST say that guidance appears when the
-package is brought in; after release it MUST show the supplied text and state;
-after closure it MUST show that guidance ended. A plain-groceries order MUST
-have no preparation card and show only its item guidance. (PC-1, PC-2)
-
-### A8. Observed result projection
-
-**A8-R1.** Card and line status MUST come from refreshed contract state. The App
-MUST keep the supplied `held`, `scheduled`, `running`, `done`, `partial`,
-`failed`, `unknown`, `blocked`, `user_changed`, `off`, `stopped`, `cancelled`,
-and `dropped` line states distinct, together with the supplied restore outcome.
-It MUST NOT turn an HTTP receipt, missing evidence, or a stale value into `done`.
-A `user_changed` presentation requires that Server-provided state, and
-`kept_user_change` MUST be shown as a preserved human change rather than a
-failure. (PC-4, PC-5)
-
-### A9. This-home memory
-
-**A9-R1.** This-home memory MUST be a secondary screen inside settings. It MUST
-support only viewing the Server-provided memory and deleting a selected contract
-case. The App MUST refresh or otherwise observe Server confirmation before
-showing a deletion as complete; it MUST NOT offer memory editing or preference
-authoring. (PC-6)
+The App MUST omit WHY, order stories and evidence, order name or quantity
+editing, household pause, settings memory and memory deletion, execution plans
+on Calendar, automatic key handoff, and presenter controls.
 
 ## 3. Acceptance catalogue
 
-All tests observe the App through its rendered UI, Android OS boundary, or the
-contract peer. Unit tests of private classes do not by themselves satisfy these
-exits.
+All exits are observed through rendered UI and Server requests. A request to
+the Hub or Simulator fails acceptance.
 
-| ID | External scenario and observable exit | Claims | Requirements |
-| --- | --- | --- | --- |
-| APP-AT-01 | Complete setup with multiple household types, skip or connect Google Calendar, and review discovered devices. The saved boundary contains only selected `commands`/`never`; discovered and delegated and virtual and physical remain visibly distinct. | PC-1, PC-3, PC-5 | P-R1, A1-R1, A2-R1 |
-| APP-AT-02 | Send Android share intents with one and three ordered screenshots, then redeliver the same share. One episode is accepted with image order preserved; no picker, form, or question is available; redelivery creates no second episode. | PC-1, PC-3, PC-4 | P-R1, A3-R1 |
-| APP-AT-03 | Return 202, then exercise processing, ready, failed extraction, no-preparation, and a nonzero `item_count`. The UI never claims a card at 202, shows the contract result, permits name/quantity correction only before a line starts, and tells the user to share again after read failure. | PC-1, PC-2, PC-4 | A3-R2 |
-| APP-AT-04 | Supply an order with two cards and four lines, including schedule, awaited event, `when`, mixed line states, final `end_state`, and `note`. Both cards render all supplied fields, no third card or approval button appears, and Stop scope remains per card. | PC-1, PC-3, PC-4, PC-5 | P-R1, A4-R1 |
-| APP-AT-05 | Supply different `when`, `end_state`, and `note` values using the current contract, which has no planned end-condition field. No planned end condition is inferred or displayed. | PC-4, PC-5 | A4-R2 |
-| APP-AT-06 | Poll repeated card responses with `notify` false and duplicate/new (`card_id`, `updated_at`) pairs with `notify` true. Only the first delivery of each notified pair produces a local notification. | PC-3, PC-4 | A4-R3 |
-| APP-AT-07 | Inspect an active card and settings, then start one line. The only interventions are card Stop, pre-start line off/on, and settings pause/resume; line on is unavailable after start; all-lines-off is not Stop; no Stop All, house stop, or wrong-judgment action exists. | PC-5, PC-6 | P-R1, A5-R1 |
-| APP-AT-08 | Stop a card containing unstarted work, a SPIRA-owned effect, a person-changed effect, and a person-started job. The peer receives contract `stop`; refreshed UI shows cancellation/restoration while preserving both human effects, asks no reason, and leaves item guidance unchanged. | PC-5, PC-6 | A5-R2, A7-R1, A8-R1 |
-| APP-AT-09 | Pause a household with unstarted work, a running effect, and then a newly shared order. The refreshed projection cancels the unstarted work, keeps the running lifecycle, stores the order as paused without judgment, and does not revive cancelled work after resume. | PC-5, PC-6 | A5-R3, A8-R1 |
-| APP-AT-10 | After the peer has only a command acknowledgement, return a card that is not `done`; then return refreshed `done`, `partial`, `failed`, `unknown`, and restore outcomes. The UI does not complete on acknowledgement and renders every supplied state without upgrading unknown evidence. | PC-4, PC-5 | P-R2, A8-R1 |
-| APP-AT-11 | Render the `ep_9031`-shaped rationale containing intent/situation basis, calendar evidence, `unbundled`, task need/device/state, `unusual_items`, `kb_counts`, and `kb_examples`. WHY shows only the A6-R1 whitelist and a second open does not cause an inference request. | PC-1, PC-2 | A6-R1 |
-| APP-AT-12 | Render the plain-groceries episode with `card_ids: []` and item guidance through unreleased, released, and closed states. No preparation card is fabricated, and the guidance lifecycle remains visible. | PC-1, PC-2 | A3-R2, A7-R1 |
-| APP-AT-13 | From settings, open memory, view Server rows, delete one case with a failed response and then a successful response/readback. No edit controls exist; failure remains visible; deletion is claimed only after Server confirmation. | PC-6 | A9-R1 |
-| APP-AT-14 | Run the same scene against the local fixture peer and against a qualified Server profile. Fixture qualification is visible and never presented as real-Server, physical-device, or native-lifecycle evidence; no App request reaches Hub or Simulator endpoints. | PC-4 | P-R2, P-R3 |
-| APP-AT-15 | With Android large text and a screen reader enabled, locate and operate card Stop, pre-start line off/on, and settings pause. Each scope and pending/confirmed result is identifiable without color alone. | PC-5 | A5-R1, A5-R2, A5-R3 |
-
-## 4. Open items
-
-- **O-02 / SP-01 — Server:** determine whether one `stopped` observation can
-  suppress the same intent permanently. The App sends and displays the current
-  contract value and does not encode a future-learning rule.
-- **O-04 / SP-09 — Server/contract:** add a card-line field for the planned end
-  condition. Until then, the App shows none and never derives one.
-- **O-05 / SP-06, SP-07, SP-12 — Server/shared fixtures:** complete the
-  no-intent rationale and same-item contrast fixtures, and move the line-off demo
-  away from the child-safety line.
-- **SP-14 — Server:** provide the real App/Hub contract routes and recorded
-  `ep_9031` flow. Until that exists, G1/G2 use `hub/tests/fixture_server` and make
-  no real-Server interoperability claim.
+| ID | Scenario and observable exit |
+| --- | --- |
+| AP-AT-1 | Start a fixture preview with the first-run switch. Skip Google, select two types, create the household, see and copy the connection code, review the read-only sample devices, and save to Main. The Server stores the household and types. |
+| AP-AT-2 | Share two images from Android and pick one from the gallery. Both go through M1, M2, and M3. |
+| AP-AT-3 | Send an order requiring no preparation. The order remains at M4a with an empty preparation area. |
+| AP-AT-4 | Send an order requiring preparation. An M5 card appears with no evidence, comparisons, or examples. |
+| AP-AT-5 | Turn off a running line, turn another line off and on before it starts, then stop the card. Each request remains pending until confirmed. Started lines offer no on control. |
+| AP-AT-6 | A person changes a light at home. The next poll shows the human-change state and Server note. |
+| AP-AT-7 | Close the observation window, then the episode. The card becomes M9, stays on Main after close, and leaves a dot on its start day. Acknowledge it or accept another order. The sheet leaves Main and the dot remains. |
+| AP-AT-8 | Select the day with a memory dot and tap its memory. The M9 sheet opens without explanatory prose. |
+| AP-AT-9 | Open Our Home. The fixed installation appears under room headings for rooms with devices. Delegation switches are disabled. Turn off a matched device line. It shows pending immediately and sends that card and task's `line_off` to the Server. |
+| AP-AT-10 | Open Calendar. Navigate months and return to today. Find the birthday label and memory dot on their dates, and select a date to see its agenda. |
+| AP-AT-11 | Start a fixture or preview without Google. Calendar shows `예시 일정` and the Server receives the same events. Connect Google and verify that its read replaces the samples. |
+| AP-AT-12 | With no card, see the full order. When the card arrives, see one summary row above its title. Expand and collapse the order and verify guidance appears only in the full list. |
+| AP-AT-13 | Inspect Main and setup at phone width. The shared typeface and tokens are applied, line timing and state are legible, and the fixture qualifier is secondary. |
+| AP-AT-14 | Return 404, 405, or 501 for the episode list. The shared order advances to its card, existing cards remain usable, and observed closures leave Calendar dots. The list is retried after a backoff. |
+| AP-AT-15 | Return 404 to line off, line on, or stop. The card shows one calm message and its control is restored without resending the request. |
+| AP-AT-16 | Hold each processing stage until its data is stored. Main advances through receipt, items, context, and Server intent in order, then collapses the order when the card appears. With reduced motion nothing animates. |
+| AP-AT-17 | Supply multiple items of one type and one guidance task. In the expanded order the first item of that type shows its kind, Server text, and state wording exactly once. |
+| AP-AT-18 | Open a real Server household without Google. The birthday appears 20 minutes after the Server time and lasts one hour. Reopen and verify its anchor stays put. When the birthday has ended or is under 10 minutes away, the next sample is sent only if there is no open card. With Google connected no sample is sent. |
+| AP-AT-19 | Open the household configured by `SPIRA_HOUSEHOLD_ID` using only the Server URL and App credentials. Main opens directly. With `SPIRA_FIRST_RUN=1`, setup starts instead. |
