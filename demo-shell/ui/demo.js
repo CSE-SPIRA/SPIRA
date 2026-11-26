@@ -74,6 +74,19 @@ function notice(text = "") {
   $("notice").textContent = text;
 }
 
+function linkDashboard() {
+  const address = query.get("dashboard");
+  if (!address) return;
+  try {
+    const url = new URL(address);
+    if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) return;
+    $("dashboard-link").href = url.href;
+    $("dashboard-link").hidden = false;
+  } catch {
+    // A malformed address leaves the optional link hidden.
+  }
+}
+
 async function exchange(path, options) {
   const response = await fetch(path, options);
   const body = await response.json().catch(() => null);
@@ -268,6 +281,7 @@ async function boot() {
 
   $("frame").toggleAttribute("data-recording", Boolean(RECORDING));
   $("frame").toggleAttribute("data-owners", query.get("owners") === "1");
+  linkDashboard();
   // Rehearsal aid: ?camera=<name> holds a named camera (for framing close-ups).
   if (query.get("camera")) setTimeout(() => {
     $("view").setAttribute("data-closeup", "");

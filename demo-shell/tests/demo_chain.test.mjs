@@ -2242,3 +2242,16 @@ test("the shell uses product-neutral wording", () => {
     assert.doesNotMatch(readFileSync(new URL(name, ui), "utf8"), /thinq/i, name);
   }
 });
+
+for (const [address, shown] of [
+  ["https://server.test/dashboard", true],
+  ["javascript:void(0)", false],
+  ["https://user@server.test/dashboard", false],
+]) {
+  test(`the dashboard link is ${shown ? "shown" : "hidden"} for ${address}`, async (t) => {
+    const shell = await openShell(t, `?dashboard=${encodeURIComponent(address)}`, () => Response.json({ server: false }));
+    const link = shell.byId("dashboard-link");
+    assert.equal(link.hidden, !shown);
+    assert.equal(link.href, shown ? address : undefined);
+  });
+}

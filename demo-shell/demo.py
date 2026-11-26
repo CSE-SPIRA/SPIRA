@@ -204,7 +204,7 @@ def create_app():
             match = next((entry for entry in recordings.index()
                           if entry["episode_id"] == query["episode"] and entry["complete"]), None)
             if match:
-                flags = {key: value for key, value in query.items() if key in ("dwell", "auto", "owners")}
+                flags = {key: value for key, value in query.items() if key in ("owners", "dashboard")}
                 return RedirectResponse("/demo?" + urlencode({"recording": match["id"], **flags}))
         page = "recordings.html" if "recordings" in query else "index.html"
         return FileResponse(DEMO_UI / page, media_type="text/html")

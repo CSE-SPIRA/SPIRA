@@ -437,9 +437,9 @@ def test_recording_writes_json_and_the_presenter_can_label_and_replay_it(client,
     assert [row["id"] for row in index] == [first, second]
     assert index[0]["name"] == "생일 리허설"
     assert client.get(f"{endpoint}/{first}").json()["entries"] == on_disk["entries"]
-    legacy = client.get("/demo?episode=ep_9031&replay=1&dwell=2", follow_redirects=False)
+    legacy = client.get("/demo?episode=ep_9031&replay=1&dwell=2&owners=1", follow_redirects=False)
     assert legacy.status_code == 307
-    assert legacy.headers["location"] == f"/demo?recording={first}&dwell=2"
+    assert legacy.headers["location"] == f"/demo?recording={first}&owners=1"
     assert "시연 녹화" in client.get("/demo?recordings").text
 
 def test_server_read_turns_upstream_timeout_into_retryable_status(client, monkeypatch):
