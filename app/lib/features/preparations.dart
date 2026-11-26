@@ -11,7 +11,6 @@ import '../theme.dart';
 import 'labels.dart';
 import 'order_extraction.dart';
 import 'memory_sheet.dart';
-import 'setup.dart';
 import 'status_badge.dart';
 
 class Preparations extends StatelessWidget {

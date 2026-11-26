@@ -51,6 +51,7 @@ class AppController extends ChangeNotifier {
     required this.store,
     required this.fixture,
     this.browserPreview = false,
+    this.firstRun = false,
     this.readCalendar,
     this.disconnectCalendar,
     this.pickImages,
@@ -63,6 +64,7 @@ class AppController extends ChangeNotifier {
   final AppStore store;
   final bool fixture;
   final bool browserPreview;
+  final bool firstRun;
   final CalendarReader? readCalendar;
   final Future<void> Function()? disconnectCalendar;
   final GalleryPicker? pickImages;
@@ -73,8 +75,14 @@ class AppController extends ChangeNotifier {
   bool get canShareExample =>
       demoPreview && !sharingExample && (canControl || serverUnavailable);
 
-  String get _environment =>
-      jsonEncode([fixture, api.baseUrl.toString(), configuredHousehold]);
+  bool get _startsFromFirstRun => firstRun && (fixture || browserPreview);
+
+  String get _environment => jsonEncode([
+    fixture,
+    api.baseUrl.toString(),
+    configuredHousehold,
+    if (_startsFromFirstRun) 'first-run',
+  ]);
   String get _scope => jsonEncode([_environment, household]);
   String get _setupKey => 'spira.setup.v1.$_environment';
   String get _snapshotKey => 'spira.snapshot.v1.$_scope';
@@ -194,6 +202,28 @@ class AppController extends ChangeNotifier {
       if (episode.status != wire.EpisodeStatus.CLOSED) ...cardsFor(episode),
   ];
 
+  Iterable<({wire.Card card, wire.LineElement line})> linesForDevice(
+    wire.Device device,
+  ) sync* {
+    for (final card in activeCards) {
+      if (card.stopped || isMemory(card)) continue;
+      final rationale = _rationales[card.episodeId];
+      if (rationale == null) continue;
+      final tasks = {
+        for (final task in rationale.tasks)
+          if (task.cardId == card.cardId &&
+              task.devices.any((entry) =>
+                  entry.id == device.id &&
+                  entry.type == device.type &&
+                  (entry.room == null || entry.room == device.room)))
+            task.taskId,
+      };
+      for (final line in card.lines) {
+        if (tasks.contains(line.taskId)) yield (card: card, line: line);
+      }
+    }
+  }
+
   List<MemoryDate> get memoryDates => [
     for (final row in _episodeHistory.values)
       if (row.status == wire.EpisodeStatus.CLOSED && row.cardIds.isNotEmpty)
@@ -293,7 +323,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _restore() async {
-    final saved = await store.read(_setupKey);
+    final saved = _startsFromFirstRun ? null : await store.read(_setupKey);
     if (saved != null) {
       final setup = jsonDecode(saved) as Map<String, dynamic>;
       household = setup['household'] as String?;
@@ -309,7 +339,7 @@ class AppController extends ChangeNotifier {
         connectionCode = await store.read(_connectionKey);
         if (connectionCode?.isEmpty == true) connectionCode = null;
       }
-    } else if (configuredHousehold != null) {
+    } else if (configuredHousehold != null && !_startsFromFirstRun) {
       household = configuredHousehold;
       step = SetupStep.ready;
     }

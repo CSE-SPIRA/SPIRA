@@ -39,7 +39,10 @@ void main() {
   }
   const calendarClientId = String.fromEnvironment('SPIRA_GOOGLE_CLIENT_ID');
   const household = String.fromEnvironment('SPIRA_HOUSEHOLD_ID');
-  const peer = String.fromEnvironment('SPIRA_PEER', defaultValue: 'fixture');
+  const peer = String.fromEnvironment('SPIRA_PEER', defaultValue: 'server');
+  const previewProxy = String.fromEnvironment('SPIRA_PREVIEW_PROXY') == '1';
+  const firstRun = String.fromEnvironment('SPIRA_FIRST_RUN') == '1';
+  const fixture = peer == 'fixture' || previewProxy;
   const buildToken = String.fromEnvironment('SPIRA_FIXTURE_APP_TOKEN');
   final api = AppApi(baseUrl);
   if (buildToken.isNotEmpty) api.token = buildToken;
@@ -54,8 +57,9 @@ void main() {
         api: api,
         platform: android ? AndroidBridge() : null,
         store: PreferencesAppStore(),
-        browserPreview: kIsWeb,
-        fixture: peer != 'server',
+        browserPreview: kIsWeb && fixture,
+        fixture: fixture,
+        firstRun: firstRun,
         configuredHousehold: household.isEmpty ? null : household,
         readCalendar: reader?.call,
         disconnectCalendar: reader?.disconnect,

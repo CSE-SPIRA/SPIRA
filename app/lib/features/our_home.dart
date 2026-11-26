@@ -2,8 +2,11 @@
 import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
+import '../design_tokens.g.dart';
 import '../korean_text.dart';
+import 'sample_devices.dart';
 import 'setup.dart';
+import 'status_badge.dart';
 
 class OurHome extends StatelessWidget {
   const OurHome(this.app, {super.key});
@@ -12,8 +15,19 @@ class OurHome extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
+    padding: const EdgeInsets.fromLTRB(
+      DesignTokens.space20,
+      DesignTokens.space12,
+      DesignTokens.space20,
+      DesignTokens.space32,
+    ),
     children: [
+      KoreanText('기기', style: Theme.of(context).textTheme.headlineMedium),
+      const SizedBox(height: DesignTokens.space8),
+      for (final error in app.controlErrors.values.toSet())
+        StatusMessage(error),
+      SampleDevices(app: app),
+      const Divider(height: DesignTokens.space32),
       HouseholdTypesForm(
         app,
         title: '가구 유형',
@@ -37,10 +51,6 @@ class OurHome extends StatelessWidget {
         ),
       ),
       if (app.calendarError case final error?) StatusMessage(error),
-      const Divider(height: 36),
-      KoreanText('기기', style: Theme.of(context).textTheme.titleLarge),
-      const SizedBox(height: 5),
-      const KoreanText(devicesConnectionText),
     ],
   );
 }

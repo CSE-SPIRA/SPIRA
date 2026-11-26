@@ -174,7 +174,7 @@ def run(args):
                 return None
 
         wait_for(proxy_ready, "the browser proxy", timeout=10)
-        defines = fixture_defines(args.proxy_port, household)
+        defines = fixture_defines(args.proxy_port, household, first_run=args.first_run)
 
         def supervise(process):
             while process.poll() is None:
@@ -211,6 +211,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkout", type=Path, default=APP.parent,
                         help="checkout for the demo stack (defaults to this script's repository root)")
+    parser.add_argument("--first-run", action="store_true", help="start at onboarding with no household")
     parser.add_argument("--build-serve", action="store_true", help="build and serve web without opening Chrome")
     parser.add_argument("--stack-log", type=Path, help="demo-up output for reusing a manually started stack")
     parser.add_argument("--demo-port", type=port, default=8730, help="Simulator port for the demo stack")

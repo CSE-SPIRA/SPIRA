@@ -35,3 +35,21 @@ class StatusBadge extends StatelessWidget {
     ],
   );
 }
+
+class StatusMessage extends StatelessWidget {
+  const StatusMessage(this.text, {super.key});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    container: true,
+    label: text,
+    liveRegion: true,
+    excludeSemantics: true,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: KoreanText(text),
+    ),
+  );
+}

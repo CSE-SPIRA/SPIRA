@@ -4,6 +4,7 @@ import 'dart:io';
 
 // ignore: deprecated_member_use
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show SynchronousFuture;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -291,6 +292,13 @@ AppController controller(
   readCalendar: calendar,
 );
 
+class TestAppAssets extends CachingAssetBundle {
+  @override
+  Future<ByteData> load(String key) => key == 'assets/sample-home.json'
+      ? SynchronousFuture(ByteData.sublistView(File(key).readAsBytesSync()))
+      : rootBundle.load(key);
+}
+
 Future<void> openApp(
   WidgetTester tester,
   AppController app, {
@@ -300,7 +308,9 @@ Future<void> openApp(
   tester.view.physicalSize = size;
   addTearDown(tester.view.resetDevicePixelRatio);
   addTearDown(tester.view.resetPhysicalSize);
-  await tester.pumpWidget(SpiraApp(app: app));
+  await tester.pumpWidget(
+    DefaultAssetBundle(bundle: TestAppAssets(), child: SpiraApp(app: app)),
+  );
   await tester.pumpAndSettle();
 }
 
@@ -1267,8 +1277,7 @@ void main() {
       const queued = '연결되면 공유한 주문을 보낼게요.';
       await openApp(tester, open(), size: const Size(412, 1350));
       await tapTab(tester, '우리 집');
-      await tester.scrollUntilVisible(find.text('집을 연결하면 기기가 보여요'), 150);
-      expect(find.text('집을 연결하면 기기가 보여요'), findsOneWidget);
+      expect(find.text('예시 집'), findsOneWidget);
 
       peer.unavailable = true;
       await tester.pumpWidget(const SizedBox.shrink());
@@ -1279,8 +1288,7 @@ void main() {
       expect(find.text('완료'), findsWidgets);
       await tapTab(tester, '우리 집');
       expect(find.text(offline).hitTestable(), findsOneWidget);
-      await tester.scrollUntilVisible(find.text('집을 연결하면 기기가 보여요'), 150);
-      expect(find.text('집을 연결하면 기기가 보여요'), findsOneWidget);
+      expect(find.text('예시 집'), findsOneWidget);
       expect(find.textContaining('집 기기 목록을 받지 못'), findsNothing);
       await tapTab(tester, '메인');
 
@@ -1480,7 +1488,7 @@ void main() {
     expect(find.text('읽은 품목 9개'), findsOneWidget);
     expect(mainCards, findsNWidgets(2));
     await tapTab(tester, '우리 집');
-    expect(find.text('집을 연결하면 기기가 보여요'), findsOneWidget);
+    expect(find.text('예시 집'), findsOneWidget);
     expect(find.text('우리 집 접속 키 입력'), findsNothing);
   });
 
@@ -1536,7 +1544,7 @@ void main() {
     await openApp(tester, controller(peer, setup: true, store: store));
     expect(find.text(code), findsOneWidget);
     await tapText(tester, '다음');
-    expect(find.text('집을 연결하면 기기가 보여요'), findsOneWidget);
+    expect(find.text('예시 집'), findsOneWidget);
     await tapText(tester, '저장');
     expect(store.values.values, isNot(contains(code)));
     expect(find.text('메인'), findsOneWidget);
@@ -2012,7 +2020,7 @@ void main() {
       expect(peer.profiles.single, {
         'household_types': ['2인'],
       });
-      expect(find.text('집을 연결하면 기기가 보여요'), findsOneWidget);
+      expect(find.text('예시 집'), findsOneWidget);
       final samples = peer.calendars.single;
       expect(samples.events.first.title, '생일 파티');
       await tapText(tester, 'Google 연결');
@@ -2154,6 +2162,125 @@ void main() {
     expect(app.currentOrderId, 'ep_9150');
     await tapTab(tester, '캘린더');
     expect(find.byKey(const ValueKey('memory-dot-ep_9031')), findsOneWidget);
+  });
+
+  testWidgets('AP-AT-9 groups sample devices and turns off their matched card line', (
+    tester,
+  ) async {
+    final running = fixture('card.v1.json');
+    lines(running).first['state'] = 'running';
+    final peer = Peer()
+      ..episodes['ep_9031'] = (fixture('episode.json')
+        ..['status'] = 'notified')
+      ..cards = [running];
+    final rationale = peer.rationales['ep_9031']!;
+    (rationale['evidence'] as Map)['kb_note'] = 'Hidden inventory evidence';
+    final reply = Completer<http.Response>();
+    peer.reaction = (_) => reply.future;
+    final app = controller(peer);
+    await openApp(tester, app, size: const Size(390, 844));
+    await tapTab(tester, '우리 집');
+    for (final room in ['현관', '거실', '주방']) {
+      final group = find.byKey(ValueKey('device-room-$room'));
+      expect(find.descendant(of: group, matching: find.text(room)), findsOneWidget);
+    }
+    final cleaner = find.byKey(const ValueKey('sample-device-cleaner_01'));
+    final living = find.byKey(const ValueKey('device-room-거실'));
+    expect(find.descendant(of: living, matching: cleaner), findsOneWidget);
+    expect(find.descendant(of: cleaner, matching: find.text('로봇청소기')), findsOneWidget);
+    expect(find.descendant(of: cleaner, matching: find.byIcon(Icons.circle_outlined)), findsOneWidget);
+    final kitchen = find.byKey(const ValueKey('device-room-주방'));
+    expect(find.descendant(of: kitchen, matching: find.text('전기포트')), findsOneWidget);
+    expect(find.text('Hidden inventory evidence'), findsNothing);
+    final matchingSwitch = find.descendant(of: cleaner, matching: find.byType(Switch));
+    expect(tester.widget<Switch>(matchingSwitch).onChanged, isNull);
+    expect(find.text('집 연결 후'), findsNWidgets(7));
+    final status = find.descendant(of: cleaner, matching: find.textContaining('지금:'));
+    final line = lines(running).first;
+    expect(find.descendant(of: cleaner, matching: find.text('지금: ${line['text']} · 진행 중')), findsOneWidget);
+
+    final off = find.descendant(of: cleaner, matching: find.widgetWithText(TextButton, '끄기'));
+    await tester.tap(off);
+    await tester.pump();
+    final pending = find.descendant(of: cleaner, matching: find.widgetWithText(TextButton, '요청함'));
+    expect(pending, findsOneWidget);
+    expect(tester.widget<TextButton>(pending).onPressed, isNull);
+    expect(peer.reactions.single.$1, 'nc_331');
+    expect(peer.reactions.single.$2, {
+      'reaction': 'line_off',
+      'task_id': line['task_id'],
+    });
+    expect(tester.widget<Text>(status).data, endsWith('진행 중'));
+
+    final updated = phase(running, 1);
+    lines(updated).first['state'] = 'off';
+    peer.cards = [updated];
+    reply.complete(Peer.response(updated));
+    await tester.pumpAndSettle();
+    expect(pending, findsNothing);
+    expect(tester.widget<Text>(status).data, endsWith('꺼짐'));
+    expect(tester.widget<TextButton>(off).onPressed, isNull);
+    expect(peer.requests.every((request) =>
+      request.url.origin == 'https://test.invalid' &&
+      request.url.path.startsWith('/v1/') &&
+      !request.url.path.startsWith('/v1/hub/') &&
+      !request.url.path.startsWith('/v1/sim/')), isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('AP-AT-1 first-run fixture ignores a configured and saved household', (
+    tester,
+  ) async {
+    final peer = Peer();
+    final store = TestStore();
+    final previous = controller(peer, store: store);
+    await openApp(tester, previous);
+    await previous.updateHousehold({'2인'});
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox.shrink());
+    final initialRequests = peer.requests.length;
+
+    final app = AppController(
+      api: peer.client(),
+      platform: null,
+      store: store,
+      fixture: true,
+      browserPreview: true,
+      firstRun: true,
+      configuredHousehold: 'h_042',
+    );
+    await openApp(tester, app, size: const Size(390, 844));
+    expect(app.household, isNull);
+    expect(find.text('Google 캘린더'), findsOneWidget);
+    expect(peer.requests, hasLength(initialRequests));
+    await tapText(tester, '건너뛰기');
+    await tapText(tester, '2인');
+    await tapText(tester, '부부·커플');
+    final create = find.widgetWithText(FilledButton, '우리 집 만들기');
+    await tester.scrollUntilVisible(create, 200);
+    await tapText(tester, '우리 집 만들기');
+    final code = fixture('household.created.json')['hub_api_key'] as String;
+    expect(find.text(code), findsOneWidget);
+    await tapText(tester, '다음');
+    expect(find.text('예시 집'), findsOneWidget);
+    expect(find.text('로봇청소기'), findsOneWidget);
+    expect(find.text('냉장고'), findsOneWidget);
+    expect(tester.widgetList<Switch>(find.byType(Switch)), hasLength(7));
+    expect(tester.widgetList<Switch>(find.byType(Switch))
+        .every((control) => control.onChanged == null), isTrue);
+    expect(find.text('끄기'), findsNothing);
+    await tapText(tester, '저장');
+    expect(find.byKey(const ValueKey('home-tabs')), findsOneWidget);
+    expect(find.text('예시 주문으로 공유'), findsOneWidget);
+    expect(app.household, 'h_042');
+    expect(peer.requests.skip(initialRequests).where((request) =>
+        request.method == 'POST' && request.url.path == '/v1/households'), hasLength(1));
+    expect(peer.profiles.last, {'household_types': ['2인', '부부·커플']});
+    expect(peer.requests.skip(initialRequests).every((request) =>
+        request.url.origin == 'https://test.invalid' &&
+        request.url.path.startsWith('/v1/households') &&
+        !request.url.path.contains('/devices')), isTrue);
+    expect(tester.takeException(), isNull);
   });
 
 }

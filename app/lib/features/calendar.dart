@@ -7,7 +7,7 @@ import '../design_tokens.g.dart';
 import '../korean_text.dart';
 import 'labels.dart';
 import 'memory_sheet.dart';
-import 'setup.dart';
+import 'status_badge.dart';
 
 class PreparationCalendar extends StatefulWidget {
   const PreparationCalendar(this.app, {super.key});
