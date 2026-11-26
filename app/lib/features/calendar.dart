@@ -3,87 +3,319 @@ import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
 import '../contracts.dart' as wire;
+import '../design_tokens.g.dart';
 import '../korean_text.dart';
 import 'labels.dart';
 import 'memory_sheet.dart';
-import 'setup.dart';
+import 'status_badge.dart';
 
-class PreparationCalendar extends StatelessWidget {
+class PreparationCalendar extends StatefulWidget {
   const PreparationCalendar(this.app, {super.key});
 
   final AppController app;
 
   @override
+  State<PreparationCalendar> createState() => _PreparationCalendarState();
+}
+
+class _PreparationCalendarState extends State<PreparationCalendar> {
+  AppController get app => widget.app;
+  DateTime get _today => seoulDay(DateTime.now().toIso8601String());
+  late DateTime _selected = app.showsSampleCalendar
+      ? seoulDay(app.displayCalendar.events.first.start)
+      : _today;
+  late DateTime _month = DateTime.utc(_selected.year, _selected.month);
+
+  void _showMonth(int offset) => setState(() {
+    _month = DateTime.utc(_month.year, _month.month + offset);
+    final today = _today;
+    _selected = today.year == _month.year && today.month == _month.month
+        ? today
+        : _month;
+  });
+
+  @override
   Widget build(BuildContext context) {
-    final now = DateTime.now().toUtc();
-    final today = seoulDay(now.toIso8601String());
-    final horizon = now.add(const Duration(days: 14));
-    final future = <DateTime, List<wire.EventElement>>{};
-    final events = [...app.googleCalendar.events]
+    final theme = Theme.of(context);
+    final today = _today;
+    final firstColumn = _month.weekday % 7;
+    final days = DateTime.utc(_month.year, _month.month + 1, 0).day;
+    final rows = (firstColumn + days + 6) ~/ 7;
+    final events = [...app.displayCalendar.events]
       ..sort(
         (a, b) => DateTime.parse(a.start).compareTo(DateTime.parse(b.start)),
       );
-    for (final event in events) {
-      if (!DateTime.parse(event.end).isAfter(now) ||
-          !DateTime.parse(event.start).isBefore(horizon)) {
-        continue;
-      }
-      final start = seoulDay(event.start);
-      final firstDay = start.isBefore(today) ? today : start;
-      final eventEnd = DateTime.parse(event.end);
-      final end = eventEnd.isBefore(horizon) ? eventEnd : horizon;
-      for (
-        var day = firstDay;
-        day.subtract(const Duration(hours: 9)).isBefore(end);
-        day = day.add(const Duration(days: 1))
-      ) {
-        (future[day] ??= []).add(event);
-      }
+    final dayEvents = <DateTime, List<wire.EventElement>>{};
+    for (var number = 1; number <= days; number++) {
+      final day = DateTime.utc(_month.year, _month.month, number);
+      final midnight = day.subtract(const Duration(hours: 9));
+      final tomorrow = midnight.add(const Duration(days: 1));
+      dayEvents[day] = events
+          .where(
+            (event) =>
+                DateTime.parse(event.start).isBefore(tomorrow) &&
+                DateTime.parse(event.end).isAfter(midnight),
+          )
+          .toList();
     }
-    final past = <DateTime, List<MemoryDate>>{};
+    final memories = <DateTime, List<MemoryDate>>{};
     for (final memory in app.memoryDates) {
       final day = seoulDay(memory.startsAt);
-      if (!day.isAfter(today)) (past[day] ??= []).add(memory);
+      (memories[day] ??= []).add(memory);
     }
-    final upcomingDays = future.keys.toList()..sort();
-    final historyDays =
-        past.keys.where((day) => !future.containsKey(day)).toList()
-          ..sort((a, b) => b.compareTo(a));
     return RefreshIndicator(
       onRefresh: () => Future.wait([app.resendCalendar(), app.sync()]),
       child: ListView(
-        key: const PageStorageKey('calendar'),
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
+        padding: const EdgeInsets.fromLTRB(
+          DesignTokens.space12,
+          DesignTokens.space12,
+          DesignTokens.space12,
+          DesignTokens.space24,
+        ),
         children: [
-          if (app.calendarError case final error?) StatusMessage(error),
-          if (upcomingDays.isEmpty && historyDays.isEmpty)
-            const KoreanText('표시할 일정과 기억이 없어요'),
-          for (final day in [...upcomingDays, ...historyDays])
-            _CalendarDay(
-              day: day,
-              events: future[day] ?? const [],
-              memories: past[day] ?? const [],
-              onMemory: (memory) => _openMemory(context, memory),
+          Row(
+            children: [
+              Expanded(
+                child: KoreanText(
+                  '${_month.year}년 ${_month.month}월',
+                  style: theme.textTheme.headlineMedium,
+                ),
+              ),
+              TextButton(
+                onPressed: () => setState(() {
+                  _selected = today;
+                  _month = DateTime.utc(today.year, today.month);
+                }),
+                child: const KoreanText('오늘'),
+              ),
+              IconButton(
+                tooltip: '이전 달',
+                onPressed: () => _showMonth(-1),
+                icon: const Icon(Icons.chevron_left),
+              ),
+              IconButton(
+                tooltip: '다음 달',
+                onPressed: () => _showMonth(1),
+                icon: const Icon(Icons.chevron_right),
+              ),
+            ],
+          ),
+          if (app.showsSampleCalendar)
+            Padding(
+              padding: const EdgeInsets.only(bottom: DesignTokens.space8),
+              child: KoreanText('예시 일정', style: theme.textTheme.bodySmall),
             ),
+          if (app.calendarError case final error?) StatusMessage(error),
+          Row(
+            children: [
+              for (final name in ['일', '월', '화', '수', '목', '금', '토'])
+                Expanded(
+                  child: KoreanText(
+                    name,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: DesignTokens.space8),
+          for (var row = 0; row < rows; row++)
+            Row(
+              children: [
+                for (var col = 0; col < 7; col++)
+                  Expanded(
+                    child: _gridCell(
+                      row * 7 + col - firstColumn + 1,
+                      days,
+                      today,
+                      dayEvents,
+                      memories,
+                    ),
+                  ),
+              ],
+            ),
+          const SizedBox(height: DesignTokens.space20),
+          _DayAgenda(
+            day: _selected,
+            events: dayEvents[_selected] ?? const [],
+            memories: memories[_selected] ?? const [],
+            onMemory: (memory) => showModalBottomSheet<void>(
+              context: context,
+              isScrollControlled: true,
+              useSafeArea: true,
+              showDragHandle: true,
+              builder: (context) => _CalendarMemory(app, memory),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  void _openMemory(BuildContext context, MemoryDate memory) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (context) => _CalendarMemory(app, memory),
+  Widget _gridCell(
+    int number,
+    int days,
+    DateTime today,
+    Map<DateTime, List<wire.EventElement>> events,
+    Map<DateTime, List<MemoryDate>> memories,
+  ) {
+    if (number < 1 || number > days) return const SizedBox.shrink();
+    final day = DateTime.utc(_month.year, _month.month, number);
+    return _MonthDay(
+      key: ValueKey(day.toIso8601String().substring(0, 10)),
+      day: day,
+      today: day == today,
+      selected: day == _selected,
+      events: events[day] ?? const [],
+      memories: memories[day] ?? const [],
+      onTap: () => setState(() => _selected = day),
     );
   }
 }
 
-class _CalendarDay extends StatelessWidget {
-  const _CalendarDay({
+String _eventTitle(wire.EventElement event) =>
+    event.title.isEmpty ? '일정' : event.title;
+
+String _eventLabel(wire.EventElement event) {
+  final start = seoulClock(event.start);
+  final end = seoulClock(event.end);
+  return start == '00:00' && end == '00:00'
+      ? '${_eventTitle(event)} · 종일'
+      : '${_eventTitle(event)} $start–$end';
+}
+
+class _MonthDay extends StatelessWidget {
+  const _MonthDay({
+    super.key,
+    required this.day,
+    required this.today,
+    required this.selected,
+    required this.events,
+    required this.memories,
+    required this.onTap,
+  });
+
+  final DateTime day;
+  final bool today;
+  final bool selected;
+  final List<wire.EventElement> events;
+  final List<MemoryDate> memories;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final date = '${day.month}월 ${day.day}일';
+    return Semantics(
+      selected: selected,
+      button: true,
+      label:
+          '${today ? '오늘, ' : ''}$date · 일정 ${events.length}개 · 기억 ${memories.length}개',
+      child: Material(
+        color: selected ? DesignTokens.soft : Colors.transparent,
+        shape: Border(top: BorderSide(color: colors.outlineVariant)),
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+            height: 44 + MediaQuery.textScalerOf(context).scale(24),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(3),
+                  child: DecoratedBox(
+                    key: today ? const ValueKey('calendar-today') : null,
+                    decoration: BoxDecoration(
+                      color: today ? colors.primary : Colors.transparent,
+                      borderRadius: BorderRadius.circular(
+                        DesignTokens.radiusPill,
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 5),
+                      child: KoreanText(
+                        '${day.day}',
+                        maxLines: 1,
+                        overflow: TextOverflow.clip,
+                        style: TextStyle(
+                          fontSize: DesignTokens.size12,
+                          fontWeight: FontWeight.w600,
+                          color: today ? colors.onPrimary : colors.onSurface,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                if (events.firstOrNull case final event?)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    child: Tooltip(
+                      message: _eventLabel(event),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final compact = constraints.maxWidth < 115;
+                          return Container(
+                            key: ValueKey('event-${event.id}'),
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(horizontal: 2),
+                            decoration: BoxDecoration(
+                              color: colors.primaryContainer,
+                              borderRadius: BorderRadius.circular(
+                                DesignTokens.radius6,
+                              ),
+                            ),
+                            child: KoreanText(
+                              compact ? _eventTitle(event) : _eventLabel(event),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: colors.onPrimaryContainer,
+                                fontSize: compact ? 10 : DesignTokens.size12,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                SizedBox(
+                  height: DesignTokens.space12,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      for (final memory in memories.take(3))
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 1),
+                          child: Icon(
+                            Icons.circle,
+                            key: ValueKey('memory-dot-${memory.episodeId}'),
+                            size: 5,
+                            color: colors.secondary,
+                          ),
+                        ),
+                      if (events.length > 1)
+                        KoreanText(
+                          '+${events.length - 1}',
+                          maxLines: 1,
+                          style: TextStyle(
+                            fontSize: 9,
+                            color: colors.onSurfaceVariant,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DayAgenda extends StatelessWidget {
+  const _DayAgenda({
     required this.day,
     required this.events,
     required this.memories,
@@ -98,48 +330,42 @@ class _CalendarDay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final date = '${day.month}월 ${day.day}일';
     return Padding(
-      padding: const EdgeInsets.only(bottom: 15),
+      padding: const EdgeInsets.symmetric(horizontal: DesignTokens.space8),
       child: Column(
-        key: ValueKey(day.toIso8601String().substring(0, 10)),
-        crossAxisAlignment: CrossAxisAlignment.start,
-        spacing: 8,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        spacing: DesignTokens.space8,
         children: [
-          KoreanText(date, style: theme.textTheme.titleMedium),
+          KoreanText(
+            '${day.month}월 ${day.day}일',
+            style: theme.textTheme.titleLarge,
+          ),
+          if (events.isEmpty && memories.isEmpty)
+            const KoreanText('이날의 일정과 기억이 없어요.'),
           for (final event in events)
-            Align(
-              key: ValueKey('event-${event.id}'),
-              alignment: Alignment.centerLeft,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(6),
-                  color: theme.colorScheme.primaryContainer,
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 7,
-                  ),
-                  child: KoreanText(
-                    '${seoulClock(event.start)}–${seoulClock(event.end)}  ${event.title.isEmpty ? '일정' : event.title}',
-                  ),
-                ),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primaryContainer,
+                borderRadius: BorderRadius.circular(DesignTokens.radius8),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(DesignTokens.space8),
+                child: KoreanText(_eventLabel(event)),
               ),
             ),
-          if (memories.isNotEmpty)
-            Wrap(
-              children: [
-                for (final memory in memories)
-                  IconButton(
-                    key: ValueKey('memory-dot-${memory.episodeId}'),
-                    icon: const Icon(Icons.circle, size: 10),
-                    tooltip: '$date 준비 기억 · ${seoulClock(memory.startsAt)}',
-                    onPressed: () => onMemory(memory),
-                  ),
-              ],
+          for (final memory in memories)
+            ListTile(
+              key: ValueKey('calendar-memory-${memory.episodeId}'),
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                Icons.circle,
+                size: 8,
+                color: theme.colorScheme.secondary,
+              ),
+              title: const KoreanText('준비 기억'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => onMemory(memory),
             ),
-          const Divider(height: 1),
         ],
       ),
     );
@@ -170,7 +396,10 @@ class _CalendarMemoryState extends State<_CalendarMemory> {
               AsyncSnapshot(:final data?) => MemorySheet(
                 rationale: data.rationale,
                 episode: data.episode,
-                startsAt: widget.memory.startsAt,
+                startsAt: widget.app.memoryStart(
+                  data.episode.episodeId,
+                  data.episode.cardIds,
+                ),
                 cardIds: data.episode.cardIds,
               ),
               AsyncSnapshot(hasError: true) => Column(

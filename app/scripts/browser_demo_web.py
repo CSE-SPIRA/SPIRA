@@ -25,13 +25,14 @@ def origin(port):
     return f"http://{LOOPBACK}:{port}"
 
 
-def fixture_defines(proxy_port, household, _key=None):
+def fixture_defines(proxy_port, household, _key=None, *, first_run=False):
     # The stack launcher also uses this helper for its existing call signature.
     return {
         "SPIRA_BASE_URL": origin(proxy_port),
         "SPIRA_HOUSEHOLD_ID": household,
         "SPIRA_PEER": "fixture",
         "SPIRA_FIXTURE_APP_TOKEN": APP_TOKEN,
+        **({"SPIRA_FIRST_RUN": "1"} if first_run else {}),
     }
 
 

@@ -3,9 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app_controller.dart';
+import '../design_tokens.g.dart';
 import '../korean_text.dart';
-
-const devicesConnectionText = '집을 연결하면 기기가 보여요';
+import 'sample_devices.dart';
+import 'status_badge.dart';
 
 class SetupScreen extends StatelessWidget {
   const SetupScreen(this.app, {super.key});
@@ -13,25 +14,34 @@ class SetupScreen extends StatelessWidget {
   final AppController app;
 
   @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
-    children: [
-      if (app.setupError case final error? when app.step != SetupStep.household)
-        StatusMessage(error),
-      switch (app.step) {
-        SetupStep.calendar => _calendar(context),
-        SetupStep.household => HouseholdTypesForm(
-          app,
-          title: '가구 유형',
-          button: '우리 집 만들기',
-          onSave: app.submitHousehold,
-        ),
-        SetupStep.connection => _connection(context),
-        SetupStep.devices => _devices(context),
-        SetupStep.ready => const SizedBox.shrink(),
-      },
-    ],
-  );
+  Widget build(BuildContext context) {
+    if (app.step == SetupStep.devices) return _devices(context);
+    return ListView(
+      key: ValueKey(app.step),
+      padding: const EdgeInsets.fromLTRB(
+        DesignTokens.space20,
+        DesignTokens.space16,
+        DesignTokens.space20,
+        DesignTokens.space32,
+      ),
+      children: [
+        if (app.setupError case final error?
+            when app.step != SetupStep.household)
+          StatusMessage(error),
+        switch (app.step) {
+          SetupStep.calendar => _calendar(context),
+          SetupStep.household => HouseholdTypesForm(
+            app,
+            title: '가구 유형',
+            button: '우리 집 만들기',
+            onSave: app.submitHousehold,
+          ),
+          SetupStep.connection => _connection(context),
+          _ => const SizedBox.shrink(),
+        },
+      ],
+    );
+  }
 
   Widget _calendar(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -41,17 +51,23 @@ class SetupScreen extends StatelessWidget {
         'Google 캘린더',
         style: Theme.of(context).textTheme.headlineMedium,
       ),
-      const KoreanText('Google 캘린더를 연결하면 향후 14일의 일정을 준비에 참고해요.'),
-      FilledButton(
-        onPressed: app.busy || app.readCalendar == null
-            ? null
-            : () => app.finishCalendar(connect: true),
-        child: const KoreanText('Google 캘린더 연결'),
-      ),
-      TextButton(
-        onPressed: app.busy ? null : () => app.finishCalendar(connect: false),
-        child: const KoreanText('건너뛰기'),
-      ),
+      if (app.readCalendar != null) ...[
+        const KoreanText('앞으로 14일의 일정을 참고해 준비할게요.'),
+        FilledButton(
+          onPressed: app.busy ? null : () => app.finishCalendar(connect: true),
+          child: const KoreanText('Google 캘린더 연결'),
+        ),
+        TextButton(
+          onPressed: app.busy ? null : () => app.finishCalendar(connect: false),
+          child: const KoreanText('건너뛰기'),
+        ),
+      ] else ...[
+        const KoreanText('Google 연결 없이 시작할 수 있어요.'),
+        FilledButton(
+          onPressed: app.busy ? null : () => app.finishCalendar(connect: false),
+          child: const KoreanText('건너뛰기'),
+        ),
+      ],
     ],
   );
 
@@ -65,7 +81,19 @@ class SetupScreen extends StatelessWidget {
       ),
       const KoreanText('이 코드를 집 허브에 입력하세요'),
       if (app.connectionCode case final code?) ...[
-        SelectableText(code, style: Theme.of(context).textTheme.titleMedium),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: DesignTokens.greenSoft,
+            borderRadius: BorderRadius.circular(DesignTokens.radius12),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(DesignTokens.space16),
+            child: SelectableText(
+              code,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          ),
+        ),
         OutlinedButton.icon(
           icon: const Icon(Icons.copy_rounded),
           label: const KoreanText('연결 코드 복사'),
@@ -87,13 +115,32 @@ class SetupScreen extends StatelessWidget {
 
   Widget _devices(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
-    spacing: 12,
     children: [
-      KoreanText('기기', style: Theme.of(context).textTheme.headlineMedium),
-      const KoreanText(devicesConnectionText),
-      FilledButton(
-        onPressed: app.busy ? null : app.finishDevices,
-        child: const KoreanText('저장'),
+      Expanded(
+        child: ListView(
+          padding: const EdgeInsets.all(DesignTokens.space20),
+          children: [
+            KoreanText(
+              '집 기기 확인',
+              style: Theme.of(context).textTheme.headlineMedium,
+            ),
+            const SizedBox(height: DesignTokens.space8),
+            const SampleDevices(),
+            if (app.setupError case final error?) StatusMessage(error),
+          ],
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(
+          DesignTokens.space20,
+          DesignTokens.space8,
+          DesignTokens.space20,
+          DesignTokens.space16,
+        ),
+        child: FilledButton(
+          onPressed: app.busy ? null : app.finishDevices,
+          child: const KoreanText('저장'),
+        ),
       ),
     ],
   );
@@ -189,22 +236,4 @@ class _HouseholdTypesFormState extends State<HouseholdTypesForm> {
       ],
     );
   }
-}
-
-class StatusMessage extends StatelessWidget {
-  const StatusMessage(this.text, {super.key});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Semantics(
-    container: true,
-    label: text,
-    liveRegion: true,
-    excludeSemantics: true,
-    child: Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: KoreanText(text),
-    ),
-  );
 }

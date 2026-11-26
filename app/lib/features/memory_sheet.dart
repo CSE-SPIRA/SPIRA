@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import '../contracts.dart' as wire;
+import '../design_tokens.g.dart';
 import '../korean_text.dart';
 import 'labels.dart';
 import 'order_extraction.dart';
@@ -13,28 +14,43 @@ class MemorySheet extends StatelessWidget {
     required this.cardIds,
     this.episode,
     this.startsAt,
+    this.onAcknowledge,
   });
 
-  final wire.Rationale rationale;
+  final wire.Rationale? rationale;
   final List<String> cardIds;
   final wire.Episode? episode;
   final String? startsAt;
+  final VoidCallback? onAcknowledge;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Card(
+      color: DesignTokens.paper,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(DesignTokens.radius16),
+        side: BorderSide(color: theme.colorScheme.outlineVariant),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(DesignTokens.space16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           spacing: 12,
           children: [
-            KoreanText('이렇게 기억할게요', style: theme.textTheme.titleLarge),
+            KoreanText('이렇게 기억할게요', style: theme.textTheme.headlineMedium),
             if (episode case final order?) OrderItems(episode: order),
             if (startsAt case final start?)
               KoreanText(seoulDateTime(start, fullDate: true)),
-            for (final cardId in cardIds) _MemoryRecord(rationale, cardId),
+            if (rationale case final result?)
+              for (final cardId in cardIds) _MemoryRecord(result, cardId)
+            else
+              const KoreanText('아직 판정 전'),
+            if (onAcknowledge case final acknowledge?)
+              FilledButton(
+                onPressed: acknowledge,
+                child: const KoreanText('확인'),
+              ),
           ],
         ),
       ),

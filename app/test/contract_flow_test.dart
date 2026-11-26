@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show SynchronousFuture;
 // ignore: deprecated_member_use
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,6 +14,7 @@ import 'package:spira_app/app_controller.dart';
 import 'package:spira_app/contracts.dart' as wire;
 import 'package:spira_app/design_tokens.g.dart';
 import 'package:spira_app/main.dart';
+import 'package:spira_app/features/labels.dart';
 import 'package:spira_app/platform/android_bridge.dart';
 import 'package:spira_app/platform/google_calendar.dart';
 import 'package:spira_app/platform/gallery.dart';
@@ -290,6 +292,13 @@ AppController controller(
   readCalendar: calendar,
 );
 
+class TestAppAssets extends CachingAssetBundle {
+  @override
+  Future<ByteData> load(String key) => key == 'assets/sample-home.json'
+      ? SynchronousFuture(ByteData.sublistView(File(key).readAsBytesSync()))
+      : rootBundle.load(key);
+}
+
 Future<void> openApp(
   WidgetTester tester,
   AppController app, {
@@ -299,7 +308,9 @@ Future<void> openApp(
   tester.view.physicalSize = size;
   addTearDown(tester.view.resetDevicePixelRatio);
   addTearDown(tester.view.resetPhysicalSize);
-  await tester.pumpWidget(SpiraApp(app: app));
+  await tester.pumpWidget(
+    DefaultAssetBundle(bundle: TestAppAssets(), child: SpiraApp(app: app)),
+  );
   await tester.pumpAndSettle();
 }
 
@@ -516,7 +527,7 @@ void main() {
     },
   );
 
-  testWidgets('APP-03 skipped calendar stays disconnected after restart', (
+  testWidgets('APP-03 skipped fixture calendar resends samples after restart', (
     tester,
   ) async {
     final peer = Peer();
@@ -545,7 +556,9 @@ void main() {
     await tapTab(tester, '우리 집');
 
     expect(reads, 0);
-    expect(peer.calendars, isEmpty);
+    expect(peer.calendars, hasLength(2));
+    expect(peer.calendars.first.toJson(), peer.calendars.last.toJson());
+    expect(peer.calendars.last.events.first.title, '생일 파티');
     expect(find.text('연결 안 됨'), findsOneWidget);
   });
 
@@ -720,13 +733,7 @@ void main() {
       expect(find.text(explanation), findsNothing);
 
       Finder lineText(Map<String, dynamic> line, String label) {
-        final row = find.byWidgetPredicate(
-          (widget) =>
-              widget is Column &&
-              widget.children.whereType<Text>().any(
-                (text) => text.data == line['text'],
-              ),
-        );
+        final row = find.byKey(ValueKey(('nc_331', line['task_id'] as String)));
         return find.descendant(of: row, matching: find.text(label));
       }
 
@@ -983,6 +990,9 @@ void main() {
       final app = controller(peer);
       await openApp(tester, app);
       final guidance = find.text('설향 딸기 500g (냉장)');
+      expect(guidance, findsNothing);
+      await tester.tap(orderScan);
+      await tester.pumpAndSettle();
       expect(guidance, findsOneWidget);
       expect(
         find.ancestor(of: guidance, matching: find.byType(Card)),
@@ -1267,8 +1277,7 @@ void main() {
       const queued = '연결되면 공유한 주문을 보낼게요.';
       await openApp(tester, open(), size: const Size(412, 1350));
       await tapTab(tester, '우리 집');
-      await tester.scrollUntilVisible(find.text('집을 연결하면 기기가 보여요'), 150);
-      expect(find.text('집을 연결하면 기기가 보여요'), findsOneWidget);
+      expect(find.text('예시 집'), findsOneWidget);
 
       peer.unavailable = true;
       await tester.pumpWidget(const SizedBox.shrink());
@@ -1279,8 +1288,7 @@ void main() {
       expect(find.text('완료'), findsWidgets);
       await tapTab(tester, '우리 집');
       expect(find.text(offline).hitTestable(), findsOneWidget);
-      await tester.scrollUntilVisible(find.text('집을 연결하면 기기가 보여요'), 150);
-      expect(find.text('집을 연결하면 기기가 보여요'), findsOneWidget);
+      expect(find.text('예시 집'), findsOneWidget);
       expect(find.textContaining('집 기기 목록을 받지 못'), findsNothing);
       await tapTab(tester, '메인');
 
@@ -1471,12 +1479,16 @@ void main() {
     expect(mainCards, findsNothing);
 
     await tapText(tester, '예시 주문으로 공유');
+    expect(orderScan, findsOneWidget);
+    expect(find.descendant(of: orderScan, matching: find.byType(Image)), findsOneWidget);
+    expect(find.text('읽은 품목 9개'), findsNothing);
+    await tester.tap(orderScan);
+    await tester.pumpAndSettle();
     expect(find.text('받았어요'), findsOneWidget);
-    expect(find.byType(Image), findsOneWidget);
     expect(find.text('읽은 품목 9개'), findsOneWidget);
     expect(mainCards, findsNWidgets(2));
     await tapTab(tester, '우리 집');
-    expect(find.text('집을 연결하면 기기가 보여요'), findsOneWidget);
+    expect(find.text('예시 집'), findsOneWidget);
     expect(find.text('우리 집 접속 키 입력'), findsNothing);
   });
 
@@ -1532,7 +1544,7 @@ void main() {
     await openApp(tester, controller(peer, setup: true, store: store));
     expect(find.text(code), findsOneWidget);
     await tapText(tester, '다음');
-    expect(find.text('집을 연결하면 기기가 보여요'), findsOneWidget);
+    expect(find.text('예시 집'), findsOneWidget);
     await tapText(tester, '저장');
     expect(store.values.values, isNot(contains(code)));
     expect(find.text('메인'), findsOneWidget);
@@ -1821,7 +1833,7 @@ void main() {
   );
 
   testWidgets(
-    'AP-AT-7 and AP-AT-8 memory replaces the card and moves to its start date',
+    'AP-AT-7 and AP-AT-8 memory stays through close and acknowledgment keeps the dot',
     (tester) async {
       final store = TestStore();
       final peer = Peer()
@@ -1894,20 +1906,33 @@ void main() {
       final rationaleReadsBeforeClose = birthdayRationaleReads().length;
       await app.sync();
       await tester.pumpAndSettle();
-      expect(memory, findsNothing);
-      expect(mainCards, findsNothing);
+      expect(memory, findsOneWidget);
+      expect(card, findsNothing);
+      expect(find.text('확인'), findsOneWidget);
       expect(app.cards, isEmpty);
-      expect(birthdayRationaleReads(), hasLength(rationaleReadsBeforeClose));
+      expect(birthdayRationaleReads(), hasLength(rationaleReadsBeforeClose + 1));
       expect(store.values.values.join(), isNot(contains('Hidden KB example')));
 
       await tester.pumpWidget(const SizedBox.shrink());
       final cuts = controller(peer, store: store);
       await openApp(tester, cuts);
+      expect(memory, findsOneWidget);
+      await tapText(tester, '확인');
+      expect(memory, findsNothing);
+      await cuts.sync();
+      await tester.pumpAndSettle();
+      expect(memory, findsNothing);
       await tapTab(tester, '캘린더');
       final dot = find.byKey(const ValueKey('memory-dot-ep_9031'));
       final date = find.byKey(const ValueKey('2026-10-17'));
       expect(find.descendant(of: date, matching: dot), findsOneWidget);
-      expect(find.byKey(const ValueKey('2026-10-15')), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('2026-10-15')),
+          matching: dot,
+        ),
+        findsNothing,
+      );
       expect(find.byKey(ValueKey('memory-dot-$heldId')), findsNothing);
       expect(
         find.text(rationale['none_reason'] as String? ?? '근거'),
@@ -1922,8 +1947,12 @@ void main() {
         isTrue,
       );
 
+      await tester.tap(date);
+      await tester.pumpAndSettle();
       final requestCount = peer.requests.length;
-      await tester.tap(dot);
+      final memoryEntry = find.byKey(const ValueKey('calendar-memory-ep_9031'));
+      await tester.ensureVisible(memoryEntry);
+      await tester.tap(memoryEntry);
       await tester.pumpAndSettle();
       expect(peer.requests.skip(requestCount).map((r) => r.url.path).toSet(), {
         '/v1/episodes/ep_9031',
@@ -1961,9 +1990,10 @@ void main() {
   }
 
   testWidgets(
-    'Calendar shows only upcoming Google events and Our Home disconnects',
+    'AP-AT-11 Google events replace the synced samples until disconnect',
     (tester) async {
-      final nextDay = DateTime.now().toUtc().add(const Duration(days: 1));
+      final today = seoulDay(DateTime.now().toIso8601String());
+      final eventTime = today.add(const Duration(hours: 10));
       final peer = Peer()
         ..episodes['ep_9031'] = (fixture('episode.json')
           ..['status'] = 'notified')
@@ -1971,8 +2001,8 @@ void main() {
       final event = wire.EventElement(
         id: 'upcoming',
         title: 'Google 일정 제목',
-        start: nextDay.toIso8601String(),
-        end: nextDay.add(const Duration(hours: 1)).toIso8601String(),
+        start: eventTime.toIso8601String(),
+        end: eventTime.add(const Duration(hours: 1)).toIso8601String(),
       );
       var disconnected = false;
       final app = controller(
@@ -1990,11 +2020,15 @@ void main() {
       expect(peer.profiles.single, {
         'household_types': ['2인'],
       });
-      expect(find.text('집을 연결하면 기기가 보여요'), findsOneWidget);
+      expect(find.text('예시 집'), findsOneWidget);
+      final samples = peer.calendars.single;
+      expect(samples.events.first.title, '생일 파티');
       await tapText(tester, 'Google 연결');
-      expect(peer.calendars.single.events.single.title, event.title);
+      expect(peer.calendars, hasLength(2));
+      expect(peer.calendars.last.events.single.title, event.title);
       await tapTab(tester, '캘린더');
       final bar = find.byKey(const ValueKey('event-upcoming'));
+      expect(find.text('예시 일정'), findsNothing);
       expect(
         find.descendant(of: bar, matching: find.textContaining(event.title)),
         findsOneWidget,
@@ -2005,9 +2039,385 @@ void main() {
       await tapTab(tester, '우리 집');
       await tapText(tester, 'Google 연결 해제');
       expect(disconnected, isTrue);
-      expect(peer.calendars.last.events, isEmpty);
+      expect(peer.calendars, hasLength(3));
+      expect(peer.calendars.last.toJson(), samples.toJson());
       await tapTab(tester, '캘린더');
+      expect(find.text('예시 일정'), findsOneWidget);
       expect(bar, findsNothing);
+    },
+  );
+  testWidgets('AP-AT-10 navigates the month grid and selects an event day', (
+    tester,
+  ) async {
+    final peer = Peer();
+    await openApp(tester, controller(peer), size: const Size(390, 844));
+    await tapTab(tester, '캘린더');
+    final birthday = find.byKey(const ValueKey('2026-10-17'));
+    final bar = find.byKey(const ValueKey('event-c1'));
+    const label = '생일 파티 14:00–18:00';
+    expect(find.descendant(of: birthday, matching: bar), findsOneWidget);
+    expect(
+      find.descendant(of: bar, matching: find.text('생일 파티')),
+      findsOneWidget,
+    );
+    expect(find.byTooltip(label), findsOneWidget);
+    expect(peer.calendars.single.events.first.title, '생일 파티');
+    expect(peer.calendars.single.events.first.end, '2026-10-17T18:00:00+09:00');
+
+    await tester.tap(find.byTooltip('다음 달'));
+    await tester.pumpAndSettle();
+    expect(find.text('2026년 11월'), findsOneWidget);
+    expect(bar, findsNothing);
+    await tester.tap(find.byTooltip('이전 달'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('2026-10-20')));
+    await tester.pumpAndSettle();
+    expect(find.text('10월 20일'), findsOneWidget);
+    expect(find.text('예방접종 09:30–10:00'), findsOneWidget);
+    await tapText(tester, '오늘');
+    final date = seoulDay(DateTime.now().toIso8601String());
+    expect(
+      find.descendant(
+        of: find.byKey(ValueKey(date.toIso8601String().substring(0, 10))),
+        matching: find.byKey(const ValueKey('calendar-today')),
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('AP-AT-11 disconnected production sends no sample calendar', (
+    tester,
+  ) async {
+    final peer = Peer();
+    await openApp(tester, controller(peer, fixture: false));
+    await tapTab(tester, '캘린더');
+    expect(find.text('예시 일정'), findsNothing);
+    expect(peer.calendars, isEmpty);
+  });
+
+  testWidgets('AP-AT-12 a card collapses the order and hides item guidance', (
+    tester,
+  ) async {
+    final peer = Peer()
+      ..episodes['ep_9031'] = (fixture('episode.json')
+        ..['status'] = 'judged'
+        ..['card_ids'] = []);
+    final app = controller(peer);
+    await openApp(tester, app);
+    const first = '설향 딸기 500g (냉장)';
+    final orderPanel = find.byKey(const ValueKey('main-order'));
+    final guidance = find.descendant(of: orderPanel, matching: find.text('완료'));
+    expect(orderScan, findsNothing);
+    expect(find.text(first), findsOneWidget);
+    expect(guidance, findsNWidgets(2));
+
+    peer.birthday
+      ..['status'] = 'notified'
+      ..['card_ids'] = ['nc_331'];
+    peer.cards = [fixture('card.v1.json')];
+    await app.sync();
+    await tester.pumpAndSettle();
+    expect(find.text('주문 9개 · $first 외 8개'), findsOneWidget);
+    expect(find.text(first), findsNothing);
+    expect(guidance, findsNothing);
+    expect(mainCards, findsOneWidget);
+    await tester.tap(orderScan);
+    await tester.pumpAndSettle();
+    expect(find.text(first), findsOneWidget);
+    expect(guidance, findsNWidgets(2));
+    await tester.tap(orderScan);
+    await tester.pumpAndSettle();
+    expect(find.text(first), findsNothing);
+    expect(guidance, findsNothing);
+  });
+
+  testWidgets('AP-AT-7 a newly shared order dismisses the closed memory', (
+    tester,
+  ) async {
+    final peer = Peer()
+      ..episodes['ep_9031'] = (fixture('episode.json')..['status'] = 'notified')
+      ..cards = [fixture('card.v1.json')];
+    final platform = TestPlatform();
+    final app = controller(peer, platform: platform);
+    await openApp(tester, app);
+    peer.birthday['status'] = 'closed';
+    peer.rationales['ep_9031'] = fixture('rationale.json');
+    peer.cards = [];
+    await app.sync();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('memory-nc_331')), findsOneWidget);
+
+    peer.upload = (_) async {
+      peer.episodes['ep_9150'] = fixture('episode.json', episode: 'ep_9150');
+      return Peer.response({
+        'episode_id': 'ep_9150',
+        'status': 'received',
+      }, 202);
+    };
+    platform.orders.add(
+      SharedOrder('new-order', '2026-11-04T19:30:41+09:00', [TestImage()]),
+    );
+    await app.sync();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('memory-nc_331')), findsNothing);
+    expect(app.currentOrderId, 'ep_9150');
+    await tapTab(tester, '캘린더');
+    expect(find.byKey(const ValueKey('memory-dot-ep_9031')), findsOneWidget);
+  });
+
+  testWidgets(
+    'AP-AT-9 groups sample devices and turns off their matched card line',
+    (tester) async {
+      final running = fixture('card.v1.json');
+      lines(running).first['state'] = 'running';
+      final peer = Peer()
+        ..episodes['ep_9031'] = (fixture('episode.json')
+          ..['status'] = 'notified')
+        ..cards = [running];
+      final rationale = peer.rationales['ep_9031']!;
+      (rationale['evidence'] as Map)['kb_note'] = 'Hidden inventory evidence';
+      final reply = Completer<http.Response>();
+      peer.reaction = (_) => reply.future;
+      final app = controller(peer);
+      await openApp(tester, app, size: const Size(390, 844));
+      await tapTab(tester, '우리 집');
+      for (final room in ['현관', '거실', '주방']) {
+        final group = find.byKey(ValueKey('device-room-$room'));
+        expect(
+          find.descendant(of: group, matching: find.text(room)),
+          findsOneWidget,
+        );
+      }
+      final cleaner = find.byKey(const ValueKey('sample-device-cleaner_01'));
+      final living = find.byKey(const ValueKey('device-room-거실'));
+      expect(find.descendant(of: living, matching: cleaner), findsOneWidget);
+      expect(
+        find.descendant(of: cleaner, matching: find.text('로봇청소기')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: cleaner,
+          matching: find.byIcon(Icons.circle_outlined),
+        ),
+        findsOneWidget,
+      );
+      final kitchen = find.byKey(const ValueKey('device-room-주방'));
+      expect(
+        find.descendant(of: kitchen, matching: find.text('전기포트')),
+        findsOneWidget,
+      );
+      expect(find.text('Hidden inventory evidence'), findsNothing);
+      final matchingSwitch = find.descendant(
+        of: cleaner,
+        matching: find.byType(Switch),
+      );
+      expect(tester.widget<Switch>(matchingSwitch).onChanged, isNull);
+      expect(find.text('집 연결 후'), findsNWidgets(7));
+      final status = find.descendant(
+        of: cleaner,
+        matching: find.textContaining('지금:'),
+      );
+      final line = lines(running).first;
+      expect(
+        find.descendant(
+          of: cleaner,
+          matching: find.text('지금: ${line['text']} · 진행 중'),
+        ),
+        findsOneWidget,
+      );
+
+      final off = find.descendant(
+        of: cleaner,
+        matching: find.widgetWithText(TextButton, '끄기'),
+      );
+      await tester.tap(off);
+      await tester.pump();
+      final pending = find.descendant(
+        of: cleaner,
+        matching: find.widgetWithText(TextButton, '요청함'),
+      );
+      expect(pending, findsOneWidget);
+      expect(tester.widget<TextButton>(pending).onPressed, isNull);
+      expect(peer.reactions.single.$1, 'nc_331');
+      expect(peer.reactions.single.$2, {
+        'reaction': 'line_off',
+        'task_id': line['task_id'],
+      });
+      expect(tester.widget<Text>(status).data, endsWith('진행 중'));
+
+      final updated = phase(running, 1);
+      lines(updated).first['state'] = 'off';
+      peer.cards = [updated];
+      reply.complete(Peer.response(updated));
+      await tester.pumpAndSettle();
+      expect(pending, findsNothing);
+      expect(tester.widget<Text>(status).data, endsWith('꺼짐'));
+      expect(tester.widget<TextButton>(off).onPressed, isNull);
+      expect(
+        peer.requests.every(
+          (request) =>
+              request.url.origin == 'https://test.invalid' &&
+              request.url.path.startsWith('/v1/') &&
+              !request.url.path.startsWith('/v1/hub/') &&
+              !request.url.path.startsWith('/v1/sim/'),
+        ),
+        isTrue,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'AP-AT-1 first-run fixture ignores a configured and saved household',
+    (tester) async {
+      final peer = Peer();
+      final store = TestStore();
+      final previous = controller(peer, store: store);
+      await openApp(tester, previous);
+      await previous.updateHousehold({'2인'});
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox.shrink());
+      final initialRequests = peer.requests.length;
+
+      final app = AppController(
+        api: peer.client(),
+        platform: null,
+        store: store,
+        fixture: true,
+        browserPreview: true,
+        firstRun: true,
+        configuredHousehold: 'h_042',
+      );
+      await openApp(tester, app, size: const Size(390, 844));
+      expect(app.household, isNull);
+      expect(find.text('Google 캘린더'), findsOneWidget);
+      expect(peer.requests, hasLength(initialRequests));
+      await tapText(tester, '건너뛰기');
+      await tapText(tester, '2인');
+      await tapText(tester, '부부·커플');
+      final create = find.widgetWithText(FilledButton, '우리 집 만들기');
+      await tester.scrollUntilVisible(create, 200);
+      await tapText(tester, '우리 집 만들기');
+      final code = fixture('household.created.json')['hub_api_key'] as String;
+      expect(find.text(code), findsOneWidget);
+      await tapText(tester, '다음');
+      expect(find.text('예시 집'), findsOneWidget);
+      expect(find.text('로봇청소기'), findsOneWidget);
+      expect(find.text('냉장고'), findsOneWidget);
+      expect(tester.widgetList<Switch>(find.byType(Switch)), hasLength(7));
+      expect(
+        tester
+            .widgetList<Switch>(find.byType(Switch))
+            .every((control) => control.onChanged == null),
+        isTrue,
+      );
+      expect(find.text('끄기'), findsNothing);
+      await tapText(tester, '저장');
+      expect(find.byKey(const ValueKey('home-tabs')), findsOneWidget);
+      expect(find.text('예시 주문으로 공유'), findsOneWidget);
+      expect(app.household, 'h_042');
+      expect(
+        peer.requests
+            .skip(initialRequests)
+            .where(
+              (request) =>
+                  request.method == 'POST' &&
+                  request.url.path == '/v1/households',
+            ),
+        hasLength(1),
+      );
+      expect(peer.profiles.last, {
+        'household_types': ['2인', '부부·커플'],
+      });
+      expect(
+        peer.requests
+            .skip(initialRequests)
+            .every(
+              (request) =>
+                  request.url.origin == 'https://test.invalid' &&
+                  request.url.path.startsWith('/v1/households') &&
+                  !request.url.path.contains('/devices'),
+            ),
+        isTrue,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('AP-AT-7 web preview restores a verified memory and its date', (
+    tester,
+  ) async {
+    final peer = Peer()
+      ..episodes['ep_9031'] = (fixture('episode.json')..['status'] = 'notified')
+      ..cards = [fixture('card.v1.json')];
+    final store = TestStore();
+    AppController preview() => AppController(
+      api: peer.client(),
+      platform: null,
+      store: store,
+      fixture: true,
+      browserPreview: true,
+      configuredHousehold: 'h_042',
+    );
+    final app = preview();
+    await openApp(tester, app);
+    peer.birthday['status'] = 'closed';
+    peer.cards = [];
+    peer.rationales['ep_9031'] = fixture('rationale.json');
+    await app.sync();
+    await tester.pumpAndSettle();
+    final memory = find.byKey(const ValueKey('memory-nc_331'));
+    expect(memory, findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await openApp(tester, preview());
+    expect(memory, findsOneWidget);
+    await tapText(tester, '확인');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await openApp(tester, preview());
+    expect(memory, findsNothing);
+    await tapTab(tester, '캘린더');
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('2026-10-17')),
+        matching: find.byKey(const ValueKey('memory-dot-ep_9031')),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+    'AP-AT-13 card title, line time and state have a phone hierarchy',
+    (tester) async {
+      final card = fixture('card.v1.json');
+      final peer = Peer()
+        ..episodes['ep_9031'] = (fixture('episode.json')
+          ..['status'] = 'notified')
+        ..cards = [card];
+      await openApp(tester, controller(peer), size: const Size(390, 844));
+      final title = find.text(card['text'] as String);
+      final row = find.byKey(const ValueKey(('nc_331', 't_clean#1')));
+      final time = find.descendant(
+        of: row,
+        matching: find.textContaining('12:30'),
+      );
+      final state = find.descendant(of: row, matching: find.text('예정됨'));
+      final qualifier = find.text('미리보기 · 계약 테스트 서버');
+      expect(tester.widget<Text>(title).style!.fontSize, DesignTokens.size27);
+      expect(
+        tester.widget<Text>(qualifier).style!.fontSize,
+        DesignTokens.size13,
+      );
+      expect(
+        Theme.of(tester.element(title)).textTheme.bodyMedium!.fontFamily,
+        'packages/spira_fonts/${DesignTokens.font}',
+      );
+      expect(tester.getTopLeft(time).dx, lessThan(tester.getTopLeft(state).dx));
+      expect(tester.getTopLeft(title).dy, lessThan(tester.getTopLeft(time).dy));
+      expect(tester.takeException(), isNull);
     },
   );
 }
