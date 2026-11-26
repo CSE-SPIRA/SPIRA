@@ -73,11 +73,14 @@ class Preparations extends StatelessWidget {
             children: [
               if (memory != null)
                 MemorySheet(
-                  key: ValueKey('memory-${memory.cardIds.first}'),
+                  key: ValueKey('memory-${app.mainMemoryCardIds.first}'),
                   rationale: app.rationaleFor(memory.episodeId),
                   episode: memory,
-                  startsAt: app.memoryStart(memory.episodeId, memory.cardIds),
-                  cardIds: memory.cardIds,
+                  startsAt: app.memoryStart(
+                    memory.episodeId,
+                    app.mainMemoryCardIds,
+                  ),
+                  cardIds: app.mainMemoryCardIds,
                   onAcknowledge: app.acknowledgeMemory,
                 ),
               for (final (index, card) in cards.indexed)
@@ -175,6 +178,8 @@ class _OrderPanelState extends State<_OrderPanel> {
               key: ValueKey(orderId),
               episode: order,
               images: images,
+              rationale: app.rationaleFor(orderId),
+              processing: !widget.collapsible && app.isSharedOrder(orderId),
               received:
                   app.accepted.contains(orderId) ||
                   app.orderImages(orderId).isNotEmpty,

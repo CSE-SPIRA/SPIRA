@@ -145,6 +145,7 @@ class AppController extends ChangeNotifier {
   String? _cursor;
   String? get lastServerCheck => _cursor;
   Timer? _timer;
+  Timer? _episodeListRetry;
   Duration? _pollInterval;
   bool _foreground = true;
   StreamSubscription<void>? _shareSubscription;
@@ -177,6 +178,10 @@ class AppController extends ChangeNotifier {
       orderedEpisodes.firstOrNull?.episodeId;
 
   wire.Episode? get mainMemory => episodes[_mainMemoryId];
+  List<String> get mainMemoryCardIds =>
+      _episodeHistory[_mainMemoryId]?.cardIds ??
+      mainMemory?.cardIds ??
+      const [];
 
   String? memoryStart(String episodeId, Iterable<String> cardIds) => cardIds
       .map((cardId) => _cardStarts[cardId]?.date)
@@ -198,6 +203,8 @@ class AppController extends ChangeNotifier {
 
   List<Uint8List> orderImages(String episodeId) =>
       _captures[episodeId] ?? const [];
+
+  bool isSharedOrder(String id) => id == _lastIntake || accepted.contains(id);
 
   List<wire.Card> get activeCards => [
     for (final episode in orderedEpisodes)
@@ -377,6 +384,13 @@ class AppController extends ChangeNotifier {
     }
     _cursor = value['cursor'] as String?;
     _mainMemoryId = memoryId;
+    _lastIntake = value['lastIntake'] as String?;
+    for (final data in value['episodeHistory'] as List<dynamic>? ?? const []) {
+      final row = wire.EpisodeListEpisode.fromJson(
+        data as Map<String, dynamic>,
+      );
+      _episodeHistory[row.episodeId] = row;
+    }
     _restoreCardStarts(value);
     // Migrate dates already supplied by the Server in older snapshots.
     for (final card in cards.values) {
@@ -440,7 +454,11 @@ class AppController extends ChangeNotifier {
       'mainMemoryId': _mainMemoryId,
       'mainMemorySharedAt': mainMemory?.sharedAt,
       'accepted': accepted.toList(),
+      'lastIntake': _lastIntake,
       'episodes': episodes.values.map((episode) => episode.toJson()).toList(),
+      'episodeHistory': _episodeHistory.values
+          .map((row) => row.toJson())
+          .toList(),
       'cards': cards.values.map((card) => card.toJson()).toList(),
       'cardStarts': _cardStarts.values
           .map((record) => [
@@ -874,22 +892,11 @@ class AppController extends ChangeNotifier {
     );
   }
 
-  Future<void> _refresh() async {
-    final id = household!;
+  Future<Map<String, wire.EpisodeListEpisode>?> _listEpisodes(String id) async {
+    if (_episodeListRetry != null) return null;
+    final listed = <String, wire.EpisodeListEpisode>{};
+    String? before;
     try {
-      final cursor = _cursor;
-      var poll = await api.cards(id, since: cursor);
-      final rewound =
-          cursor != null &&
-          DateTime.parse(poll.serverTime).isBefore(DateTime.parse(cursor));
-      final reconcile = cursor != null && (rewound || stale);
-      final open = reconcile ? await api.cards(id) : null;
-      if (rewound) poll = open!;
-      DateTime.parse(poll.serverTime);
-      final returnedOpenIds = open?.cards.map((card) => card.cardId).toSet();
-
-      final listed = <String, wire.EpisodeListEpisode>{};
-      String? before;
       do {
         final list = await api.episodes(id, before: before);
         for (final row in list.episodes) {
@@ -904,25 +911,72 @@ class AppController extends ChangeNotifier {
         }
         before = next;
       } while (before != null);
+    } on AppApiException catch (error) {
+      if (!const {404, 405, 501}.contains(error.status)) rethrow;
+      if (!_disposed) {
+        _episodeListRetry = Timer(_idlePollInterval * 2, () {
+          _episodeListRetry = null;
+        });
+      }
+      return null;
+    }
+    return listed;
+  }
 
-      final latest = listed.values.firstOrNull?.episodeId;
+  Future<void> _refresh() async {
+    final id = household!;
+    try {
+      final cursor = _cursor;
+      var poll = await api.cards(id, since: cursor);
+      final rewound =
+          cursor != null &&
+          DateTime.parse(poll.serverTime).isBefore(DateTime.parse(cursor));
+      final reconcile = cursor != null && (rewound || stale);
+      final open = reconcile ? await api.cards(id) : null;
+      if (rewound) poll = open!;
+      DateTime.parse(poll.serverTime);
+      final returnedOpenIds = open?.cards.map((card) => card.cardId).toSet();
+
+      final cardUpdates = rewound
+          ? poll.cards
+          : [...?open?.cards, ...poll.cards];
+      final serverList = await _listEpisodes(id);
+      final listed =
+          serverList ??
+          {
+            if (!rewound)
+              for (final row in _episodeHistory.values)
+                if (row.status == wire.EpisodeStatus.CLOSED) row.episodeId: row,
+          };
       final details = (await Future.wait(
         {
-          ?latest,
+          ?listed.values.firstOrNull?.episodeId,
           ...accepted,
-          if (_lastIntake != null && listed.containsKey(_lastIntake))
+          if (_lastIntake != null &&
+              (serverList == null || listed.containsKey(_lastIntake)))
             _lastIntake!,
-          for (final row in listed.values)
+          for (final row in (serverList ?? _episodeHistory).values)
             if (row.status != wire.EpisodeStatus.CLOSED) row.episodeId,
+          if (serverList == null) ...{
+            for (final card in [...cards.values, ...cardUpdates])
+              card.episodeId,
+            for (final episode in episodes.values)
+              if (episode.status != wire.EpisodeStatus.CLOSED)
+                episode.episodeId,
+            ?_mainMemoryId,
+          },
         }.map((episodeId) async {
           try {
             final episode = await api.episode(episodeId);
             if (episode.episodeId != episodeId || episode.householdId != id) {
               throw const FormatException('Wrong episode');
             }
+            DateTime.parse(episode.sharedAt);
             return episode;
           } on AppApiException catch (error) {
-            if (error.status == 404 && !listed.containsKey(episodeId)) {
+            if (error.status == 404 &&
+                !(serverList?.containsKey(episodeId) ?? false)) {
+              listed.remove(episodeId);
               return null;
             }
             rethrow;
@@ -930,26 +984,46 @@ class AppController extends ChangeNotifier {
         }),
       )).whereType<wire.Episode>().toList();
       if (_disposed) return;
-      final cardUpdates = rewound
-          ? poll.cards
-          : [...?open?.cards, ...poll.cards];
       for (final card in cardUpdates) {
         DateTime.parse(card.updatedAt);
         if (card.startsAt case final start?) DateTime.parse(start);
       }
 
       for (final episode in details) {
+        final cardIds = episode.cardIds;
+        // Archived cards disappear from episode detail. Keep their IDs for
+        // episodes whose preparation was seen before the close.
+        final seenCardIds =
+            episode.status == wire.EpisodeStatus.CLOSED &&
+                cardIds.isEmpty &&
+                !rewound
+            ? {
+                ...?_episodeHistory[episode.episodeId]?.cardIds,
+                for (final card in cardUpdates)
+                  if (card.episodeId == episode.episodeId) card.cardId,
+              }
+            : cardIds;
         listed[episode.episodeId] = wire.EpisodeListEpisode(
           episodeId: episode.episodeId,
-          cardIds: episode.cardIds,
+          cardIds: seenCardIds.toList(),
           itemCount: episode.itemCount,
           sharedAt: episode.sharedAt,
           status: episode.status,
         );
       }
+      final latest = serverList == null
+          ? (listed.values.toList()..sort(
+                  (a, b) =>
+                      DateTime.parse(b.sharedAt)
+                          .compareTo(DateTime.parse(a.sharedAt)),
+                ))
+                .firstOrNull
+                ?.episodeId
+          : listed.values.firstOrNull?.episodeId;
       final orderId = _lastIntake ?? latest;
       final order = listed[orderId];
-      final hasClosedCard = order != null &&
+      final hasClosedCard =
+          order != null &&
           order.status == wire.EpisodeStatus.CLOSED &&
           order.cardIds.isNotEmpty;
       if (_savedPreviewMemory case final saved?) {
@@ -1030,7 +1104,8 @@ class AppController extends ChangeNotifier {
             (record.sharedAt != null && row.sharedAt != record.sharedAt);
       });
       _rationales.removeWhere(
-        (id, _) => id != _mainMemoryId &&
+        (id, _) =>
+            id != _mainMemoryId &&
             (!listed.containsKey(id) ||
                 listed[id]!.status == wire.EpisodeStatus.CLOSED),
       );
@@ -1071,6 +1146,14 @@ class AppController extends ChangeNotifier {
       refreshed = true;
       serverUnavailable = false;
       refreshError = null;
+      final intake = _lastIntake;
+      if (intake != null && episodes.containsKey(intake)) {
+        final status = episodes[intake]!.status;
+        if (status == wire.EpisodeStatus.RECEIVED ||
+            status == wire.EpisodeStatus.READING) {
+          unawaited(_loadRationale(intake));
+        }
+      }
       for (final card in activeCards) {
         if (!isMemory(card)) unawaited(_loadRationale(card.episodeId));
       }
@@ -1234,6 +1317,12 @@ class AppController extends ChangeNotifier {
           wire.Reaction(reaction: wire.ReactionEnum.STOP),
         );
       } catch (error) {
+        if (error is AppApiException && error.status == 404) {
+          _pendingStops.remove(card.cardId);
+          _reactionUnavailable(card.cardId);
+          await _save();
+          return;
+        }
         if (error is AppApiException && error.status < 500) {
           _pendingStops.remove(card.cardId);
         } else {
@@ -1261,6 +1350,7 @@ class AppController extends ChangeNotifier {
     controlErrors.remove(card.cardId);
     _change();
     await _serialize(() async {
+      var refresh = true;
       try {
         final current = cards[card.cardId];
         final matching = current?.lines
@@ -1283,6 +1373,12 @@ class AppController extends ChangeNotifier {
           ),
         );
       } catch (error) {
+        if (error is AppApiException && error.status == 404) {
+          _pendingLines.remove(key);
+          _reactionUnavailable(card.cardId);
+          refresh = false;
+          return;
+        }
         if (error is AppApiException &&
             error.status < 500 &&
             error.status != 408) {
@@ -1294,9 +1390,14 @@ class AppController extends ChangeNotifier {
         }
         controlErrors[card.cardId] = _error(error, '준비 항목 변경을 확인하지 못했어요.');
       } finally {
-        await _refresh();
+        if (refresh) await _refresh();
       }
     });
+  }
+
+  void _reactionUnavailable(String cardId) {
+    controlErrors[cardId] = '아직 이 서버에서는 끌 수 없어요';
+    _change();
   }
 
   wire.Rationale? rationaleFor(String episodeId) => _rationales[episodeId];
@@ -1316,14 +1417,17 @@ class AppController extends ChangeNotifier {
             throw const FormatException('Wrong episode');
           }
           if (_disposed) return;
-          if (closed ? _mainMemoryId == id
+          if (closed
+              ? _mainMemoryId == id
               : episodes.containsKey(id) &&
-                  episodes[id]!.status != wire.EpisodeStatus.CLOSED) {
+                    episodes[id]!.status != wire.EpisodeStatus.CLOSED) {
             _rationales[id] = result;
             if (closed &&
-                episodes[id]!.cardIds.every((cardId) =>
-                    result.observations.any((row) =>
-                        row.cardId == cardId && row.verdict != null))) {
+                mainMemoryCardIds.every(
+                  (cardId) => result.observations.any(
+                    (row) => row.cardId == cardId && row.verdict != null,
+                  ),
+                )) {
               _closedRationaleId = id;
             }
             _change();
@@ -1383,6 +1487,7 @@ class AppController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _timer?.cancel();
+    _episodeListRetry?.cancel();
     unawaited(_shareSubscription?.cancel());
     super.dispose();
   }
