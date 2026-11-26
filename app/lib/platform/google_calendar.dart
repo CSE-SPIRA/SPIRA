@@ -19,11 +19,17 @@ class GoogleCalendarReader {
   final String serverClientId;
   Future<void>? _initialization;
 
+  Future<void> _initialize() => _initialization ??= GoogleSignIn.instance
+      .initialize(serverClientId: serverClientId);
+
+  Future<void> disconnect() async {
+    await _initialize();
+    await GoogleSignIn.instance.disconnect();
+  }
+
   Future<wire.Calendar> call({required bool interactive}) async {
+    await _initialize();
     final signIn = GoogleSignIn.instance;
-    await (_initialization ??= signIn.initialize(
-      serverClientId: serverClientId,
-    ));
     // Android remembers the default account selected during setup.
     final authClient = interactive
         ? (await signIn.authenticate()).authorizationClient
