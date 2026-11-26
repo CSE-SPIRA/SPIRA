@@ -1298,6 +1298,8 @@ test("read-only rehearsal crosses the observed house moments without posting act
 
 test("a live guest moment marks verified changes together and keeps the overview until selected", async (t) => {
   const input = sceneFixture();
+  // A guest moment happens while the order is still open; a closed order's card has left the phone.
+  input.episode.status = "notified";
   const { episode, rationale, card, hub, facts, viewer, devices, relations } = input;
   const guest = facts.find(({ event }) => event === "guest_arrived");
   const moodLine = relations["t_mood#3"];
