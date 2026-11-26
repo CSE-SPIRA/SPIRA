@@ -54,6 +54,8 @@ and intent beats hold for 1.6 seconds each by default. A complete rationale
 received in one response plays in the same order.
 
 The launcher starts with an empty fixture and fresh Hub and World databases.
+If the shell reports earlier house state, press Ctrl-C in the launch terminal
+and start `scripts/demo-up` again.
 Use `--keep` to resume the last run for this checkout, episode, and Simulator
 port. `--port` sets the Simulator port (default 8730), `--shell-port` sets the
 shell's port, and `--peer-ports FIXTURE MQTT HUB` selects the other ports.

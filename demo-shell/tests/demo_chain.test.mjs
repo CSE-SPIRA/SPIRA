@@ -128,7 +128,8 @@ async function openShell(t, query, reply, withHouse = false) {
     CSS: { supports: () => false },
     DOMParser: class {
       parseFromString(markup) {
-        const markerMarkup = markup.slice(markup.indexOf('<div id="viewer-markers"'));
+        const start = markup.indexOf('<div id="viewer-markers"');
+        const markerMarkup = markup.slice(start);
         const clockTag = /<time class="wall-clock" datetime="([^"]+)">([^<]*)<\/time>/g;
         const clocks = [...markerMarkup.matchAll(clockTag)].map(([, datetime, textContent]) => {
           const clock = Object.assign(element(), { textContent });
@@ -136,9 +137,16 @@ async function openShell(t, query, reply, withHouse = false) {
           return clock;
         });
         const marker = Object.assign(element(), { id: "fridge-marker" });
+        const guestArrival = /data-guest-arrival="([^"]+)"/.exec(markerMarkup)?.[1];
         const root = Object.assign(element(), {
           tagName: "DIV", attributes: [], markup,
-          querySelector(selector) { return selector === "#fridge-marker" && markerMarkup.includes(marker.id) ? marker : null; },
+          querySelector(selector) {
+            if (selector === "#fridge-marker" && markerMarkup.includes(marker.id)) return marker;
+            if (selector === "[data-guest-arrival]" && guestArrival) return { dataset: { guestArrival } };
+            if (selector === "[data-signal], [data-guest-arrival], [data-device][data-changed]" &&
+                (guestArrival || /data-(signal|changed)=/.test(markerMarkup))) return {};
+            return null;
+          },
           querySelectorAll(selector) {
             if (selector === "time.wall-clock") return clocks;
             if (selector === "[data-signal]") {
@@ -165,7 +173,12 @@ async function openShell(t, query, reply, withHouse = false) {
             });
           },
         });
-        return { getElementById: () => root };
+        const wallClock = [...markup.slice(0, start).matchAll(clockTag)][0];
+        return {
+          getElementById: () => start < 0 ? null : root,
+          querySelector: (selector) => selector === "time.wall-clock" && wallClock
+            ? { getAttribute: () => wallClock[1] } : null,
+        };
       }
     },
     getComputedStyle: () => ({ getPropertyValue: () => "" }),
@@ -255,6 +268,60 @@ test("clock-only viewer changes keep the marker tree and focused fridge node", a
   assert.equal(document.activeElement, fridge);
   assert.equal(clock.textContent, "10:00:01");
   assert.equal(clock.getAttribute("datetime"), "2026-10-17T10:00:01.123456+09:00");
+});
+
+test("a second share warns before sending when the World still shows guests", async (t) => {
+  const { episode, facts, viewer } = sceneFixture();
+  const guests = facts.find(({ event }) => event === "guest_arrived");
+  assert.ok(Date.parse(guests.at) > Date.parse(episode.shared_at));
+  let existing = [];
+  let shares = 0;
+  const checks = [];
+  const shell = await openShell(t, "?auto=0", (path, options) => {
+    if (path === "/demo/api/config") return Response.json({ server: true, fixture: true, household_id: "h_042" });
+    if (path === "/demo/api/sim/viewer") {
+      assert.equal(options.cache, "no-store");
+      return new Response(viewer(existing));
+    }
+    if (path === "/demo/api/order") {
+      checks.push(shell.byId("stale-house").hidden);
+      shares++;
+      return Response.json({ episode_id: shares === 1 ? episode.episode_id : episode.episode_id + "2" });
+    }
+    return new Response(null, { status: 404 });
+  });
+  assert.equal(shell.byId("stale-house").hidden, true);
+  await shell.byId("next-cue").onclick();
+  await settle();
+  existing = [guests];
+  shell.byId("orders").onclick({ target: { closest: () => ({ dataset: { order: "birthday" } }) } });
+  assert.equal(shell.byId("next-cue").textContent, "다음: 공유");
+  await shell.byId("next-cue").onclick();
+  await settle();
+  assert.deepEqual(checks, [true, false]);
+  assert.equal(shell.byId("stale-house").hidden, false);
+  assert.match(shellHtml, /이전 시연의 집 상태가 남아 있어요\. 터미널에서 Ctrl-C 후 scripts\/demo-up으로 새로 시작하세요\./);
+  assert.equal((shellHtml.match(/id="stale-house"/g) ?? []).length, 1);
+});
+
+test("opening the house detects guest presence from before a story-clock rewind", async (t) => {
+  const { episode, rationale, card, hub, facts, viewer } = sceneFixture();
+  const guests = facts.find(({ event }) => event === "guest_arrived");
+  const now = hub.ledger[0].at;
+  assert.ok(Date.parse(guests.at) > Date.parse(now));
+  assert.ok(Date.parse(now) >= Date.parse(episode.shared_at));
+  const shell = await openShell(t, "?episode=ep_9031&page=house", (path) => {
+    if (path === "/demo/api/config") return Response.json({ server: true, hub: true, household_id: "h_042" });
+    if (path === "/demo/api/hub") return Response.json(hub);
+    if (path === "/demo/api/sim/viewer") return new Response(
+      `<time class="wall-clock" datetime="${now}"></time>${viewer([guests])}`);
+    if (path.endsWith("/rationale")) return Response.json(rationale);
+    if (path.includes("/cards")) return Response.json({ cards: [card] });
+    if (path.endsWith("/ep_9031")) return Response.json(episode);
+    return new Response(null, { status: 404 });
+  });
+  assert.equal(shell.byId("home").hidden, false);
+  assert.equal(shell.byId("stale-house").hidden, false);
 });
 
 test("the stage strip marks each stage done only when its own result arrives", async (t) => {

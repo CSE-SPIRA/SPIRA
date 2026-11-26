@@ -137,6 +137,29 @@ async function refreshHouseMarkers() {
 const MARKER_TAGS = new Set(["SECTION", "DIV", "ARTICLE", "H2", "H3", "SPAN", "SMALL", "P", "BUTTON", "UL", "LI", "TIME"]);
 const MARKER_ATTRIBUTE = /^(?:id|class|title|role|type|tabindex|datetime|popover|popovertarget|aria-[a-z-]+|data-[a-z-]+)$/;
 
+async function checkHouseBeforeShare() {
+  try {
+    const response = await fetchResponse("/demo/api/sim/viewer", { cache: "no-store", signal: AbortSignal.timeout(2500) });
+    const fragment = new DOMParser().parseFromString(await response.text(), "text/html");
+    const markers = fragment.getElementById("viewer-markers");
+    if (!markers) return;
+    // These observations already exist before the order write, even if the next share rewinds story time.
+    $("stale-house").hidden = !markers.querySelector("[data-signal], [data-guest-arrival], [data-device][data-changed]");
+  } catch {
+    // The share can still proceed if the viewer is temporarily unavailable.
+  }
+}
+
+function checkHouseAtOpen(fragment, markers, facts) {
+  const warning = $("stale-house");
+  if (!warning.hidden) return;
+  const sharedAt = Date.parse(state.episode?.shared_at);
+  const worldAt = Date.parse(fragment.querySelector("time.wall-clock")?.getAttribute("datetime"));
+  const guestAt = markers.querySelector("[data-guest-arrival]")?.dataset.guestArrival;
+  const times = [...facts.map(({ at }) => Date.parse(at)), Date.parse(guestAt)];
+  if (times.some((at) => at < sharedAt || at > worldAt)) warning.hidden = false;
+}
+
 function applyHouseMarkers(markup) {
   if (!markup || markup === state.houseMarkup) return;
   const fragment = new DOMParser().parseFromString(markup, "text/html");
@@ -152,6 +175,8 @@ function applyHouseMarkers(markup) {
     }
   }
   state.houseMarkup = markup;
+  const facts = RECORDING ? [] : worldFacts(markers);
+  if (!REPLAY && state.page === "house") checkHouseAtOpen(fragment, markers, facts);
   const clocks = [...markers.querySelectorAll("time.wall-clock")].map((node) => {
     const reading = { node, text: node.textContent, datetime: node.getAttribute("datetime") };
     node.textContent = "";
@@ -170,7 +195,7 @@ function applyHouseMarkers(markup) {
   });
   if (unchanged) return;
   state.markerSignature = signature;
-  if (!RECORDING) ui.house.rememberFacts(worldFacts(markers));
+  if (!RECORDING) ui.house.rememberFacts(facts);
   state.displayReadings = new Map([...markers.querySelectorAll("[data-device][data-values]")].map(
     ({ dataset }) => [dataset.device, JSON.parse(dataset.values)]));
   if (state.houseModule) state.houseModule.replaceHouseMarkers(current, markers);
@@ -285,7 +310,7 @@ const context = {
 };
 // Each viewer run owns its state and timers. Controllers call through this table after setup.
 const ui = {
-  surface: { revealHouseState, refreshSnapshot, refreshHouseMarkers, loadHouse, applyHouseMarkers },
+  surface: { revealHouseState, refreshSnapshot, refreshHouseMarkers, loadHouse, applyHouseMarkers, checkHouseBeforeShare },
 };
 ui.reasoning = createReasoning(context, ui);
 ui.phone = createPhone(context, ui);

@@ -281,13 +281,14 @@ export function createPhone(context, ui) {
   async function share(files, sample = null) {
     const demoPath = draftPath();
     state.sharing = true;
-    notice("주문을 보내는 중이에요.");
     ui.presenter.renderControls();
-    const sharedAt = ui.recording.stamp();
     const form = new FormData();
     for (const file of files) form.append("images", file, file.name || "order.png");
     if (sample && state.config.fixture) form.append("sample", sample);
     try {
+      await ui.surface.checkHouseBeforeShare();
+      notice("주문을 보내는 중이에요.");
+      const sharedAt = ui.recording.stamp();
       const result = await exchange("/demo/api/order", { method: "POST", body: form, signal: AbortSignal.timeout(35000) });
       if (!result.ok || !result.body?.episode_id) throw new Error(result.status);
       const accepted = result.body;

@@ -79,7 +79,10 @@
     </div>
   </main>
   <footer class="controls" aria-label="단계 조작">
-    <p id="notice" role="status"></p>
+    <div class="control-notices">
+      <p id="stale-house" role="status" hidden>이전 시연의 집 상태가 남아 있어요. 터미널에서 Ctrl-C 후 scripts/demo-up으로 새로 시작하세요.</p>
+      <p id="notice" role="status"></p>
+    </div>
     <div class="control-right">
       <span id="clock-unavailable" role="status" hidden>시연 시계가 없어 시각 이동을 건너뛰어요.</span>
       <button class="button simple helper" type="button" id="previous" aria-keyshortcuts="ArrowLeft" disabled>← 이전</button>

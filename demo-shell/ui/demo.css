@@ -30,6 +30,7 @@ time,.numeric{font-variant-numeric:tabular-nums}
 #path-control{align-items:center;gap:8px;padding-inline:12px;color:var(--muted);font-size:var(--size-19)}
 #demo-path{font:inherit;color:var(--green-deep);background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-pill);padding:5px 8px}
 .controls{bottom:0;height:83px;border-top:1px solid var(--line);gap:var(--space-24)}
+#stale-house{color:var(--ink);font-size:var(--size-19);font-weight:600}
 .control-right{margin-left:auto;display:flex;align-items:center;gap:12px}
 #clock-unavailable,#presenter-drawer summary{color:var(--muted);font-size:var(--size-16)}
 #next-cue:disabled{opacity:1;color:var(--muted);background:var(--soft)}
