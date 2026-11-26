@@ -66,10 +66,19 @@ The standalone house draws device displays from World observations. The
 the scene input. It keeps the card visible on the left and returns the house
 to the overview when the presenter advances.
 
+With `WORLD_OPERATOR=1`, the viewer uses the existing operator login policy
+for person actions. When starting the Simulator and demo shell separately,
+set `WORLD_HOUSE_SHELL_ORIGIN` on the Simulator to the shell's exact browser
+origin, such as `http://127.0.0.1:8733`. Set `DEMO_SIMULATOR_URL` on the shell
+to the Simulator origin reachable by that browser. The live shell house can
+then use the same named controls. The current `demo-up` launcher does not
+forward this setting.
+
 At guest arrival, wait for the Hub read-backs to see the TV and light markers
 together. Select either marker to inspect its observed value, or advance
-directly from the overview. An offline recording needs the current house
-assets to offer marker controls.
+directly from the overview. A run-start marker appears as soon as World shows
+the run. Offline recordings offer the observed close-ups with current house
+assets.
 
 ## Tests
 
@@ -91,8 +100,10 @@ Tests use in-process protocol fakes, HTTP stubs for both evidence sources, and a
 | SIM-AT-20 | HTTP tests check World change labels, guest windows and action-only overlays. Order details, intents, rationale, card text, Hub attribution and judge output stay out of the viewer. |
 | SIM-AT-21 | HTTP tests submit the named panel and appliance-app forms and check the emitted signals and truth journal. The Class A panel signal is provisional pending PQ-01. |
 | SM-AT-1, SM-AT-2 | Node tests cover grouped markers, the overview, close-up selection, Escape, and advancing. |
-| SM-AT-3 | The live fixture receives `cleaner.stopped` with `by: user` after a panel stop. The card assertion is an expected failure until the fixture projects an interrupted run as `user_changed`. |
+| SM-AT-3 | The fixture receives `cleaner.stopped` with `by: user` and the interrupted run result is `unknown`. The older end-to-end assertion that expects `user_changed` remains an expected failure. |
 | SM-AT-4 | The viewer and World snapshot assertions check that Server judgment stays private. |
+| SM-AT-5 | The shell test observes a cleaner run in World while the Hub read-back is pending and checks for the marker. |
+| SIM-AT-22, SIM-AT-23 | Node tests cover selection, the named action, immediate rendering, confirmation, rollback and Escape. The fixture integration checks that changing the light from pink to yellow in the house yields a Hub event with `by: user`. |
 
 ## Where to change what
 
@@ -116,6 +127,7 @@ Read replies carry `operation_id: null` and `local_operation: false`. A stale re
 | `WORLD_PLANS` | Local path or GET URL returning a generated C-1 `Plan` or `PlanPull`. Existing URLs continue to accept `WORLD_PLANS_TOKEN`. |
 | `WORLD_HUB_STATE_URL` | Hub dashboard `GET /state` URL for the same household. When set, it supplies both the judge's C-3 events and the viewer's execution overlay. |
 | `WORLD_PEER_VIEWERS` | Optional comma-separated viewer links in `label=URL` form. |
+| `WORLD_HOUSE_SHELL_ORIGIN` | Exact browser origin of a separately started live shell. Allows its named person-action requests under the existing operator login policy. |
 | `WORLD_EXECUTIONS` | Local path or GET URL returning the fixture Server's `/_fixture/receipts` object with a C-4 `executions` array. A standalone C-4 array also works. `WORLD_EXECUTIONS_TOKEN` adds an optional Bearer header. |
 | `WORLD_RECEIVED_URL` | Fixture Server `/_fixture/receipts` GET URL. The judge reads the received C-3 batches in `events`. A flat C-3 array also works. `WORLD_RECEIVED_TOKEN` adds an optional Bearer header. Compare the events under **Private evidence** on the operator page. |
 
