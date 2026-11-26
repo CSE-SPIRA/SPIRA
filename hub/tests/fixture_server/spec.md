@@ -2,7 +2,7 @@
 
 **Status:** ACTIVE. This file defines the live fixture replay. The Hub's
 [integration requirements](../../spec.md#h10-contract-fixture-server-test-support-only)
-and the Server's [App read views](../../../server/spec.md#122-route-behavior)
+and the Server's [App read views](../../../server/spec.md#122-behaviour-per-route)
 define the surrounding behavior and contract.
 
 **FX-R1.** A live order MUST be readable immediately after acceptance. The

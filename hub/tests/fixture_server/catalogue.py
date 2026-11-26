@@ -98,15 +98,15 @@ CASES = [
     Case("judgment-failed", "읽기 이후 판단 실패", "results", "server/spec.md:421 · contracts/schemas/episode.json",
          "판단 실패를 구별할 계약 응답 필요", "실패 시 계획 공개 기준 확인 필요", "새 실행 없음",
          "실패와 정상 무의도 구분 필요", "", needs="public S2–S4 failure response and an agreed client-visible signal"),
-    Case("server-pace", "서버 기본 숫자", "timing", "server/config/numbers.yaml · fixture JUDGMENT_SECONDS (assumed)",
+    Case("server-pace", "서버 기본 숫자", "timing", "server/config/numbers.yaml · fixture STAGE_GAPS (assumed)",
          "평상시 읽기·카드 진행", "공개 후 계획", "계획 조건 대기", "단계별 진행",
          "현재 미완료 단계에 적용합니다. 회차가 없거나 판단이 끝났으면 다음 공유에 적용합니다.",
          "test_paces[server]", {"pace": "server"}),
-    Case("fast", "빠른 리허설", "timing", "fixture JUDGMENT_SECONDS (assumed)",
+    Case("fast", "빠른 리허설", "timing", "fixture STAGE_GAPS (assumed)",
          "읽기·카드가 빠르게 진행", "계획 조기 공개", "기록된 작업 시각 유지", "짧은 단계 대기",
          "조용한 시간과 판단 간격을 줄입니다. 현재 미완료 단계 또는 다음 공유에 적용합니다.",
          "test_paces[fast]", {"pace": "fast"}),
-    Case("slow", "느린 LLM", "timing", "fixture JUDGMENT_SECONDS × 4 (assumed)",
+    Case("slow", "느린 LLM", "timing", "fixture STAGE_GAPS × 4 (assumed)",
          "읽기·카드 지연", "공개 전 새 계획 없음", "새 동작 없음", "남은 단계가 오래 대기",
          "서버 조용한 시간과 판단 간격을 네 배로 늘립니다. 현재 미완료 단계 또는 다음 공유에 적용합니다.",
          "test_paces[slow]", {"pace": "slow"}),
@@ -119,7 +119,7 @@ STAGE_NAMES = {
 }
 
 CASES += [
-    Case(f"stuck-{stage}", f"{title} 단계에서 멈춤", "timing", "fixture JUDGMENT_SECONDS (assumed)",
+    Case(f"stuck-{stage}", f"{title} 단계에서 멈춤", "timing", "fixture STAGE_GAPS (assumed)",
          "직전까지 공개된 회차 상태", "공개까지 새 계획 없음", "새 작업 없음", "해당 단계 대기",
          f"{title} 직전에 멈춥니다. 접수에서 멈추면 회차는 received로 보입니다. 판단 속도에서 해제하세요.",
          f"test_stuck_and_release[{stage}]", {"hold": stage})
@@ -127,7 +127,7 @@ CASES += [
 ]
 
 CASES += [
-    Case("release-now", "판단 지금 끝내기", "timing", "fixture JUDGMENT_SECONDS (assumed)",
+    Case("release-now", "판단 지금 끝내기", "timing", "fixture STAGE_GAPS (assumed)",
          "기록된 최종 판단", "계획 공개", "기록된 작업 조건 대기", "카드·계획까지 진행",
          "공유된 회차의 남은 판단 시각을 지금으로 당깁니다.", "test_stuck_and_release[published]", {"release": True}),
     Case("partial-rationale", "중간 근거만 보기", "timing", "ep_9031/rationale.json · live projection",

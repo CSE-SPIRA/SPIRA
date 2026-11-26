@@ -48,6 +48,18 @@ From the repository root, run `scripts/demo-up`. Open the first printed URL (def
 - `--no-app` skips the App preview. Use it when starting a stack for [Flutter hot reload](app/README.md#run-in-the-browser). `--no-shell` hides the optional example staging.
 - The local operator opens without a password. To use the operator from another device on a trusted network, add `--sim-lan-ip <demo-host-LAN-IPv4>` and use the URL and password printed in the terminal.
 
+### Run with the Server
+
+Use the configured Server's Python environment and run the Server with `DEMO_MODE=1` for a birthday in real minutes. The Server setup describes how to prepare `dev/home.yaml`. [Server setup](server/README.md#dry-run-s1s5-without-the-hub)
+
+1. Run `(cd server && python scripts/demo_home.py --home dev/home.yaml)` to create the demo household.
+2. Run `source server/out/demo.env` from the repository root.
+3. Run `scripts/demo-up --server URL` with the Server's base URL.
+4. Open the printed App URL. It opens the demo household and sends the sample calendar from the App.
+5. For Android, add `--phone` to the launch command. With the Android SDK and ADB installed, the launcher prints the debug APK path and the reset command.
+
+Use `scripts/demo-up --phone --first-run` to try onboarding with the fixture. Add `--no-app` for a phone-only run.
+
 ## Paper
 
 Build from `docs/paper` with [Tectonic](https://tectonic-typesetting.github.io):
