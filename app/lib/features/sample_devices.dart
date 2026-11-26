@@ -66,12 +66,14 @@ class _SampleDevicesState extends State<SampleDevices> {
               roomNames['living_room']!,
               roomNames['kitchen']!,
             ])
-              _DeviceRoom(
-                key: ValueKey('device-room-$room'),
-                room: room,
-                devices: inventory.where((entry) => entry.device.room == room),
-                app: widget.app,
-              ),
+              if (inventory.where((entry) => entry.device.room == room)
+                  case final devices when devices.isNotEmpty)
+                _DeviceRoom(
+                  key: ValueKey('device-room-$room'),
+                  room: room,
+                  devices: devices,
+                  app: widget.app,
+                ),
         ],
       ),
     );
@@ -101,36 +103,30 @@ class _DeviceRoom extends StatelessWidget {
           child: KoreanText(room, style: theme.textTheme.titleMedium),
         ),
         const SizedBox(height: DesignTokens.space4),
-        if (devices.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: DesignTokens.space8),
-            child: KoreanText('기기가 없어요.', style: theme.textTheme.bodySmall),
-          )
-        else
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: DesignTokens.paper,
-              borderRadius: BorderRadius.circular(DesignTokens.radius12),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (final (index, entry) in devices.indexed) ...[
-                  if (index > 0)
-                    const Divider(
-                      height: 1,
-                      indent: DesignTokens.space12,
-                      endIndent: DesignTokens.space12,
-                    ),
-                  _DeviceRow(
-                    key: ValueKey('sample-device-${entry.device.id}'),
-                    entry: entry,
-                    app: app,
-                  ),
-                ],
-              ],
-            ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: DesignTokens.paper,
+            borderRadius: BorderRadius.circular(DesignTokens.radius12),
           ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final (index, entry) in devices.indexed) ...[
+                if (index > 0)
+                  const Divider(
+                    height: 1,
+                    indent: DesignTokens.space12,
+                    endIndent: DesignTokens.space12,
+                  ),
+                _DeviceRow(
+                  key: ValueKey('sample-device-${entry.device.id}'),
+                  entry: entry,
+                  app: app,
+                ),
+              ],
+            ],
+          ),
+        ),
       ],
     );
   }

@@ -16,10 +16,8 @@ memory data. It MUST make zero requests to the Hub or Simulator. Google
 Calendar is read on the phone. A command receipt MUST NOT be shown as a
 confirmed effect. (PC-4, PC-5)
 
-**P-R3.** Until the real Server implements the App contract, the local App peer
-MUST be the contract fixture Server at `hub/tests/fixture_server`. A run against
-that peer MUST remain visibly qualified as fixture evidence and MUST NOT be
-presented as real-Server interoperability. (PC-4)
+**P-R3.** The App MUST support both the real Server and the contract fixture Server at
+`hub/tests/fixture_server`. Runs against that fixture MUST be visibly labeled. (PC-4)
 
 ## 2. Requirements
 
@@ -32,14 +30,14 @@ embed the App's actual web build when it shows the App.
 
 | ID | Required presentation | Contract source |
 | --- | --- | --- |
-| M1 | The App MUST accept one to three ordered images from Android share or the gallery. Each selection MUST have one stable `source_id` for retry. After acceptance, show the submitted thumbnails and receipt. | `POST /v1/orders`, `received` |
-| M2 | The order area MUST show a list skeleton during reading. | Episode `reading` |
+| M1 | The App MUST accept one to three ordered images from Android share or the gallery. Each selection MUST have one stable `source_id` for retry. After acceptance, show the submitted thumbnails and `받았어요`. | `POST /v1/orders`, `received` |
+| M2 | While the shared order is being processed, the order area MUST show a compact vertical step list with checks on completed steps, a gently animated current step, and dimmed upcoming steps. Reduced motion MUST render the current step without animation. | Episode and rationale detail |
 | M3 | The order area MUST show names and quantities, plus only a count for masked items. Read failure MUST prompt the user to send again. | Episode `items`, `item_count`, `masked_count`, `read_failed` |
-| M4a | The order MUST remain visible with an empty preparation area when no card was produced. Item guidance state appears beside the item when supplied and the list is expanded. | Episode `judged`, empty `card_ids`, `item_tasks[].state` |
+| M4a | The order MUST remain visible with an empty preparation area when no card was produced. In the full order, the App MUST show each item task under the first item of its type, with a label for its kind, the Server text, and its state. Scheduled guidance MUST say when it will appear and completed guidance MUST say where it was shown. | Episode `judged`, empty `card_ids`, `item_tasks[].item`, `kind`, `text`, `state` |
 | M4b | A held card MUST show the Server's text verbatim. | Episode `held`, card held template |
 | M5 | With a card present, the order MUST default to one tappable row with a thumbnail, item count, first visible item and remaining count, and a chevron. Tapping MUST reveal or hide the full order. A preparation card MUST show the Server's text verbatim, schedule, timed or triggered lines, progress, and applicable controls. The App MUST deduplicate local notifications by `card_id` and `updated_at`, and honor `notify` for new and newly timed cards. | Card poll `text`, `starts_at`, `lines`, `summary`, `notify` |
 | M6 | The App MUST show each supplied line state distinctly, including the Server's note and any awaited event. | Card poll `lines[].state`, `note`, `summary.waiting_for` |
-| M7a | Line off MUST remain available while a line runs. Line on MUST be available only before start. A 409 indicating start MUST remove that control. Stop applies only to its card. Requests MUST remain pending until refreshed card state confirms the change. | Card `line_off`, `line_on`, `stop` reactions |
+| M7a | Line off MUST remain available while a line runs. Line on MUST be available only before start. A 409 indicating start MUST remove that control. Stop applies only to its card. Accepted requests MUST remain pending until refreshed card state confirms the change. A reaction 404 MUST show one message, `아직 이 서버에서는 끌 수 없어요`, and restore the control without retrying. | Card `line_off`, `line_on`, `stop` reactions |
 | M7b | A human change MUST show the changed state and Server note. A person-started standby task uses the Server's resulting state. | Card `user_changed`, `note`, `done` |
 | M8 | The App MUST show the supplied restoration outcome and note per line. | Card `lines[].end_state`, `note` |
 | M9 | When the observation window closes, the card MUST become a memory sheet with the intent, lines and states, verdict, and task feedback. | Episode rationale `intents[].intent_text`, `tasks`, `observations` |
@@ -50,6 +48,18 @@ with the Server after startup or reconnect, and avoid inventing a planned
 end condition. Poll every 30 seconds, with a three-second foreground cadence
 during active preparation or intake. Show the last known state and a connection
 notice while reads fail.
+
+The App MUST poll the shared episode and its rationale during intake. It MUST
+show the item count and list when S1 items are present, the calendar and past
+order check when S2 rationale is available, and the Server's short intent text
+when S3 intents are present. A rationale 404 before S2 is expected. Changes
+MUST follow stored data, with no timed advancement. The preparation card
+replaces the progress block when it arrives.
+
+If the household episode list returns 404, 405, or 501, card refresh MUST
+continue using episode detail for the open cards, the newly shared order, and
+previously seen episodes. The App MUST defer retrying the list until a later
+poll interval. Calendar MUST retain markers for episodes observed closing.
 
 Memory MUST render `match`, `stopped`, and `unconfirmed` distinctly, and
 `off`, `changed`, and `kept` as per-line results. If no observation is
@@ -64,13 +74,19 @@ a day MUST list its events and memories. Selecting a memory MUST open the
 same sheet as M9, including purchased items, masked count, and start/end times
 when supplied. Preparation plans remain on Main.
 
-The App MUST read the next 14 days of Google events on the phone. In fixture or
-preview builds, it MUST show a bundled calendar marked `예시 일정` while Google
-is disconnected, and sync those same events with `PUT …/calendar`. A connected
+The App MUST read the next 14 days of Google events on the phone. A connected
 Google calendar MUST replace the samples, including when it has no events.
-A disconnected production build MUST omit sample events.
+While Google is disconnected, Calendar MUST show `예시 일정` and the App MUST
+send those same events with `PUT …/calendar`. Fixture and preview use the
+bundled replay dates. With `SPIRA_PEER=server`, the App MUST anchor a one-hour
+birthday 20 minutes after the cards response's `server_time` and put ordinary
+events on later days. It MUST persist the sample anchor for the household.
+It MUST send the sample once on opening the household and only replace it when
+the birthday has ended or starts in less than 10 minutes and there is no open
+card. It MUST send no sample while Google is connected.
 
-Calendar MUST use the household episode listing for history. It MUST date a
+Calendar MUST use the household episode listing when available and known
+closed episodes otherwise. It MUST date a
 closed episode in the household time zone using the last observed card
 `starts_at`, with `shared_at` as the fallback for a card the App never saw.
 A card seen only in the held state has no marker. The App MUST reconstruct the
@@ -81,8 +97,8 @@ sheet from episode detail and rationale without cached card bodies.
 Our Home MUST show editable household types via `PUT …/profile`, Google
 connect/disconnect, and the device list on one page. Until the App device
 routes exist, Our Home and onboarding MUST show the fixed demo inventory
-from the example Hub installation, labeled `예시 집`. It MUST group devices by
-room and show a name and type icon. Each delegation control MUST remain
+from the example Hub installation, labeled `예시 집`. It MUST show only rooms with devices, grouped by
+room, with a name and type icon per device. Each delegation control MUST remain
 disabled and labeled `집 연결 후`. The App needs a Server device list including
 rooms and a Server write route for per-device delegation. The Hub needs that
 delegation before execution.
@@ -91,9 +107,11 @@ Our Home MUST match open card lines to devices through
 `GET /v1/episodes/{id}/rationale`, using the task's card and task identifiers
 and its `devices` identifiers, types, and rooms. The row MUST display the card
 line's text and state and use the card's `line_off` reaction when available.
-Onboarding MUST show the device list read-only. A fixture or preview first-run
-switch MUST start at Google setup with no household, even when a fixture
-household is configured or setup was previously completed.
+Onboarding MUST show the device list read-only. `SPIRA_HOUSEHOLD_ID` MUST
+open an existing household directly, including one created by the Server's demo
+home script. `SPIRA_FIRST_RUN=1` MUST start at Google setup with no household,
+even when a household is configured or setup was previously completed. Opening
+a household MUST require only the Server connection.
 
 | ID | Requirement |
 | --- | --- |
@@ -141,8 +159,14 @@ the Hub or Simulator fails acceptance.
 | AP-AT-6 | A person changes a light at home. The next poll shows the human-change state and Server note. |
 | AP-AT-7 | Close the observation window, then the episode. The card becomes M9, stays on Main after close, and leaves a dot on its start day. Acknowledge it or accept another order. The sheet leaves Main and the dot remains. |
 | AP-AT-8 | Select the day with a memory dot and tap its memory. The M9 sheet opens without explanatory prose. |
-| AP-AT-9 | Open Our Home. The fixed installation appears under room headings. Delegation switches are disabled. Turn off a matched device line. It shows pending immediately and sends that card and task's `line_off` to the Server. |
+| AP-AT-9 | Open Our Home. The fixed installation appears under room headings for rooms with devices. Delegation switches are disabled. Turn off a matched device line. It shows pending immediately and sends that card and task's `line_off` to the Server. |
 | AP-AT-10 | Open Calendar. Navigate months and return to today. Find the birthday label and memory dot on their dates, and select a date to see its agenda. |
 | AP-AT-11 | Start a fixture or preview without Google. Calendar shows `예시 일정` and the Server receives the same events. Connect Google and verify that its read replaces the samples. |
 | AP-AT-12 | With no card, see the full order. When the card arrives, see one summary row above its title. Expand and collapse the order and verify guidance appears only in the full list. |
 | AP-AT-13 | Inspect Main and setup at phone width. The shared typeface and tokens are applied, line timing and state are legible, and the fixture qualifier is secondary. |
+| AP-AT-14 | Return 404, 405, or 501 for the episode list. The shared order advances to its card, existing cards remain usable, and observed closures leave Calendar dots. The list is retried after a backoff. |
+| AP-AT-15 | Return 404 to line off, line on, or stop. The card shows one calm message and its control is restored without resending the request. |
+| AP-AT-16 | Hold each processing stage until its data is stored. Main advances through receipt, items, context, and Server intent in order, then collapses the order when the card appears. With reduced motion the current step is static. |
+| AP-AT-17 | Supply multiple items of one type and one guidance task. In the expanded order the first item of that type shows its kind, Server text, and state wording exactly once. |
+| AP-AT-18 | Open a real Server household without Google. The birthday appears 20 minutes after the Server time and lasts one hour. Reopen and verify its anchor stays put. When the birthday has ended or is under 10 minutes away, the next sample is sent only if there is no open card. With Google connected no sample is sent. |
+| AP-AT-19 | Open the household configured by `SPIRA_HOUSEHOLD_ID` using only the Server URL and App credentials. Main opens directly. With `SPIRA_FIRST_RUN=1`, setup starts instead. |

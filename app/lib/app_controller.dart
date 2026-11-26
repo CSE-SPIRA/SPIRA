@@ -76,18 +76,17 @@ class AppController extends ChangeNotifier {
   bool get canShareExample =>
       demoPreview && !sharingExample && (canControl || serverUnavailable);
 
-  bool get _startsFromFirstRun => firstRun && (fixture || browserPreview);
-
   String get _environment => jsonEncode([
     fixture,
     api.baseUrl.toString(),
     configuredHousehold,
-    if (_startsFromFirstRun) 'first-run',
+    if (firstRun) 'first-run',
   ]);
   String get _scope => jsonEncode([_environment, household]);
   String get _setupKey => 'spira.setup.v1.$_environment';
   String get _snapshotKey => 'spira.snapshot.v1.$_scope';
   String get _calendarKey => 'spira.calendar.v1.$_scope';
+  String get _sampleAnchorKey => 'spira.sample-anchor.v1.$_scope';
   String get _serverTokenKey => 'spira.server-token.v1.$_environment';
   String get _connectionKey => 'spira.connection.v1.$_environment';
 
@@ -135,16 +134,24 @@ class AppController extends ChangeNotifier {
   bool get hasPendingSelection => _gallery != null;
 
   wire.Calendar _googleCalendar = wire.Calendar(events: []);
+  DateTime? _sampleAnchor;
+  bool get _usesReplayCalendar => fixture || browserPreview;
   bool get showsSampleCalendar =>
-      (fixture || browserPreview) && !_calendarConnected;
-  wire.Calendar get displayCalendar =>
-      showsSampleCalendar ? sampleCalendar : _googleCalendar;
+      !_calendarConnected && (_usesReplayCalendar || _sampleAnchor != null);
+  wire.Calendar get displayCalendar {
+    if (!showsSampleCalendar) return _googleCalendar;
+    return _usesReplayCalendar
+        ? sampleCalendar
+        : serverSampleCalendar(_sampleAnchor!);
+  }
+
   bool get calendarConnected => _calendarConnected;
   String? calendarError;
 
   String? _cursor;
   String? get lastServerCheck => _cursor;
   Timer? _timer;
+  Timer? _episodeListRetry;
   Duration? _pollInterval;
   bool _foreground = true;
   StreamSubscription<void>? _shareSubscription;
@@ -154,7 +161,6 @@ class AppController extends ChangeNotifier {
   String? _calendarFingerprint;
   bool _calendarFingerprintDirty = false;
   bool _calendarConnected = false;
-  bool _calendarClearPending = false;
   wire.Calendar? _initialCalendar;
   bool _inboxChanged = false;
   bool _disposed = false;
@@ -177,6 +183,10 @@ class AppController extends ChangeNotifier {
       orderedEpisodes.firstOrNull?.episodeId;
 
   wire.Episode? get mainMemory => episodes[_mainMemoryId];
+  List<String> get mainMemoryCardIds =>
+      _episodeHistory[_mainMemoryId]?.cardIds ??
+      mainMemory?.cardIds ??
+      const [];
 
   String? memoryStart(String episodeId, Iterable<String> cardIds) => cardIds
       .map((cardId) => _cardStarts[cardId]?.date)
@@ -198,6 +208,8 @@ class AppController extends ChangeNotifier {
 
   List<Uint8List> orderImages(String episodeId) =>
       _captures[episodeId] ?? const [];
+
+  bool isSharedOrder(String id) => id == _lastIntake || accepted.contains(id);
 
   List<wire.Card> get activeCards => [
     for (final episode in orderedEpisodes)
@@ -325,14 +337,13 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _restore() async {
-    final saved = _startsFromFirstRun ? null : await store.read(_setupKey);
+    final saved = firstRun ? null : await store.read(_setupKey);
     if (saved != null) {
       final setup = jsonDecode(saved) as Map<String, dynamic>;
       household = setup['household'] as String?;
       step = SetupStep.values.byName(setup['step'] as String);
       _calendarConnected = setup['calendarConnected'] as bool? ?? false;
       householdTypes.addAll((setup['types'] as List<dynamic>).cast<String>());
-      _calendarClearPending = setup['calendarClearPending'] as bool? ?? false;
       // An older calendar checkpoint already had a household but no code step.
       if (step == SetupStep.calendar && household != null) {
         step = SetupStep.household;
@@ -341,7 +352,7 @@ class AppController extends ChangeNotifier {
         connectionCode = await store.read(_connectionKey);
         if (connectionCode?.isEmpty == true) connectionCode = null;
       }
-    } else if (configuredHousehold != null && !_startsFromFirstRun) {
+    } else if (configuredHousehold != null && !firstRun) {
       household = configuredHousehold;
       step = SetupStep.ready;
     }
@@ -349,6 +360,10 @@ class AppController extends ChangeNotifier {
       api.token = await store.read(_serverTokenKey) ?? api.token;
     }
     if (household == null) return;
+    if (!_usesReplayCalendar) {
+      final anchor = await store.read(_sampleAnchorKey);
+      if (anchor != null) _sampleAnchor = DateTime.tryParse(anchor);
+    }
     final cached = await store.read(_snapshotKey);
     if (cached == null) return;
     final value = jsonDecode(cached) as Map<String, dynamic>;
@@ -377,6 +392,13 @@ class AppController extends ChangeNotifier {
     }
     _cursor = value['cursor'] as String?;
     _mainMemoryId = memoryId;
+    _lastIntake = value['lastIntake'] as String?;
+    for (final data in value['episodeHistory'] as List<dynamic>? ?? const []) {
+      final row = wire.EpisodeListEpisode.fromJson(
+        data as Map<String, dynamic>,
+      );
+      _episodeHistory[row.episodeId] = row;
+    }
     _restoreCardStarts(value);
     // Migrate dates already supplied by the Server in older snapshots.
     for (final card in cards.values) {
@@ -429,7 +451,6 @@ class AppController extends ChangeNotifier {
       'step': step.name,
       'calendarConnected': _calendarConnected,
       'types': householdTypes.toList(),
-      'calendarClearPending': _calendarClearPending,
     }),
   );
 
@@ -440,7 +461,11 @@ class AppController extends ChangeNotifier {
       'mainMemoryId': _mainMemoryId,
       'mainMemorySharedAt': mainMemory?.sharedAt,
       'accepted': accepted.toList(),
+      'lastIntake': _lastIntake,
       'episodes': episodes.values.map((episode) => episode.toJson()).toList(),
+      'episodeHistory': _episodeHistory.values
+          .map((row) => row.toJson())
+          .toList(),
       'cards': cards.values.map((card) => card.toJson()).toList(),
       'cardStarts': _cardStarts.values
           .map((record) => [
@@ -546,7 +571,6 @@ class AppController extends ChangeNotifier {
     if (reader == null) throw StateError('Calendar unavailable');
     _googleCalendar = await reader(interactive: true);
     _calendarConnected = true;
-    _calendarClearPending = false;
     calendarError = null;
   }
 
@@ -556,9 +580,12 @@ class AppController extends ChangeNotifier {
       await disconnectCalendar?.call();
       _calendarConnected = false;
       _googleCalendar = wire.Calendar(events: []);
-      _calendarClearPending = true;
       await _saveSetup();
-      await resendCalendar();
+      if (_usesReplayCalendar) {
+        await resendCalendar();
+      } else {
+        await sync();
+      }
     });
     if (setupError case final error?) {
       calendarError = error;
@@ -566,24 +593,30 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> resendCalendar({wire.Calendar? selected}) {
+  Future<void> resendCalendar({wire.Calendar? selected}) =>
+      _syncCalendar(selected: selected);
+
+  Future<void> _syncCalendar({wire.Calendar? selected, DateTime? serverTime}) {
     final id = household;
     if (starting || _disposed || id == null) return Future<void>.value();
     // A full replacement must follow any older read already in flight.
     return _calendarQueue = _calendarQueue.then((_) async {
       if (_disposed) return;
       try {
-        if (showsSampleCalendar) {
-          await _sendCalendar(id, sampleCalendar, sample: true);
-          if (_calendarClearPending) {
-            _calendarClearPending = false;
-            await _saveSetup();
+        if (!_calendarConnected) {
+          if (!_usesReplayCalendar) {
+            if (serverTime == null) return;
+            final birthday = _sampleAnchor?.add(sampleBirthdayOffset);
+            if (birthday == null ||
+                (cards.isEmpty && _sampleNeedsRenewal(birthday, serverTime))) {
+              await store.write(_sampleAnchorKey, serverTime.toIso8601String());
+              _sampleAnchor = serverTime;
+            }
           }
-        } else if (_calendarClearPending) {
-          await _sendCalendar(id, wire.Calendar(events: []));
-          _calendarClearPending = false;
-          await _saveSetup();
-        } else if (readCalendar case final reader? when _calendarConnected) {
+          if (!_calendarConnected) {
+            await _sendCalendar(id, displayCalendar, sample: true);
+          }
+        } else if (readCalendar case final reader? when serverTime == null) {
           final calendar = selected ?? await reader(interactive: false);
           if (_disposed || !_calendarConnected) return;
           _googleCalendar = calendar;
@@ -600,6 +633,11 @@ class AppController extends ChangeNotifier {
     });
   }
 
+  bool _sampleNeedsRenewal(DateTime birthday, DateTime now) =>
+      !now.isBefore(birthday.add(sampleBirthdayDuration)) ||
+      (now.isBefore(birthday) &&
+          birthday.difference(now) < sampleBirthdayRenewalWindow);
+
   Future<void> _sendCalendar(
     String id,
     wire.Calendar calendar, {
@@ -614,7 +652,8 @@ class AppController extends ChangeNotifier {
         .toString();
     final key = _calendarKey;
     // A local preview peer may have restarted with the same address.
-    final firstSampleSync = sample && _calendarFingerprint == null;
+    final firstSampleSync =
+        sample && _usesReplayCalendar && _calendarFingerprint == null;
     final previous = _calendarFingerprint ?? await store.read(key);
     if (_disposed || (sample && !showsSampleCalendar)) return;
     if (firstSampleSync || previous != fingerprint) {
@@ -692,6 +731,14 @@ class AppController extends ChangeNotifier {
       shareIssue = inbox.issue;
       uploadError = null;
       _change();
+      // A share can launch the App before its demo calendar has been synced.
+      if (queuedShares > 0 &&
+          !_usesReplayCalendar &&
+          !_calendarConnected &&
+          !refreshed) {
+        await _refresh();
+        if (_disposed) return;
+      }
       for (final order in inbox.orders) {
         final ShareReceipt receipt;
         try {
@@ -874,22 +921,11 @@ class AppController extends ChangeNotifier {
     );
   }
 
-  Future<void> _refresh() async {
-    final id = household!;
+  Future<Map<String, wire.EpisodeListEpisode>?> _listEpisodes(String id) async {
+    if (_episodeListRetry != null) return null;
+    final listed = <String, wire.EpisodeListEpisode>{};
+    String? before;
     try {
-      final cursor = _cursor;
-      var poll = await api.cards(id, since: cursor);
-      final rewound =
-          cursor != null &&
-          DateTime.parse(poll.serverTime).isBefore(DateTime.parse(cursor));
-      final reconcile = cursor != null && (rewound || stale);
-      final open = reconcile ? await api.cards(id) : null;
-      if (rewound) poll = open!;
-      DateTime.parse(poll.serverTime);
-      final returnedOpenIds = open?.cards.map((card) => card.cardId).toSet();
-
-      final listed = <String, wire.EpisodeListEpisode>{};
-      String? before;
       do {
         final list = await api.episodes(id, before: before);
         for (final row in list.episodes) {
@@ -904,25 +940,73 @@ class AppController extends ChangeNotifier {
         }
         before = next;
       } while (before != null);
+    } on AppApiException catch (error) {
+      if (!const {404, 405, 501}.contains(error.status)) rethrow;
+      if (!_disposed) {
+        _episodeListRetry = Timer(_idlePollInterval * 2, () {
+          _episodeListRetry = null;
+        });
+      }
+      return null;
+    }
+    return listed;
+  }
 
-      final latest = listed.values.firstOrNull?.episodeId;
+  Future<void> _refresh() async {
+    final id = household!;
+    DateTime? calendarTime;
+    try {
+      final cursor = _cursor;
+      var poll = await api.cards(id, since: cursor);
+      final rewound =
+          cursor != null &&
+          DateTime.parse(poll.serverTime).isBefore(DateTime.parse(cursor));
+      final reconcile = cursor != null && (rewound || stale);
+      final open = reconcile ? await api.cards(id) : null;
+      if (rewound) poll = open!;
+      final serverTime = DateTime.parse(poll.serverTime);
+      final returnedOpenIds = open?.cards.map((card) => card.cardId).toSet();
+
+      final cardUpdates = rewound
+          ? poll.cards
+          : [...?open?.cards, ...poll.cards];
+      final serverList = await _listEpisodes(id);
+      final listed =
+          serverList ??
+          {
+            if (!rewound)
+              for (final row in _episodeHistory.values)
+                if (row.status == wire.EpisodeStatus.CLOSED) row.episodeId: row,
+          };
       final details = (await Future.wait(
         {
-          ?latest,
+          ?listed.values.firstOrNull?.episodeId,
           ...accepted,
-          if (_lastIntake != null && listed.containsKey(_lastIntake))
+          if (_lastIntake != null &&
+              (serverList == null || listed.containsKey(_lastIntake)))
             _lastIntake!,
-          for (final row in listed.values)
+          for (final row in (serverList ?? _episodeHistory).values)
             if (row.status != wire.EpisodeStatus.CLOSED) row.episodeId,
+          if (serverList == null) ...{
+            for (final card in [...cards.values, ...cardUpdates])
+              card.episodeId,
+            for (final episode in episodes.values)
+              if (episode.status != wire.EpisodeStatus.CLOSED)
+                episode.episodeId,
+            ?_mainMemoryId,
+          },
         }.map((episodeId) async {
           try {
             final episode = await api.episode(episodeId);
             if (episode.episodeId != episodeId || episode.householdId != id) {
               throw const FormatException('Wrong episode');
             }
+            DateTime.parse(episode.sharedAt);
             return episode;
           } on AppApiException catch (error) {
-            if (error.status == 404 && !listed.containsKey(episodeId)) {
+            if (error.status == 404 &&
+                !(serverList?.containsKey(episodeId) ?? false)) {
+              listed.remove(episodeId);
               return null;
             }
             rethrow;
@@ -930,26 +1014,46 @@ class AppController extends ChangeNotifier {
         }),
       )).whereType<wire.Episode>().toList();
       if (_disposed) return;
-      final cardUpdates = rewound
-          ? poll.cards
-          : [...?open?.cards, ...poll.cards];
       for (final card in cardUpdates) {
         DateTime.parse(card.updatedAt);
         if (card.startsAt case final start?) DateTime.parse(start);
       }
 
       for (final episode in details) {
+        final cardIds = episode.cardIds;
+        // Archived cards disappear from episode detail. Keep their IDs for
+        // episodes whose preparation was seen before the close.
+        final seenCardIds =
+            episode.status == wire.EpisodeStatus.CLOSED &&
+                cardIds.isEmpty &&
+                !rewound
+            ? {
+                ...?_episodeHistory[episode.episodeId]?.cardIds,
+                for (final card in cardUpdates)
+                  if (card.episodeId == episode.episodeId) card.cardId,
+              }
+            : cardIds;
         listed[episode.episodeId] = wire.EpisodeListEpisode(
           episodeId: episode.episodeId,
-          cardIds: episode.cardIds,
+          cardIds: seenCardIds.toList(),
           itemCount: episode.itemCount,
           sharedAt: episode.sharedAt,
           status: episode.status,
         );
       }
+      final latest = serverList == null
+          ? (listed.values.toList()..sort(
+                  (a, b) =>
+                      DateTime.parse(b.sharedAt)
+                          .compareTo(DateTime.parse(a.sharedAt)),
+                ))
+                .firstOrNull
+                ?.episodeId
+          : listed.values.firstOrNull?.episodeId;
       final orderId = _lastIntake ?? latest;
       final order = listed[orderId];
-      final hasClosedCard = order != null &&
+      final hasClosedCard =
+          order != null &&
           order.status == wire.EpisodeStatus.CLOSED &&
           order.cardIds.isNotEmpty;
       if (_savedPreviewMemory case final saved?) {
@@ -1030,7 +1134,8 @@ class AppController extends ChangeNotifier {
             (record.sharedAt != null && row.sharedAt != record.sharedAt);
       });
       _rationales.removeWhere(
-        (id, _) => id != _mainMemoryId &&
+        (id, _) =>
+            id != _mainMemoryId &&
             (!listed.containsKey(id) ||
                 listed[id]!.status == wire.EpisodeStatus.CLOSED),
       );
@@ -1071,12 +1176,23 @@ class AppController extends ChangeNotifier {
       refreshed = true;
       serverUnavailable = false;
       refreshError = null;
+      final intake = _lastIntake;
+      if (intake != null && episodes.containsKey(intake)) {
+        final status = episodes[intake]!.status;
+        if (status == wire.EpisodeStatus.RECEIVED ||
+            status == wire.EpisodeStatus.READING) {
+          unawaited(_loadRationale(intake));
+        }
+      }
       for (final card in activeCards) {
         if (!isMemory(card)) unawaited(_loadRationale(card.episodeId));
       }
       if (_mainMemoryId case final memoryId?
           when memoryId != _closedRationaleId) {
         unawaited(_loadRationale(memoryId, closed: true));
+      }
+      if (!_calendarConnected && !_usesReplayCalendar) {
+        calendarTime = serverTime;
       }
     } catch (error) {
       stale = true;
@@ -1086,6 +1202,7 @@ class AppController extends ChangeNotifier {
           : _error(error, '새로 불러오지 못했어요. 다시 시도해 주세요.');
     }
     _change();
+    if (calendarTime != null) await _syncCalendar(serverTime: calendarTime);
     await _deliverNotifications();
   }
 
@@ -1234,6 +1351,12 @@ class AppController extends ChangeNotifier {
           wire.Reaction(reaction: wire.ReactionEnum.STOP),
         );
       } catch (error) {
+        if (error is AppApiException && error.status == 404) {
+          _pendingStops.remove(card.cardId);
+          _reactionUnavailable(card.cardId);
+          await _save();
+          return;
+        }
         if (error is AppApiException && error.status < 500) {
           _pendingStops.remove(card.cardId);
         } else {
@@ -1261,6 +1384,7 @@ class AppController extends ChangeNotifier {
     controlErrors.remove(card.cardId);
     _change();
     await _serialize(() async {
+      var refresh = true;
       try {
         final current = cards[card.cardId];
         final matching = current?.lines
@@ -1283,6 +1407,12 @@ class AppController extends ChangeNotifier {
           ),
         );
       } catch (error) {
+        if (error is AppApiException && error.status == 404) {
+          _pendingLines.remove(key);
+          _reactionUnavailable(card.cardId);
+          refresh = false;
+          return;
+        }
         if (error is AppApiException &&
             error.status < 500 &&
             error.status != 408) {
@@ -1294,9 +1424,14 @@ class AppController extends ChangeNotifier {
         }
         controlErrors[card.cardId] = _error(error, '준비 항목 변경을 확인하지 못했어요.');
       } finally {
-        await _refresh();
+        if (refresh) await _refresh();
       }
     });
+  }
+
+  void _reactionUnavailable(String cardId) {
+    controlErrors[cardId] = '아직 이 서버에서는 끌 수 없어요';
+    _change();
   }
 
   wire.Rationale? rationaleFor(String episodeId) => _rationales[episodeId];
@@ -1316,14 +1451,17 @@ class AppController extends ChangeNotifier {
             throw const FormatException('Wrong episode');
           }
           if (_disposed) return;
-          if (closed ? _mainMemoryId == id
+          if (closed
+              ? _mainMemoryId == id
               : episodes.containsKey(id) &&
-                  episodes[id]!.status != wire.EpisodeStatus.CLOSED) {
+                    episodes[id]!.status != wire.EpisodeStatus.CLOSED) {
             _rationales[id] = result;
             if (closed &&
-                episodes[id]!.cardIds.every((cardId) =>
-                    result.observations.any((row) =>
-                        row.cardId == cardId && row.verdict != null))) {
+                mainMemoryCardIds.every(
+                  (cardId) => result.observations.any(
+                    (row) => row.cardId == cardId && row.verdict != null,
+                  ),
+                )) {
               _closedRationaleId = id;
             }
             _change();
@@ -1338,9 +1476,11 @@ class AppController extends ChangeNotifier {
         }
       });
 
-  Future<({wire.Episode episode, wire.Rationale rationale})> readMemory(
-    String id,
-  ) async {
+  Future<({
+    wire.Episode episode,
+    wire.Rationale rationale,
+    List<String> cardIds,
+  })> readMemory(String id) async {
     final (episode, rationale) = await (
       api.episode(id),
       api.rationale(id),
@@ -1351,7 +1491,13 @@ class AppController extends ChangeNotifier {
         episode.status != wire.EpisodeStatus.CLOSED) {
       throw const FormatException('Wrong episode');
     }
-    return (episode: episode, rationale: rationale);
+    return (
+      episode: episode,
+      rationale: rationale,
+      cardIds: episode.cardIds.isEmpty
+          ? _episodeHistory[id]?.cardIds ?? const []
+          : episode.cardIds,
+    );
   }
 
   String _error(Object error, String fallback) {
@@ -1383,6 +1529,7 @@ class AppController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _timer?.cancel();
+    _episodeListRetry?.cancel();
     unawaited(_shareSubscription?.cancel());
     super.dispose();
   }
