@@ -38,6 +38,7 @@ from app.scripts.browser_demo_web import (
     APP_TOKEN, FLUTTER_REQUIRED, cached_web, fixture_defines, origin, proxy_command, temporary_root,
     web_command,
 )
+from scripts.demo_phone import application_id, cached_apk, install_phone
 from scripts.demo_start import guest_window, serve_start_page
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -125,8 +126,7 @@ def check_server(server):
         raise RuntimeError(f"Cannot reach Server at {server}/health") from None
 
 
-def cached_app(defines, build):
-    # The App builder also hashes its working Flutter inputs, including uncommitted source changes.
+def app_cache():
     try:
         tree = subprocess.check_output(
             ["git", "rev-parse", "HEAD:app"], cwd=ROOT, text=True, stderr=subprocess.DEVNULL,
@@ -139,10 +139,14 @@ def cached_app(defines, build):
     info = cache.lstat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
         raise RuntimeError(f"App cache directory must be private and owned by the current user: {cache}")
+    return cache / tree
 
+
+def cached_app(defines, build):
+    # The App builder also hashes its working Flutter inputs, including uncommitted source changes.
     # Use the App builder's cache-location entry point for this call.
     previous_cache = os.environ.get("XDG_CACHE_HOME")
-    os.environ["XDG_CACHE_HOME"] = str(cache / tree)
+    os.environ["XDG_CACHE_HOME"] = str(app_cache())
     try:
         return cached_web(defines, build)
     finally:
@@ -178,6 +182,8 @@ def main():
     app_options.add_argument("--no-app", action="store_true", help="Start without the App preview")
     app_options.add_argument("--app-web", type=Path, metavar="DIR", help="Serve a prebuilt App preview")
     app_options.add_argument("--export-app", type=Path, metavar="DIR", help="Copy the App build and exit")
+    parser.add_argument("--phone", action="store_true", help="Build the debug Android APK and install it through ADB")
+    parser.add_argument("--first-run", action="store_true", help="Build the App with first-run setup enabled")
     parser.add_argument("--shell-port", type=int, help="Demo shell port (default: choose a free port)")
     parser.add_argument("--no-shell", action="store_true", help="Start the live stack without the demo shell")
     parser.add_argument("--tagger", action="store_true", help="Enable Codex text tags in the demo shell")
@@ -203,6 +209,8 @@ def main():
         parser.error("--realistic requires the built-in fixture")
     if args.server and args.export_app is not None:
         parser.error("--export-app requires the built-in fixture")
+    if args.phone and args.export_app is not None:
+        parser.error("--phone starts the demo stack and cannot be used with --export-app")
     if args.app_web is not None:
         args.app_web = args.app_web.resolve()
         if not (args.app_web / "index.html").is_file():
@@ -224,6 +232,7 @@ def main():
         defines = {
             "SPIRA_BASE_URL": origin(args.proxy_port),
             "SPIRA_HOUSEHOLD_ID": args.household, "SPIRA_PEER": "server",
+            "SPIRA_FIXTURE_APP_TOKEN": APP_TOKEN,
         }
     else:
         args.household = args.household or HOUSEHOLD
@@ -233,6 +242,9 @@ def main():
         hub_key = HouseholdCreated.model_validate_json(onboarding.read_text(encoding="utf-8")).hub_api_key
         app_token = APP_TOKEN
         defines = fixture_defines(args.proxy_port, args.household, hub_key)
+    if args.first_run:
+        defines.pop("SPIRA_HOUSEHOLD_ID")
+        defines["SPIRA_FIRST_RUN"] = "1"
     if args.export_app is not None:
         try:
             export_app(args.export_app.resolve(), defines)
@@ -328,8 +340,10 @@ def run(args, mosquitto, directory, requests, hub_key, app_token, defines):
             resetting.release()
 
     def build(command, cwd):
-        if args.server:
-            command = [*command, "--no-web-resources-cdn"]
+        is_web = command[2] == "web"
+        if args.server and is_web:
+            command.append("--no-web-resources-cdn")
+        if args.server or not is_web:
             if os.getenv("UV_OFFLINE") == "1":
                 if status := build_process([command[0], "pub", "get", "--offline"], cwd):
                     return status
@@ -447,8 +461,14 @@ def run(args, mosquitto, directory, requests, hub_key, app_token, defines):
                 app_message = FLUTTER_REQUIRED
             else:
                 app_message = "App build: cache hit" if hit else "App build: built"
+        phone = None
+        if args.phone:
+            apk, hit = cached_apk(ROOT, app_cache(), defines, build)
+            phone = (apk, hit, application_id(ROOT))
+        if web or phone:
+            requests["proxy"] = args.proxy_port
         if web:
-            requests.update(proxy=args.proxy_port, app=args.web_port)
+            requests["app"] = args.web_port
         try:
             ports = choose_ports(requests, sim_host)
         except OSError as error:
@@ -457,16 +477,20 @@ def run(args, mosquitto, directory, requests, hub_key, app_token, defines):
         server = args.server or urls["fixture"]
         clock_url = None if args.server else f"{server}/v1/demo/clock"
         start_peers(args.keep)
-        if web:
-            if args.server:
+        if web or phone:
+            if args.server or phone:
                 launch("app-proxy", [sys.executable, "-m", "uvicorn", "scripts.demo_app_proxy:create_app", "--factory",
                                      "--host", "127.0.0.1", "--port", str(ports["proxy"]), "--no-access-log"],
                        ROOT, SPIRA_SERVER_URL=server, SPIRA_HOUSEHOLD=args.household,
-                       SPIRA_APP_TOKEN=app_token, SPIRA_WEB_ORIGIN=urls["app"])
+                       SPIRA_APP_TOKEN=app_token, SPIRA_WEB_ORIGIN=urls.get("app", ""),
+                       SPIRA_PHONE_TOKEN=APP_TOKEN if phone else "",
+                       SPIRA_DEMO_FIRST_RUN="1" if args.first_run else "0")
             else:
                 launch("app-proxy", proxy_command(server, urls["hub"], ports["proxy"], ports["app"]), ROOT)
-            proxy_health = urllib.request.Request(urls["proxy"] + "/health", headers={"Origin": urls["app"]})
+            headers = {"Origin": urls["app"]} if web else {"Authorization": f"Bearer {APP_TOKEN}"}
+            proxy_health = urllib.request.Request(urls["proxy"] + "/health", headers=headers)
             wait("App proxy", lambda: reachable(proxy_health))
+        if web:
             launch("app-web", web_command(web, ports["app"]), ROOT)
             wait("App preview", lambda: reachable(urls["app"] + "/"))
 
@@ -530,7 +554,11 @@ def run(args, mosquitto, directory, requests, hub_key, app_token, defines):
             print(f"Home key (우리 집): {hub_key}")
         if app_message:
             print(app_message)
-        if not web and not args.server:
+        if phone:
+            apk, hit, app_id = phone
+            print(f"Phone APK ({'cache hit' if hit else 'built'}): {apk}", flush=True)
+            install_phone(apk, ports["proxy"], app_id)
+        if not web and not args.server and not phone:
             print(f"App preview: app/scripts/browser-demo --demo-port {ports['sim']} "
                   f"--proxy-port {args.proxy_port} --web-port {args.web_port} --stack-log {url_file}")
         print(f"Logs:      {logs}\nCtrl-C to stop.", flush=True)

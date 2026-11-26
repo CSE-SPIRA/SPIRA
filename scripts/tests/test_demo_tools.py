@@ -165,6 +165,29 @@ def test_real_app_proxy_uses_backend_credentials(monkeypatch):
     ]
 
 
+def test_real_app_proxy_forwards_phone_calendar_with_backend_credentials(monkeypatch):
+    for name, value in {
+        "SPIRA_SERVER_URL": "http://server.test", "SPIRA_HOUSEHOLD": "h_123",
+        "SPIRA_WEB_ORIGIN": "", "SPIRA_PHONE_TOKEN": "demo", "SPIRA_APP_TOKEN": "test-app-token",
+    }.items():
+        monkeypatch.setenv(name, value)
+    calls = []
+
+    async def upstream(self, method, url, **kwargs):
+        calls.append((method, url, kwargs["headers"]["Authorization"], json.loads(kwargs["content"])))
+        return httpx.Response(202)
+
+    monkeypatch.setattr(httpx.AsyncClient, "request", upstream)
+    path = "/v1/households/h_123/calendar"
+    calendar = {"events": []}
+    with TestClient(create_app()) as client:
+        assert client.put(path, json=calendar).status_code == 403
+        phone = {"Authorization": "Bearer demo"}
+        assert client.put(path, headers={**phone, "Origin": "http://other.test"}, json=calendar).status_code == 403
+        assert client.put(path, headers=phone, json=calendar).status_code == 202
+    assert calls == [("PUT", f"http://server.test{path}", "Bearer test-app-token", calendar)]
+
+
 def test_stack_starts_without_flutter(tmp_path):
     broker = shutil.which("mosquitto")
     if broker is None:
@@ -245,13 +268,14 @@ def wait_for(probe, seconds=30):
 
 
 @contextmanager
-def local_launcher(tmp_path, *options, env=None, app_web=None):
+def local_launcher(tmp_path, *options, env=None, app_web=None, build_web=False):
     if shutil.which("mosquitto") is None:
         pytest.skip("Mosquitto is required for the live launcher test")
     ports = choose_ports(dict.fromkeys(("sim", "fixture", "mqtt", "hub", "shell", "start", "proxy", "app"), 0), "127.0.0.1")
+    app_options = ["--app-web", str(app_web)] if app_web is not None else ([] if build_web else ["--no-app"])
     command = [
         sys.executable, str(ROOT / "scripts/demo_up.py"),
-        *(["--no-app"] if app_web is None else ["--app-web", str(app_web)]),
+        *app_options,
         "--proxy-port", str(ports["proxy"]), "--web-port", str(ports["app"]),
         "--port", str(ports["sim"]), "--shell-port", str(ports["shell"]),
         "--start-port", str(ports["start"]), "--peer-ports",

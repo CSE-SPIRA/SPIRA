@@ -1,4 +1,4 @@
-"""Forward the local App preview's requests with server-side credentials."""
+"""Forward local web and Android App requests with server-side credentials."""
 
 import os
 import re
@@ -11,32 +11,35 @@ from fastapi.middleware.cors import CORSMiddleware
 def create_app():
     server = os.environ["SPIRA_SERVER_URL"]
     household = os.environ["SPIRA_HOUSEHOLD"]
-    origin = os.environ["SPIRA_WEB_ORIGIN"]
+    origin = os.getenv("SPIRA_WEB_ORIGIN")
+    phone_token = os.getenv("SPIRA_PHONE_TOKEN")
+    first_run = os.getenv("SPIRA_DEMO_FIRST_RUN") == "1"
     app_key = f"Bearer {os.environ['SPIRA_APP_TOKEN']}"
-    household_path = f"/v1/households/{household}"
-    routes = {
-        ("POST", "/v1/orders"), ("GET", f"{household_path}/episodes"),
-        ("GET", f"{household_path}/cards"), ("GET", f"{household_path}/memory"),
-        ("PUT", f"{household_path}/profile"), ("PUT", f"{household_path}/calendar"),
-        ("POST", f"{household_path}/pause"),
-    }
+    household_id = r"h_[a-z0-9]+" if first_run else re.escape(household)
+    household_path = rf"/v1/households/{household_id}"
     patterns = {
-        "GET": r"/v1/episodes/ep_[a-z0-9]+(?:/rationale)?",
-        "PUT": r"/v1/episodes/ep_[a-z0-9]+/order",
-        "DELETE": rf"{household_path}/memory/(?:syn_[a-zA-Z0-9_-]+|home_{household}_ep_[a-z0-9]+_[0-9]+)",
-        "POST": r"/v1/cards/nc_[a-z0-9]+/reactions",
+        "GET": rf"/v1/episodes/ep_[a-z0-9]+(?:/rationale)?|{household_path}/(?:episodes|cards|memory)",
+        "PUT": rf"/v1/episodes/ep_[a-z0-9]+/order|{household_path}/(?:profile|calendar)",
+        "DELETE": rf"{household_path}/memory/(?:syn_[a-zA-Z0-9_-]+|home_{household_id}_ep_[a-z0-9]+_[0-9]+)",
+        "POST": rf"/v1/orders|/v1/cards/nc_[a-z0-9]+/reactions|{household_path}/pause",
     }
+    if first_run:
+        patterns["POST"] += "|/v1/households"
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-    app.add_middleware(CORSMiddleware, allow_origins=[origin], allow_methods=["GET", "POST", "PUT", "DELETE"],
+    app.add_middleware(CORSMiddleware, allow_origins=[origin] if origin else [], allow_methods=["GET", "POST", "PUT", "DELETE"],
                        allow_headers=["Authorization", "Content-Type"])
 
     @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
     async def forward(request: Request):
-        if request.headers.get("origin") != origin:
+        request_origin = request.headers.get("origin")
+        web = origin and request_origin == origin
+        phone = (phone_token and request_origin is None
+                 and request.headers.get("authorization") == f"Bearer {phone_token}")
+        if not (web or phone):
             raise HTTPException(403)
         method, path = request.method, request.url.path
         headers = {"Accept": "application/json"}
-        if (method, path) in routes or re.fullmatch(patterns.get(method, r"(?!)"), path):
+        if re.fullmatch(patterns[method], path):
             headers["Authorization"] = app_key
         elif (method, path) != ("GET", "/health"):
             raise HTTPException(404)
