@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 // ignore: deprecated_member_use
 import 'package:flutter/material.dart';
 
@@ -19,12 +17,9 @@ class SpiraMark extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Transform.rotate(
-          angle: -34 * math.pi / 180,
-          child: CustomPaint(
-            size: Size.square(26 * markScale),
-            painter: _SpiraLeafPainter(scale: markScale),
-          ),
+        CustomPaint(
+          size: Size.square(26 * markScale),
+          painter: const _SpiraLogoPainter(),
         ),
         SizedBox(width: 13 * markScale),
         KoreanText(
@@ -42,40 +37,47 @@ class SpiraMark extends StatelessWidget {
   }
 }
 
-class _SpiraLeafPainter extends CustomPainter {
-  const _SpiraLeafPainter({required this.scale});
-
-  final double scale;
-
-  static RRect _outline(Rect box) {
-    final large = Radius.elliptical(box.width * 0.74, box.height * 0.74);
-    final small = Radius.elliptical(box.width * 0.43, box.height * 0.43);
-    // CSS scales overlapping radii together before subtracting the border.
-    return RRect.fromRectAndCorners(
-      box,
-      topLeft: large,
-      topRight: small,
-      bottomLeft: small,
-      bottomRight: large,
-    ).scaleRadii();
-  }
+class _SpiraLogoPainter extends CustomPainter {
+  const _SpiraLogoPainter();
 
   @override
   void paint(Canvas canvas, Size size) {
-    final outerStroke = 1.8 * scale;
-    final innerStroke = 1.4 * scale;
-    final paint = Paint()..color = DesignTokens.green;
-    final box = Offset.zero & size;
-    final outer = _outline(box);
-    // The pseudo-element's inset is measured from the parent's padding edge.
-    final inner = _outline(box.deflate(outerStroke + 4 * scale));
-    canvas.drawDRRect(outer, outer.deflate(outerStroke), paint);
-    canvas.drawDRRect(inner, inner.deflate(innerStroke), paint);
+    // Coordinates are measured on the 460 × 460 CSE-SPIRA organisation avatar.
+    canvas.save();
+    canvas.scale(size.shortestSide / 460);
+
+    final roof = Path()
+      ..moveTo(101.5, 248.5)
+      ..lineTo(230, 152.5)
+      ..lineTo(357.5, 248.5);
+    canvas.drawPath(
+      roof,
+      Paint()
+        ..color = const Color(0xFF1F2328)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 27
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+
+    final brown = Paint()..color = const Color(0xFFA8743F);
+    canvas.drawCircle(const Offset(230, 82), 23, brown);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        const Rect.fromLTRB(157, 262, 303, 367),
+        const Radius.circular(10),
+      ),
+      brown,
+    );
+    canvas.drawRect(
+      const Rect.fromLTRB(216, 262, 244, 367),
+      Paint()..color = const Color(0xFF865C32),
+    );
+    canvas.restore();
   }
 
   @override
-  bool shouldRepaint(_SpiraLeafPainter oldDelegate) =>
-      oldDelegate.scale != scale;
+  bool shouldRepaint(_SpiraLogoPainter oldDelegate) => false;
 }
 
 class SpiraTopBar extends StatelessWidget implements PreferredSizeWidget {
