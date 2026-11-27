@@ -15,7 +15,7 @@ SPIRA reads an order screenshot, finds similar cases in a synthetic purchase-int
 | [`hub/`](hub) | Home Hub: pull plan, triggers, execute, read back, restore | Yejoon Kim |
 | [`simulator/`](simulator) | Virtual household (MQTT) + 2D viewer | Yejoon Kim |
 | [`contracts/`](contracts) | Values shared between parts: API, schemas, enums, fixtures | Shared |
-| [`docs/`](docs) | [Architecture](docs/architecture.md) · [Paper (LaTeX)](docs/paper) | Shared · Jeewon Lee |
+| [`docs/`](docs) | [Architecture](docs/architecture.md) · Paper ([LaTeX](docs/paper.tex) · [PDF](docs/paper.pdf)) | Shared · Jeewon Lee |
 | [SPIRA_KB](https://github.com/CSE-SPIRA/SPIRA_KB) | Synthetic purchase-intent knowledge base (separate repository) | Uijin Lee |
 
 ## Where to start
@@ -26,11 +26,11 @@ SPIRA reads an order screenshot, finds similar cases in a synthetic purchase-int
 
 ## Paper
 
-Build from `docs/paper` with [Tectonic](https://tectonic-typesetting.github.io):
+Build from `docs` with [Tectonic](https://tectonic-typesetting.github.io):
 
 ```bash
-cd docs/paper
-tectonic -X compile main.tex
+cd docs
+tectonic -X compile paper.tex
 ```
 
 ## Team

@@ -73,7 +73,7 @@ export function createPhone(context, ui) {
     </div>`;
   }
 
-  // Line states and the after-party review use the App's words (design/vocabulary.json) and
+  // Line states and the after-party review use the App's words (demo-shell/design/vocabulary.json) and
   // show only what the Server's card and rationale say, matched by card_id as the App does.
   function rawLines(card) {
     return state.cards.find(({ card_id }) => card_id === card.card_id)?.lines ?? [];

@@ -47,7 +47,7 @@ done
 if [ ! -x "$PEERS_VENV/bin/python" ]; then
   say "처음 한 번: 시뮬레이터·허브·demo-shell 가상환경을 만들어요 (몇 분)"
   python3.12 -m venv "$PEERS_VENV"
-  "$PEERS_VENV/bin/pip" install -q -e contracts/generated/python -e 'simulator[dev]' -r design/requirements.txt \
+  "$PEERS_VENV/bin/pip" install -q -e contracts/generated/python -e 'simulator[dev]' -r demo-shell/design/requirements.txt \
     -r hub/requirements.txt -r demo-shell/requirements.txt
 fi
 "$PEERS_VENV/bin/python" -c "import fastapi, httpx, multipart, yaml, uvicorn" 2>/dev/null \

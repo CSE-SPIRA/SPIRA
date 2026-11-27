@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('App design assets are current', () async {
     final result = await Process.run('python3', [
-      '../design/build.py',
+      '../demo-shell/design/build.py',
       '--check',
       '--part',
       'app',

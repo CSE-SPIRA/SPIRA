@@ -11,7 +11,7 @@ From `simulator/`, use Python 3.12 or newer. Substitute your Python executable i
 
 ```bash
 python3.12 -m venv .venv
-.venv/bin/pip install -e ../contracts/generated/python -e '.[dev]' -r ../design/requirements.txt \
+.venv/bin/pip install -e ../contracts/generated/python -e '.[dev]' -r ../demo-shell/design/requirements.txt \
   -r ../hub/requirements.txt
 ```
 
@@ -83,7 +83,7 @@ assets.
 
 ## Tests
 
-From the repository root. The design asset check also needs `design/requirements.txt` in the same environment:
+From the repository root. The design asset check also needs `demo-shell/design/requirements.txt` in the same environment:
 
 ```bash
 PYTHONPATH=simulator PYTHONDONTWRITEBYTECODE=1 simulator/.venv/bin/python -m pytest -rx simulator/tests

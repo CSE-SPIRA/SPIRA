@@ -33,7 +33,7 @@ Draft PRs are welcome for work that is not ready yet.
 | `server/` | Seojin |
 | `hub/` · `app/` · `simulator/` | Yejoon |
 | `contracts/` | Seojin (draft) + affected owners review |
-| `docs/paper/` | Jeewon |
+| `docs/paper.tex` · `docs/paper.pdf` | Jeewon |
 | `docs/` (other) | Shared |
 | Knowledge base | separate repository [SPIRA_KB](https://github.com/CSE-SPIRA/SPIRA_KB) (Uijin) |
 

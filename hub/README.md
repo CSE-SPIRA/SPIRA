@@ -141,7 +141,7 @@ PYTHONPATH=contracts/generated/python uv run --no-project --python 3.12 \
 | Change | File |
 | --- | --- |
 | Installed devices, bindings and home signals | [`installation.example.json`](installation.example.json) |
-| Shared design and vocabulary | [`design/`](../design/README.md) |
+| Shared design and vocabulary | [`demo-shell/design/`](../demo-shell/design/README.md) |
 | Runtime and dashboard implementation | [`spira_hub/`](spira_hub) |
 | Fixture Server replay | [`tests/fixture_server/`](tests/fixture_server) |
 
