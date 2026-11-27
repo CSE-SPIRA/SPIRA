@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api/app_api.dart';
@@ -31,10 +32,11 @@ class PreferencesAppStore implements AppStore {
       _preferences.setString(key, value);
 }
 
-enum SetupStep { calendar, household, connection, devices, ready }
+enum SetupStep { welcome, calendar, household, connection, devices, ready }
 
 const _idlePollInterval = Duration(seconds: 30);
 const _activePollInterval = Duration(seconds: 3);
+const _calendarSyncError = '캘린더를 동기화하지 못했어요.';
 
 typedef MemoryDate = ({String episodeId, String cardId, String startsAt});
 typedef _ObservedCardDate = ({MemoryDate date, String? sharedAt});
@@ -53,6 +55,7 @@ class AppController extends ChangeNotifier {
     required this.fixture,
     this.browserPreview = false,
     this.firstRun = false,
+    this.hasDelegationRoute = false,
     this.readCalendar,
     this.disconnectCalendar,
     this.pickImages,
@@ -66,6 +69,7 @@ class AppController extends ChangeNotifier {
   final bool fixture;
   final bool browserPreview;
   final bool firstRun;
+  final bool hasDelegationRoute;
   final CalendarReader? readCalendar;
   final Future<void> Function()? disconnectCalendar;
   final GalleryPicker? pickImages;
@@ -91,7 +95,7 @@ class AppController extends ChangeNotifier {
   String get _connectionKey => 'spira.connection.v1.$_environment';
 
   String? household;
-  SetupStep step = SetupStep.calendar;
+  SetupStep step = SetupStep.welcome;
   String? connectionCode;
   bool starting = true;
   bool busy = false;
@@ -454,15 +458,16 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> _saveSetup() => store.write(
-    _setupKey,
-    jsonEncode({
-      'household': household,
-      'step': step.name,
-      'calendarConnected': _calendarConnected,
-      'types': householdTypes.toList(),
-    }),
-  );
+  Future<void> _saveSetup({SetupStep? nextStep, bool? calendarConnected}) =>
+      store.write(
+        _setupKey,
+        jsonEncode({
+          'household': household,
+          'step': (nextStep ?? step).name,
+          'calendarConnected': calendarConnected ?? _calendarConnected,
+          'types': householdTypes.toList(),
+        }),
+      );
 
   Future<void> _save() => store.write(
     _snapshotKey,
@@ -551,15 +556,45 @@ class AppController extends ChangeNotifier {
     });
   }
 
-  Future<void> finishCalendar({required bool connect}) async {
-    if (busy) return;
+  Future<void> startSetup() async {
+    if (busy || step != SetupStep.welcome) return;
     await _setup(() async {
-      if (connect) {
-        await _connectCalendar();
-        _initialCalendar = _googleCalendar;
+      await _saveSetup(nextStep: SetupStep.calendar);
+      step = SetupStep.calendar;
+    });
+  }
+
+  Future<void> finishCalendar({required bool connect}) async {
+    final reader = readCalendar;
+    if (busy || step != SetupStep.calendar || (connect && reader == null)) {
+      return;
+    }
+    await _setup(() async {
+      calendarError = null;
+      wire.Calendar? calendar;
+      if (connect && reader != null) {
+        try {
+          calendar = await reader(interactive: true);
+        } catch (error) {
+          calendarError = switch (error) {
+            GoogleSignInException(code: GoogleSignInExceptionCode.canceled) =>
+              null,
+            GoogleSignInException() || GoogleAuthorizationException() =>
+              'Google에 연결하지 못했어요. 건너뛰고 나중에 우리 집에서 연결할 수 있어요.',
+            _ => _calendarSyncError,
+          };
+          return;
+        }
       }
+      await _saveSetup(
+        nextStep: SetupStep.household,
+        calendarConnected: calendar != null,
+      );
+      if (calendar != null) {
+        _googleCalendar = _initialCalendar = calendar;
+      }
+      _calendarConnected = calendar != null;
       step = SetupStep.household;
-      await _saveSetup();
     });
   }
 
@@ -636,7 +671,7 @@ class AppController extends ChangeNotifier {
       } catch (error) {
         calendarError = _error(
           error,
-          showsSampleCalendar ? '예시 일정을 보내지 못했어요.' : '캘린더를 동기화하지 못했어요.',
+          showsSampleCalendar ? '예시 일정을 보내지 못했어요.' : _calendarSyncError,
         );
       }
       _change();

@@ -15,9 +15,10 @@ import 'memory_sheet.dart';
 import 'status_badge.dart';
 
 class Preparations extends StatelessWidget {
-  const Preparations(this.app, {super.key});
+  const Preparations(this.app, {super.key, required this.devTools});
 
   final AppController app;
+  final bool devTools;
 
   @override
   Widget build(BuildContext context) {
@@ -101,7 +102,7 @@ class Preparations extends StatelessWidget {
         ],
       ),
     );
-    if (!app.demoPreview) return main;
+    if (!devTools || !app.demoPreview) return main;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -148,7 +149,7 @@ class _OrderPanelState extends State<_OrderPanel> {
         if (widget.collapsible)
           _OrderSummary(
             order: order,
-            thumbnail: images.firstOrNull,
+            images: images,
             expanded: _expanded,
             onTap: () => setState(() => _expanded = !_expanded),
           ),
@@ -290,6 +291,9 @@ class _RecentMemories extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: colors.onSurfaceVariant,
+    );
     final prepared = app.memoryDates.toList()
       ..sort((a, b) => b.startsAt.compareTo(a.startsAt));
     final shown = prepared.take(5).toList();
@@ -333,8 +337,11 @@ class _RecentMemories extends StatelessWidget {
       spacing: DesignTokens.space8,
       children: [
         KoreanText('최근 이 집의 기억', style: theme.textTheme.titleMedium),
-        if (shown.isEmpty && orders.isEmpty)
-          const KoreanText('아직 쌓인 기억이 없어요.'),
+        if (shown.isEmpty && orders.isEmpty) ...[
+          KoreanText('1. 온라인 주문 화면 캡처를 올려요', style: muted),
+          KoreanText('2. SPIRA가 그날에 맞는 준비를 정해요', style: muted),
+          KoreanText('3. 그날 집이 알아서 맞춰 움직여요', style: muted),
+        ],
         for (final memory in shown)
           tile(
             key: ValueKey('recent-memory-${memory.episodeId}'),
@@ -368,13 +375,13 @@ class _RecentMemories extends StatelessWidget {
 class _OrderSummary extends StatelessWidget {
   const _OrderSummary({
     required this.order,
-    required this.thumbnail,
+    required this.images,
     required this.expanded,
     required this.onTap,
   });
 
   final wire.Episode? order;
-  final Uint8List? thumbnail;
+  final List<Uint8List> images;
   final bool expanded;
   final VoidCallback onTap;
 
@@ -389,53 +396,153 @@ class _OrderSummary extends StatelessWidget {
         '가린 품목 ${order!.maskedCount}개',
     ].join(' · ');
     final colors = Theme.of(context).colorScheme;
+    final thumbnail = images.firstOrNull;
+    const receipt = Icon(Icons.receipt_long_outlined, size: 20);
     return Material(
+      key: const ValueKey('order-scan-line'),
       color: colors.surfaceContainerHighest,
       borderRadius: BorderRadius.circular(DesignTokens.radius12),
       clipBehavior: Clip.antiAlias,
-      child: Semantics(
-        expanded: expanded,
-        child: InkWell(
-          key: const ValueKey('order-scan-line'),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(DesignTokens.space8),
-            child: Row(
-              spacing: DesignTokens.space8,
-              children: [
-                SizedBox.square(
-                  dimension: DesignTokens.space32,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(DesignTokens.radius6),
-                    child: thumbnail == null
-                        ? const Icon(Icons.receipt_long_outlined, size: 20)
-                        : Image.memory(
-                            thumbnail!,
-                            fit: BoxFit.cover,
-                            cacheWidth: 96,
-                            semanticLabel: '주문 사진',
-                            errorBuilder: (_, _, _) => const Icon(
-                              Icons.receipt_long_outlined,
-                              size: 20,
-                            ),
-                          ),
+      child: Row(
+        children: [
+          if (thumbnail != null)
+            Padding(
+              padding: const EdgeInsets.all(DesignTokens.space8),
+              child: Tooltip(
+                message: '주문 사진 크게 보기',
+                child: Material(
+                  color: colors.surface,
+                  borderRadius: BorderRadius.circular(DesignTokens.radius8),
+                  clipBehavior: Clip.antiAlias,
+                  child: Semantics(
+                    button: true,
+                    child: InkWell(
+                      onTap: () => showDialog<void>(
+                        context: context,
+                        useSafeArea: false,
+                        builder: (context) => _OrderScreenshots(images),
+                      ),
+                      child: SizedBox.square(
+                        dimension: DesignTokens.space48,
+                        child: Image.memory(
+                          thumbnail,
+                          fit: BoxFit.cover,
+                          cacheWidth: 144,
+                          excludeFromSemantics: true,
+                          errorBuilder: (_, _, _) => receipt,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-                Expanded(
-                  child: KoreanText(
-                    summary,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleSmall,
+              ),
+            ),
+          Expanded(
+            child: Semantics(
+              expanded: expanded,
+              button: true,
+              child: InkWell(
+                onTap: onTap,
+                child: Container(
+                  constraints: BoxConstraints(
+                    minHeight: thumbnail == null
+                        ? DesignTokens.space48
+                        : DesignTokens.space48 + 2 * DesignTokens.space8,
+                  ),
+                  padding: const EdgeInsets.all(DesignTokens.space8),
+                  child: Row(
+                    spacing: DesignTokens.space8,
+                    children: [
+                      if (thumbnail == null)
+                        const SizedBox.square(
+                          dimension: DesignTokens.space32,
+                          child: receipt,
+                        ),
+                      Expanded(
+                        child: KoreanText(
+                          summary,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                      ),
+                      Icon(
+                        expanded ? Icons.expand_less : Icons.expand_more,
+                        color: colors.onSurfaceVariant,
+                      ),
+                    ],
                   ),
                 ),
-                Icon(
-                  expanded ? Icons.expand_less : Icons.expand_more,
-                  color: colors.onSurfaceVariant,
-                ),
-              ],
+              ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OrderScreenshots extends StatefulWidget {
+  const _OrderScreenshots(this.images);
+
+  final List<Uint8List> images;
+
+  @override
+  State<_OrderScreenshots> createState() => _OrderScreenshotsState();
+}
+
+class _OrderScreenshotsState extends State<_OrderScreenshots> {
+  int _index = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final count = widget.images.length;
+    return Dialog.fullscreen(
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                IconButton(
+                  tooltip: '닫기',
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close),
+                ),
+                const Expanded(child: KoreanText('주문 사진')),
+                if (count > 1) ...[
+                  IconButton(
+                    tooltip: '이전 사진',
+                    onPressed: _index == 0
+                        ? null
+                        : () => setState(() => _index--),
+                    icon: const Icon(Icons.chevron_left),
+                  ),
+                  KoreanText('${_index + 1} / $count'),
+                  IconButton(
+                    tooltip: '다음 사진',
+                    onPressed: _index == count - 1
+                        ? null
+                        : () => setState(() => _index++),
+                    icon: const Icon(Icons.chevron_right),
+                  ),
+                ],
+              ],
+            ),
+            Expanded(
+              child: InteractiveViewer(
+                key: ValueKey(_index),
+                child: Image.memory(
+                  widget.images[_index],
+                  fit: BoxFit.contain,
+                  semanticLabel: '주문 사진 ${_index + 1}',
+                  errorBuilder: (_, _, _) => const Center(
+                    child: Icon(Icons.image_not_supported_outlined),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -7,6 +7,8 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'api/app_api.dart';
 import 'app_controller.dart';
+import 'design_tokens.g.dart';
+import 'features/brand.dart';
 import 'features/calendar.dart';
 import 'features/labels.dart';
 import 'features/our_home.dart';
@@ -42,6 +44,7 @@ void main() {
   const peer = String.fromEnvironment('SPIRA_PEER', defaultValue: 'server');
   const previewProxy = String.fromEnvironment('SPIRA_PREVIEW_PROXY') == '1';
   const firstRun = String.fromEnvironment('SPIRA_FIRST_RUN') == '1';
+  const devTools = String.fromEnvironment('SPIRA_DEV_TOOLS') == '1';
   const fixture = peer == 'fixture' || previewProxy;
   const buildToken = String.fromEnvironment('SPIRA_FIXTURE_APP_TOKEN');
   final api = AppApi(baseUrl);
@@ -53,6 +56,7 @@ void main() {
   final gallery = OrderGallery();
   runApp(
     SpiraApp(
+      devTools: devTools,
       app: AppController(
         api: api,
         platform: android ? AndroidBridge() : null,
@@ -71,9 +75,10 @@ void main() {
 }
 
 class SpiraApp extends StatelessWidget {
-  const SpiraApp({required this.app, super.key});
+  const SpiraApp({required this.app, this.devTools = false, super.key});
 
   final AppController app;
+  final bool devTools;
 
   @override
   Widget build(BuildContext context) {
@@ -86,15 +91,16 @@ class SpiraApp extends StatelessWidget {
       supportedLocales: const [Locale('ko')],
       // ignore: deprecated_member_use
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
-      home: _Home(app),
+      home: _Home(app, devTools: devTools),
     );
   }
 }
 
 class _Home extends StatefulWidget {
-  const _Home(this.app);
+  const _Home(this.app, {required this.devTools});
 
   final AppController app;
+  final bool devTools;
 
   @override
   State<_Home> createState() => _HomeState();
@@ -150,65 +156,78 @@ class _HomeState extends State<_Home> with WidgetsBindingObserver {
     listenable: app,
     builder: (context, _) {
       final ready = !app.starting && app.step == SetupStep.ready;
-      final surface = ready ? Theme.of(context).colorScheme.surface : null;
+      final welcome = app.step == SetupStep.welcome;
+      final theme = Theme.of(context);
       final lastCheck = app.lastServerCheck;
       return Scaffold(
-        backgroundColor: surface,
-        appBar: AppBar(
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const KoreanText('SPIRA'),
-              if (app.fixture && (!app.demoPreview || _tab != _HomeTab.main))
-                KoreanText(
-                  fixturePreviewLabel,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-            ],
-          ),
-          backgroundColor: surface,
-          actions: [
-            if (app.needsToken || (ready && _tab == _HomeTab.ourHome))
-              IconButton(
-                tooltip: '서버 접속 토큰 입력',
-                onPressed: _token,
-                icon: const Icon(Icons.key),
+        backgroundColor: ready ? theme.colorScheme.surface : null,
+        appBar: welcome
+            ? null
+            : SpiraTopBar(
+                showFixtureLabel:
+                    widget.devTools &&
+                    app.fixture &&
+                    (!ready || !app.demoPreview || _tab != _HomeTab.main),
+                onEnterToken:
+                    widget.devTools &&
+                        (app.needsToken || (ready && _tab == _HomeTab.ourHome))
+                    ? _token
+                    : null,
               ),
-          ],
-        ),
         body: SafeArea(
           bottom: !ready,
-          child: app.starting
-              ? const Center(
-                  child: CircularProgressIndicator(semanticsLabel: '앱 시작 중'),
-                )
-              : ready
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (app.serverUnavailable)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
-                        child: Semantics(
-                          liveRegion: true,
-                          child: KoreanText(
-                            lastCheck == null
-                                ? '서버에 연결할 수 없어요'
-                                : '서버에 연결할 수 없어요 · 마지막 확인 ${seoulClock(lastCheck)}',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (!widget.devTools && app.needsToken)
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: DesignTokens.space20,
+                  ),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
+                      onPressed: _token,
+                      style: TextButton.styleFrom(
+                        foregroundColor: theme.colorScheme.onSurfaceVariant,
                       ),
-                    Expanded(
-                      child: switch (_tab) {
-                        _HomeTab.main => Preparations(app),
+                      child: const KoreanText('서버 연결에 필요한 접속 토큰 입력'),
+                    ),
+                  ),
+                ),
+              if (ready && app.serverUnavailable)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+                  child: Semantics(
+                    liveRegion: true,
+                    child: KoreanText(
+                      lastCheck == null
+                          ? '서버에 연결할 수 없어요'
+                          : '서버에 연결할 수 없어요 · 마지막 확인 ${seoulClock(lastCheck)}',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
+                ),
+              Expanded(
+                child: app.starting
+                    ? const Center(
+                        child: CircularProgressIndicator(
+                          semanticsLabel: '앱 시작 중',
+                        ),
+                      )
+                    : ready
+                    ? switch (_tab) {
+                        _HomeTab.main => Preparations(
+                          app,
+                          devTools: widget.devTools,
+                        ),
                         _HomeTab.calendar => PreparationCalendar(app),
                         _HomeTab.ourHome => OurHome(app),
-                      },
-                    ),
-                  ],
-                )
-              : SetupScreen(app),
+                      }
+                    : SetupScreen(app),
+              ),
+            ],
+          ),
         ),
         bottomNavigationBar: ready
             ? _TabBar(

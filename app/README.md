@@ -25,11 +25,17 @@ for a qualified team Server. An Android emulator can reach a local peer
 through `10.0.2.2`. Debug builds allow HTTP.
 
 ```sh
-flutter run -d <android-device-id> --dart-define-from-file=.env
+flutter run -d <android-device-id> --dart-define-from-file=.env --dart-define=SPIRA_DEV_TOOLS=1
 ```
 
-If the peer requires authentication, enter the App bearer token via the
-toolbar key. Set `SPIRA_HOUSEHOLD_ID` to open the household created by
+The local developer command enables the toolbar key in **우리 집** or when the
+Server asks for a token, plus a qualifier on fixture runs. `SPIRA_DEV_TOOLS=1`
+can also go in `.env`. For the default App, omit the flag and leave
+`SPIRA_DEV_TOOLS` unset in `.env`. If the Server asks for authentication, use
+**서버 연결에 필요한 접속 토큰 입력** below the top bar to enter the App bearer
+token.
+
+Set `SPIRA_HOUSEHOLD_ID` to open the household created by
 `server/scripts/demo_home.py` directly. The App needs the Server URL and App
 credentials to open that household. Set `SPIRA_FIRST_RUN=1` to run onboarding
 even with a configured household.
@@ -55,7 +61,8 @@ events after accepting the calendar.
 From the repository root, use `app/scripts/browser-demo` for the fixture
 preview. It requires Flutter, Python, `uv`, and `mosquitto`. The launcher
 starts or reuses the demo stack and connects the App preview to the fixture
-Server. Use **예시 주문으로 공유** or **주문 분석하기** to send an order.
+Server. Both launch modes pass `SPIRA_DEV_TOOLS=1`. Use **예시 주문으로 공유** or
+**주문 분석하기** to send an order.
 Use `--build-serve` to serve a built preview. Add `--first-run` to start
 onboarding from an empty App, including when the fixture already has a
 household. The first-run build skips Google, collects household types, shows
@@ -78,9 +85,10 @@ web build. `app/scripts/demo-shell-web` builds it into `app/build/web` with
 `h_demo`, or `DEMO_HOUSEHOLD`) and `SPIRA_BASE_URL` = the shell origin +
 `/demo/app-api` (default `http://127.0.0.1:8733`, or `DEMO_ORIGIN`). The shell
 serves the build at `/demo/app/` and forwards the App's contract calls to the
-Server with its own App token, so the web build holds no token. **주문 분석하기**
-opens the browser file picker there; on Android it opens the gallery
-(`image_picker`). Rebuild after App changes; restart is not needed.
+Server with its own App token. The phone uses the default product build with
+`SPIRA_DEV_TOOLS` unset. **주문 분석하기** opens the browser file picker there
+and the gallery (`image_picker`) on Android. The shell serves the updated App
+after a rebuild.
 
 ```sh
 app/scripts/demo-shell-web

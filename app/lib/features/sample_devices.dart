@@ -13,11 +13,30 @@ import 'status_badge.dart';
 
 typedef _SampleDevice = ({wire.Device device, String? label});
 
+class DeviceDelegationHint extends StatelessWidget {
+  const DeviceDelegationHint({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: DesignTokens.space8),
+      child: KoreanText(
+        '기기별로 맡길지는 집 허브가 연결되면 고를 수 있어요.',
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
 class SampleDevices extends StatefulWidget {
-  const SampleDevices({super.key, this.app});
+  const SampleDevices({super.key, required this.showDelegation, this.app});
 
   // Onboarding passes no controller and has no card controls.
   final AppController? app;
+  final bool showDelegation;
 
   @override
   State<SampleDevices> createState() => _SampleDevicesState();
@@ -55,7 +74,7 @@ class _SampleDevicesState extends State<SampleDevices> {
                   color: colors.onSurfaceVariant,
                 ),
               ),
-              if (snapshot.hasData)
+              if (widget.showDelegation && snapshot.hasData)
                 KoreanText('맡기기', style: theme.textTheme.bodySmall),
             ],
           ),
@@ -72,6 +91,7 @@ class _SampleDevicesState extends State<SampleDevices> {
                   key: ValueKey('device-room-$room'),
                   room: room,
                   devices: devices,
+                  showDelegation: widget.showDelegation,
                   app: widget.app,
                 ),
         ],
@@ -85,11 +105,13 @@ class _DeviceRoom extends StatelessWidget {
     super.key,
     required this.room,
     required this.devices,
+    required this.showDelegation,
     required this.app,
   });
 
   final String room;
   final Iterable<_SampleDevice> devices;
+  final bool showDelegation;
   final AppController? app;
 
   @override
@@ -121,6 +143,7 @@ class _DeviceRoom extends StatelessWidget {
                 _DeviceRow(
                   key: ValueKey('sample-device-${entry.device.id}'),
                   entry: entry,
+                  showDelegation: showDelegation,
                   app: app,
                 ),
               ],
@@ -133,9 +156,15 @@ class _DeviceRoom extends StatelessWidget {
 }
 
 class _DeviceRow extends StatelessWidget {
-  const _DeviceRow({super.key, required this.entry, required this.app});
+  const _DeviceRow({
+    super.key,
+    required this.entry,
+    required this.showDelegation,
+    required this.app,
+  });
 
   final _SampleDevice entry;
+  final bool showDelegation;
   final AppController? app;
 
   @override
@@ -145,7 +174,10 @@ class _DeviceRow extends StatelessWidget {
     final theme = Theme.of(context);
     final name = entry.label ?? deviceNames[type] ?? '기기';
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: DesignTokens.space12),
+      padding: EdgeInsets.symmetric(
+        horizontal: DesignTokens.space12,
+        vertical: showDelegation ? 0 : DesignTokens.space8,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -158,25 +190,22 @@ class _DeviceRow extends StatelessWidget {
                 color: theme.colorScheme.primary,
               ),
               Expanded(
-                child: KoreanText(name, style: theme.textTheme.titleMedium),
-              ),
-              Flexible(
                 child: KoreanText(
-                  '집 연결 후',
-                  textAlign: TextAlign.end,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                  name,
+                  style: theme.textTheme.titleMedium,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (showDelegation)
+                Semantics(
+                  label: '$name 맡기기',
+                  child: const Switch(
+                    value: false,
+                    onChanged: null,
+                    padding: EdgeInsets.zero,
                   ),
                 ),
-              ),
-              Semantics(
-                label: '$name 맡기기 · 집 연결 후',
-                child: const Switch(
-                  value: false,
-                  onChanged: null,
-                  padding: EdgeInsets.zero,
-                ),
-              ),
             ],
           ),
           if (controller != null)
@@ -203,19 +232,37 @@ class _DeviceLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final pending = app.linePending(card, line);
     final canTurnOff =
         line.state != wire.LineState.OFF && app.canSwitch(card, line);
     return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       spacing: DesignTokens.space8,
       children: [
         Expanded(
           child: KoreanText(
-            '지금: ${normalizeKelvin(line.text)} · ${lineLabel(line.state)}',
-            style: Theme.of(context).textTheme.bodySmall,
+            normalizeKelvin(line.text),
+            style: theme.textTheme.bodySmall,
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        Flexible(
+          child: StatusBadge(
+            lineLabel(line.state),
+            color: lineStatusColor(context, line.state),
           ),
         ),
         TextButton(
+          style: TextButton.styleFrom(
+            minimumSize: const Size(DesignTokens.space32, DesignTokens.space32),
+            padding: const EdgeInsets.symmetric(
+              horizontal: DesignTokens.space4,
+            ),
+            textStyle: theme.textTheme.bodySmall,
+          ),
           onPressed: pending || !canTurnOff
               ? null
               : () => app.switchLine(card, line),

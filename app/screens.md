@@ -7,14 +7,21 @@
 | Screen | How it opens | Purpose |
 | --- | --- | --- |
 | Start and connection | App launch | Configuration check, token entry, Server reachability. |
-| Setup (first run) | No household stored, or `SPIRA_FIRST_RUN=1` | Google calendar, household types, household creation, Hub connection code, device check. |
+| Setup (first run) | No household stored, or `SPIRA_FIRST_RUN=1` | Welcome, Google calendar, household types and creation, Hub connection code, device check. |
 | 메인 | Tab 1 (default) | One preparation's lifecycle: share → staged wait → card → interventions → memory. |
 | 캘린더 | Tab 2 | Month of events and memories; a day's agenda; a memory sheet. |
 | 우리 집 | Tab 3 | Devices by room with what each is doing now; household types; Google connection. |
+| Order photos | Thumbnail in the order summary | Full-screen view of the submitted screenshots. |
 | Stop confirmation | 멈추기 on a card | Confirms stopping one card's preparation. |
 | Memory sheet | Main after close, or a memory on Calendar | What happened and the Server's verdict. |
 
-Every screen shows the header `SPIRA` and, in a fixture or preview build, the qualifier `미리보기 · 계약 테스트 서버` in small type ([labels.dart](lib/features/labels.dart)). The App never calls the Hub or the Simulator.
+Main, Calendar, Our Home, and the four numbered Setup steps use the same top bar, with the `SPIRA` wordmark centered at the same height on the same background. Welcome uses the larger mark in the body. Screen titles stay in the body, including Calendar's month and navigation row. [brand.dart](lib/features/brand.dart)
+
+The App never calls the Hub or the Simulator.
+
+### Developer build
+
+`SPIRA_DEV_TOOLS=1` enables the toolbar key (`서버 접속 토큰 입력`) in **우리 집** or when the Server asks for a token. Fixture runs show `미리보기 · 계약 테스트 서버` in small type beside the wordmark on screens with the top bar. In the fixture browser preview, Main shows the qualifier at its foot alongside `예시 주문으로 공유` (`주문을 보내는 중…` while sending).
 
 Polling: every 3 seconds while an order is being read or a card is open, every 30 seconds otherwise ([app_controller.dart](lib/app_controller.dart) `_activePollInterval`, `_idlePollInterval`). Nothing on screen advances on a timer of its own; every change follows stored Server data or a confirmed request.
 
@@ -26,7 +33,7 @@ Source: [main.dart](lib/main.dart), [app_controller.dart](lib/app_controller.dar
 | --- | --- | --- |
 | `SPIRA_BASE_URL` missing or invalid | Centered `서버 주소를 설정해 주세요.` | None. |
 | Restoring stored state | `앱 시작 중` | None. |
-| Server answers 401 | Toolbar key; dialog `서버 접속 토큰 입력` with field `서버 접속 토큰` / `접속 토큰`; message `서버 접속 토큰을 입력해 주세요.` | `취소`, `연결`. Saving failure: `접속 정보를 저장하지 못했어요.` |
+| Server answers 401 | Quiet text button `서버 연결에 필요한 접속 토큰 입력` below the top bar in the default build. Dialog title `서버 접속 토큰` with field `접속 토큰`. | `취소`, `연결`. Saving failure: `접속 정보를 저장하지 못했어요.` |
 | Server unreachable | Banner `서버에 연결할 수 없어요`, after a first success `서버에 연결할 수 없어요 · 마지막 확인 {HH:MM}`. The last view stays readable. | Pull to refresh. |
 | Stored state unreadable | `저장된 정보를 불러오지 못했어요.` | Retry by restarting. |
 | Refresh failed for another reason | `새로 불러오지 못했어요. 다시 시도해 주세요.` | Pull to refresh. |
@@ -39,27 +46,28 @@ The bottom navigation has three tabs: `메인`, `캘린더`, `우리 집`.
 
 ## Setup (first run)
 
-Source: [setup.dart](lib/features/setup.dart). One step per screen, one primary button per step.
-
-```text
-+----------------------------------+
-| SPIRA                            |
-| 미리보기 · 계약 테스트 서버          |
-| Step title                       |
-| One sentence                     |
-| [ primary button ]               |
-| secondary link                   |
-+----------------------------------+
-```
+One step per screen, one primary button per step. After Welcome, the body shows `1 / 4` through `4 / 4` above the step title. [setup.dart](lib/features/setup.dart)
 
 | Step | Title and text | Controls | Request |
 | --- | --- | --- | --- |
-| 1. Google | `Google 캘린더`; connected build: `앞으로 14일의 일정을 참고해 준비할게요.`; without a Google client: `Google 연결 없이 시작할 수 있어요.` | `Google 캘린더 연결` (Android with a client id), `건너뛰기` | Google sign-in on the phone only. |
-| 2. Household types | `가구 유형`; groups `인원` (`1인`, `2인`, `3~4인`, `5인 이상`), `구성` (`부부·커플`, `영유아 자녀`, `초등 자녀`, `중학생 자녀`, `고등학생 자녀`, `부모 + 성인 자녀`, `3대 함께`, `룸메이트·셰어하우스`), `생활 단계` (`대학생`, `직장인`, `은퇴·노년`), `근무 형태` (`맞벌이`, `재택근무`), `반려동물` (`반려견`, `반려묘`, `그 밖의 반려동물`). `인원` and `생활 단계` are pick-one. | `우리 집 만들기` | `POST /v1/households {household_types}`. A blocked combination: `함께 선택할 수 없는 가구 유형이에요.` Other failure: `설정을 저장하지 못했어요. 다시 시도해 주세요.` |
+| Welcome | Larger `SpiraMark` and `온라인 주문을 보고, 그날에 맞춰 집을 미리 준비해요.` | `시작하기` | None. |
+| 1. Google | `Google 계정으로 시작` and `앞으로 14일의 일정을 참고해 준비할게요.` With no client, `Google 캘린더` and `Google 연결 없이 시작할 수 있어요.` | `Google로 계속` with secondary `건너뛰기`. With no client, `건너뛰기` is the only action. | Google sign-in and calendar read on the phone. |
+| 2. Household types | `가구 유형` with groups `인원`, `구성`, `생활 단계`, `근무 형태`, and `반려동물`. Options and pick limits come from the bundled contract catalog. Selected chips use green fill, border, and text and retain their size. | `우리 집 만들기` is disabled when the selection is empty or blocked. | `POST /v1/households {household_types}` and `PUT …/profile`. A 422 shows the Server's Korean reason when available or `함께 선택할 수 없는 가구 유형이에요.` |
 | 3. Connection code | `집 허브 연결 코드`; `이 코드를 집 허브에 입력하세요`; the `hub_api_key` from the creation response, shown once | `연결 코드 복사` → `연결 코드를 복사했어요`; `다음` | None. The code is entered on the Hub by a person. |
-| 4. Devices | `집 기기 확인`; the sample device list (see 우리 집), read-only, delegation disabled | `저장` | Calendar sync after the household exists (see Calendar). |
+| 4. Devices | `집 기기 확인`; `기기별로 맡길지는 집 허브가 연결되면 고를 수 있어요.` beneath the heading, followed by the read-only sample device list (see 우리 집) | `저장` | Calendar sync after the household exists (see Calendar). |
 
 After step 4 the App opens Main.
+
+Canceling Google sign-in or authorization keeps step 1 visible with no error. Another sign-in or authorization failure shows `Google에 연결하지 못했어요. 건너뛰고 나중에 우리 집에서 연결할 수 있어요.` A calendar read failure shows `캘린더를 동기화하지 못했어요.` Server sync uses the messages under Calendar. A setup save failure shows `설정을 저장하지 못했어요. 다시 시도해 주세요.`
+
+Step 2 shows the first applicable blocked reason directly above `우리 집 만들기`, in the order below. Rare combinations are allowed without a message. [Household type contract](../contracts/kb/household_types.json)
+
+| Blocked selection | Inline message |
+| --- | --- |
+| The size cannot fit the chosen composition | `선택한 가구 구성에 맞게 인원을 늘려 주세요.` |
+| Roommates with a couple, any child category, parents with adult children, or three generations | `룸메이트·셰어하우스는 가족 구성과 함께 고를 수 없어요.` |
+| Dual income without a couple | `맞벌이는 부부·커플과 함께 골라 주세요.` |
+| Retirement with dual income or remote work | `은퇴·노년은 맞벌이 또는 재택근무와 함께 고를 수 없어요.` |
 
 ## 메인
 
@@ -67,11 +75,11 @@ Source: [preparations.dart](lib/features/preparations.dart), [order_extraction.d
 
 ```text
 +----------------------------------+
-| SPIRA                            |
+|              SPIRA               |
 | 주문                              |
 | No order: large upload box (+)   |
 |   주문 분석하기                     |
-|   + 최근 이 집의 기억 (cards)        |
+|   최근 이 집의 기억 (cards or steps)  |
 | After a share: [ 주문 분석하기 ]     |
 | Order area (wait / items /       |
 |   collapsed row)                 |
@@ -86,16 +94,16 @@ Source: [preparations.dart](lib/features/preparations.dart), [order_extraction.d
 
 | State | Data | What shows | Controls |
 | --- | --- | --- | --- |
-| No order yet (Android) | — | `쇼핑 앱에서 주문 화면을 공유하면, 그 주문에 맞춰 집을 준비해요.` / `주문 화면을 캡처하고 공유 메뉴에서 SPIRA를 선택해 주세요.` | `주문 분석하기` (gallery, 1–3 images). Preview: `예시 주문으로 공유` (`주문을 보내는 중…` while sending). |
+| No order yet (Android) | — | `쇼핑 앱에서 주문 화면을 공유하면, 그 주문에 맞춰 집을 준비해요.` / `주문 화면을 캡처하고 공유 메뉴에서 SPIRA를 선택해 주세요.` | `주문 분석하기` (gallery, 1–3 images). |
 | No order yet (other) | — | `주문 화면을 보내면 필요한 준비를 찾아드려요.` | `주문 분석하기`. |
-| No order yet, images can be picked (Android gallery, web file picker) | — | A large bordered box with a `+` circle, `주문 분석하기` and `온라인 주문 화면 캡처를 올려 주세요 (1~3장)` instead of the button and the lines above; below it **최근 이 집의 기억**: up to five cards, preparation memories first (closed orders with cards, as on Calendar; tap opens the memory sheet), then recent orders without cards (`M월 D일 · 주문`, item types when the order was read, else `품목 N개`); `아직 쌓인 기억이 없어요.` when none. | Tap the box. |
+| No order yet, images can be picked (Android gallery, web file picker) | — | A large bordered box with a `+` circle, `주문 분석하기` and `온라인 주문 화면 캡처를 올려 주세요 (1~3장)`. | Tap the box. |
 | Sending | Upload in flight | `공유한 주문을 보내는 중이에요…` | None. |
 | Offline share | Upload queued | `연결되면 공유한 주문을 보낼게요.` | Sent automatically on reconnect. |
 | Share rejected | 4xx from `POST /v1/orders` or image checks | One of `주문 화면을 한 번에 1~3장 공유해 주세요.`, `이미지 한 장은 5MB 이하여야 해요.`, `JPG 또는 PNG 주문 화면을 공유해 주세요.`, `서버가 이미지를 읽을 수 없어요. 새 캡처를 공유해 주세요.`, `공유한 이미지를 열 수 없어요. 주문 화면을 다시 공유해 주세요.`; gallery: `사진을 1~3장 골라 주세요.`, `선택한 사진을 열 수 없어요. 다시 골라 주세요.`; generic `주문을 보내지 못했어요. 다시 시도해 주세요.` | `다시 시도`, `다시 보내기`, `선택 취소`. |
 | **Staged wait** (M2) | Episode `received`/`reading`, from this phone or shared elsewhere | Loading panel: activity indicator, the stage in progress, a progress bar. Below it, one line per stored stage (see next table). Sent thumbnails (`보낸 사진 N`) between the panel and the lines. | None. |
 | Read failed | Episode `read_failed` | `읽지 못했어요. 다시 보내 주세요` | Share again. |
 | Items, no card (M3, M4a) | Episode judged, no card | `받았어요`; `품목 N개를 읽었어요`; item name and `N개` per row; `가린 품목 N개` when masked; item guidance (below). | None. |
-| Card present (M5) | `card_ids` non-empty | Collapsed row: thumbnail (`주문 사진`), `주문 N개 · {first item} 외 N-1개`, chevron; `가린 품목 N개` when masked. | Tap toggles the full order (items and guidance). |
+| Card present (M5) | `card_ids` non-empty | Collapsed row with a rounded 48 × 48 thumbnail when a local screenshot is available, `주문 N개 · {first item} 외 N-1개`, and a chevron. With only masked items, also show `가린 품목 N개`. | Tap the summary text or chevron to toggle the full order. Tap the thumbnail (`주문 사진 크게 보기`) to open the submitted screenshots full screen. Zoom or pan the current screenshot, use `이전 사진` or `다음 사진` when there are multiple screenshots, and dismiss with `닫기`. |
 
 **Staged wait lines** ([order_extraction.dart](lib/features/order_extraction.dart) `OrderExtraction.build`). The panel line names the stage in progress; a finished stage adds a checked line that fades in. Upcoming stages are never listed. The bar moves only when a stage is stored.
 
@@ -141,6 +149,16 @@ Errors: `준비 항목 변경을 확인하지 못했어요.`, `중지 요청을 
 
 ### Memory on Main (M9, M10)
 
+With no current order or memory sheet, **최근 이 집의 기억** shows up to five
+cards, with preparation memories first (tap to open the memory sheet),
+then recent orders without cards (`M월 D일 · 주문` with item types, or `품목 N개`
+while item types are unavailable). When both lists are empty, it shows three
+muted lines.
+
+1. 온라인 주문 화면 캡처를 올려요
+2. SPIRA가 그날에 맞는 준비를 정해요
+3. 그날 집이 알아서 맞춰 움직여요
+
 When the episode closes, live cards leave Main and the memory sheet takes their place until a new order is accepted or the user taps `확인` (`확인 상태를 저장하지 못했어요.` on failure). The Calendar keeps the marker either way.
 
 Memory sheet ([memory_sheet.dart](lib/features/memory_sheet.dart)): title `이렇게 기억할게요`; the order items; per line, the state and the task feedback `끔` (off) / `바꿈` (changed) / `그대로` (kept); the verdict `예상대로 쓰였어요` (match), `멈추셨어요` (stopped), `확인하지 못했어요` (unconfirmed), `아직 판정 전` before the Server's observation. Data: `GET …/rationale` `observations[]`, `GET /v1/episodes/{id}`.
@@ -151,7 +169,8 @@ Source: [calendar.dart](lib/features/calendar.dart), [sample_calendar.dart](lib/
 
 ```text
 +----------------------------------+
-| ‹  2026년 10월  ›        [오늘]   |
+|              SPIRA               |
+| 2026년 10월          [오늘]  ‹  ›  |
 | 예시 일정                          |
 | 일 월 화 수 목 금 토                 |
 | month grid: event bars, dots     |
@@ -161,10 +180,10 @@ Source: [calendar.dart](lib/features/calendar.dart), [sample_calendar.dart](lib/
 
 | Region | What shows | Data |
 | --- | --- | --- |
-| Header | `{YYYY}년 {M}월`; `이전 달`, `다음 달`, `오늘` | Local. |
+| Month row | `{YYYY}년 {M}월`; `이전 달`, `다음 달`, `오늘` | Local. |
 | Sample label | `예시 일정` while samples are shown | Sample calendar. |
-| Grid | Weekdays `일 … 토`; today marked; event bars with title and time; a memory dot on each date with a memory | Events from Google or the samples; memories from closed episodes (date = the card's `starts_at` the App saw, else `shared_at`). |
-| Day agenda | `M월 D일` (`오늘, ` prefix today) · `일정 N개 · 기억 N개`; heading `일정` with `{title} · 종일` or times; heading `준비 기억`; empty: `이날의 일정과 기억이 없어요.` | Same. |
+| Grid | Weekdays `일 … 토`; today marked. Each day shows up to one event chip in the smallest token size, with a one-line title and ellipsis when needed. Wider cells include the time. `+N` on its own line counts additional events. Memory dates keep their dots. | Events from Google or the samples; memories from closed episodes (date = the card's `starts_at` the App saw, else `shared_at`). |
+| Day agenda | `M월 D일`; every event's full title with `종일` or times; `준비 기억` for each memory; `이날의 일정과 기억이 없어요.` when empty. | Same. |
 | Memory open | Memory sheet; `기억 불러오는 중`; failure `기억을 불러오지 못했어요` with `다시 시도` | `GET /v1/episodes/{id}`, `…/rationale`. |
 
 **Which events**: Google events when connected (they replace the samples, even when empty). Without Google: in a fixture or preview build, the replay's sample (생일 파티 on the replay's Saturday 14:00–18:00, plus ordinary events); against the real Server, the same sample anchored to Server time (the birthday starts 20 minutes after the `server_time` of a cards read and lasts one hour; ordinary events on later days). The anchor is stored and survives restarts; a new one is made only when the birthday has ended or is under 10 minutes away and no card is open.
@@ -177,10 +196,10 @@ Source: [our_home.dart](lib/features/our_home.dart), [sample_devices.dart](lib/f
 
 | Region | What shows | Controls and data |
 | --- | --- | --- |
-| Devices `기기` | `예시 집` label; rooms that have devices (entrance hidden when empty), each device with its type icon and name; failure `예시 집을 불러오지 못했어요.` | Bundled copy of `hub/installation.example.json` (kept equal by a test). |
-| Delegation `맡기기` | Toggle per device, disabled, `집 연결 후`; label `{name} 맡기기 · 집 연결 후` | No Server route yet. |
-| Now running | `지금: {line text} · {state}` for a device in an open card's line | Device → task from `GET …/rationale` `tasks[].devices` (`id`, `type`, `room` only). `끄기` sends that line's `line_off`; `요청함` while pending. |
-| Household types `가구 유형` | The chosen types | `가구 유형 저장` → `PUT …/profile`. |
+| Devices `기기` | `예시 집` label; rooms that have devices (entrance hidden when empty). A device with no line in an open card uses one row for its type icon and name. Failure message `예시 집을 불러오지 못했어요.` | Bundled copy of `hub/installation.example.json` (kept equal by a test). |
+| Delegation | One muted line beneath the `기기` heading, `기기별로 맡길지는 집 허브가 연결되면 고를 수 있어요.` The same copy appears in Setup step 4. | The controller's `hasDelegationRoute` flag defaults to off. The on path renders the `맡기기` column and its switches for future Server integration. |
+| Open card line | For a matching device, one line of preparation text with ellipsis, a status badge, and a compact right-aligned `끄기` text button. | Device → task from `GET …/rationale` `tasks[].devices` (`id`, `type`, `room` only). `끄기` sends that line's `line_off`; `요청함` while pending. |
+| Household types `가구 유형` | The chosen types, using the same stable green chip selection style as Setup | `가구 유형 저장` → `PUT …/profile`. |
 | Google `Google 캘린더` | `연결됨` / `연결 안 됨` | `Google 연결` / `Google 연결 해제` (Android). |
 
 ## Server routes the screens use
