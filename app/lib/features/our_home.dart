@@ -24,9 +24,10 @@ class OurHome extends StatelessWidget {
     children: [
       KoreanText('기기', style: Theme.of(context).textTheme.headlineMedium),
       const SizedBox(height: DesignTokens.space8),
+      if (!app.hasDelegationRoute) const DeviceDelegationHint(),
       for (final error in app.controlErrors.values.toSet())
         StatusMessage(error),
-      SampleDevices(app: app),
+      SampleDevices(showDelegation: app.hasDelegationRoute, app: app),
       const Divider(height: DesignTokens.space32),
       HouseholdTypesForm(
         app,

@@ -208,7 +208,16 @@ class _MonthDay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    const labelHeight = 1.25;
+    final labelStyle = theme.textTheme.bodySmall?.copyWith(
+      fontSize: DesignTokens.size12,
+      height: labelHeight,
+    );
+    final scaledLabelHeight =
+        MediaQuery.textScalerOf(context).scale(DesignTokens.size12) *
+        labelHeight;
     final date = '${day.month}월 ${day.day}일';
     return Semantics(
       selected: selected,
@@ -221,7 +230,8 @@ class _MonthDay extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           child: SizedBox(
-            height: 44 + MediaQuery.textScalerOf(context).scale(24),
+            // Reserve lines for the date, event and count, plus room for dots.
+            height: 3 * scaledLabelHeight + DesignTokens.space20,
             child: Column(
               children: [
                 Padding(
@@ -240,8 +250,7 @@ class _MonthDay extends StatelessWidget {
                         '${day.day}',
                         maxLines: 1,
                         overflow: TextOverflow.clip,
-                        style: TextStyle(
-                          fontSize: DesignTokens.size12,
+                        style: labelStyle?.copyWith(
                           fontWeight: FontWeight.w600,
                           color: today ? colors.onPrimary : colors.onSurface,
                         ),
@@ -260,7 +269,10 @@ class _MonthDay extends StatelessWidget {
                           return Container(
                             key: ValueKey('event-${event.id}'),
                             width: double.infinity,
-                            padding: const EdgeInsets.symmetric(horizontal: 2),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 2,
+                              vertical: 1,
+                            ),
                             decoration: BoxDecoration(
                               color: colors.primaryContainer,
                               borderRadius: BorderRadius.circular(
@@ -270,10 +282,10 @@ class _MonthDay extends StatelessWidget {
                             child: KoreanText(
                               compact ? _eventTitle(event) : _eventLabel(event),
                               maxLines: 1,
+                              softWrap: false,
                               overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
+                              style: labelStyle?.copyWith(
                                 color: colors.onPrimaryContainer,
-                                fontSize: compact ? 10 : DesignTokens.size12,
                               ),
                             ),
                           );
@@ -281,14 +293,27 @@ class _MonthDay extends StatelessWidget {
                       ),
                     ),
                   ),
-                SizedBox(
-                  height: DesignTokens.space12,
-                  child: Row(
+                if (events.length > 1)
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: KoreanText(
+                      '+${events.length - 1}',
+                      maxLines: 1,
+                      style: labelStyle?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                if (memories.isNotEmpty)
+                  Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       for (final memory in memories.take(3))
                         Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 1),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 1,
+                            vertical: 2,
+                          ),
                           child: Icon(
                             Icons.circle,
                             key: ValueKey('memory-dot-${memory.episodeId}'),
@@ -296,18 +321,8 @@ class _MonthDay extends StatelessWidget {
                             color: colors.secondary,
                           ),
                         ),
-                      if (events.length > 1)
-                        KoreanText(
-                          '+${events.length - 1}',
-                          maxLines: 1,
-                          style: TextStyle(
-                            fontSize: 9,
-                            color: colors.onSurfaceVariant,
-                          ),
-                        ),
                     ],
                   ),
-                ),
               ],
             ),
           ),

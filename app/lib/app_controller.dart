@@ -55,6 +55,7 @@ class AppController extends ChangeNotifier {
     required this.fixture,
     this.browserPreview = false,
     this.firstRun = false,
+    this.hasDelegationRoute = false,
     this.readCalendar,
     this.disconnectCalendar,
     this.pickImages,
@@ -68,6 +69,7 @@ class AppController extends ChangeNotifier {
   final bool fixture;
   final bool browserPreview;
   final bool firstRun;
+  final bool hasDelegationRoute;
   final CalendarReader? readCalendar;
   final Future<void> Function()? disconnectCalendar;
   final GalleryPicker? pickImages;
