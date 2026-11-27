@@ -20,7 +20,8 @@ Calendar is read on the phone. A command receipt MUST NOT be shown as a
 confirmed effect. (PC-4, PC-5)
 
 **P-R3.** The App MUST support both the real Server and the contract fixture Server at
-`hub/tests/fixture_server`. Runs against that fixture MUST be visibly labeled. (PC-4)
+`hub/tests/fixture_server`. Developer builds (`SPIRA_DEV_TOOLS=1`) running
+against that fixture MUST be visibly labeled. (PC-4)
 
 ## 2. Requirements
 
@@ -138,8 +139,8 @@ Stop. The App MUST provide no Stop All control.
 The App MUST use shared design tokens and IBM Plex Sans KR. The preparation
 card MUST lead with its title and place line timing on the left and state on
 the right. Each screen MUST distinguish one primary action when available.
-Fixture builds MUST use a small qualifier. User-facing copy MUST use concise,
-natural Korean and omit internal diagnostics.
+Developer builds connected to the fixture MUST use a small qualifier.
+User-facing copy MUST use concise, natural Korean and omit internal diagnostics.
 
 ### A6. Removed surfaces
 
@@ -166,7 +167,7 @@ the Hub or Simulator fails acceptance.
 | AP-AT-10 | Open Calendar. Navigate months and return to today. Find the birthday label and memory dot on their dates, and select a date to see its agenda. |
 | AP-AT-11 | Start a fixture or preview without Google. Calendar shows `예시 일정` and the Server receives the same events. Connect Google and verify that its read replaces the samples. |
 | AP-AT-12 | With no card, see the full order. When the card arrives, see one summary row above its title. Expand and collapse the order and verify guidance appears only in the full list. |
-| AP-AT-13 | Inspect Main and setup at phone width. The shared typeface and tokens are applied, line timing and state are legible, and the fixture qualifier is secondary. |
+| AP-AT-13 | Inspect Main and setup at phone width. The shared typeface and tokens are applied, line timing and state are legible, and the fixture qualifier is secondary in a developer build. |
 | AP-AT-14 | Return 404, 405, or 501 for the episode list. The shared order advances to its card, existing cards remain usable, and observed closures leave Calendar dots. The list is retried after a backoff. |
 | AP-AT-15 | Return 404 to line off, line on, or stop. The card shows one calm message and its control is restored without resending the request. |
 | AP-AT-16 | Hold each processing stage until its data is stored. Main advances through receipt, items, context, and Server intent in order, then collapses the order when the card appears. With reduced motion nothing animates. |

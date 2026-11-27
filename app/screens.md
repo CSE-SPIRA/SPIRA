@@ -14,7 +14,13 @@
 | Stop confirmation | 멈추기 on a card | Confirms stopping one card's preparation. |
 | Memory sheet | Main after close, or a memory on Calendar | What happened and the Server's verdict. |
 
-Every screen shows the header `SPIRA` and, in a fixture or preview build, the qualifier `미리보기 · 계약 테스트 서버` in small type ([labels.dart](lib/features/labels.dart)). The App never calls the Hub or the Simulator.
+Main, Calendar, Our Home, and every Setup step use the same top bar, with the `SPIRA` wordmark centered at the same height on the same background. Screen titles stay in the body, including Calendar's month and navigation row. [brand.dart](lib/features/brand.dart)
+
+The App never calls the Hub or the Simulator.
+
+### Developer build
+
+`SPIRA_DEV_TOOLS=1` enables the toolbar key (`서버 접속 토큰 입력`) in **우리 집** or when the Server asks for a token. Fixture runs show `미리보기 · 계약 테스트 서버` in small type beside the wordmark. In the fixture browser preview, Main shows the qualifier at its foot alongside `예시 주문으로 공유` (`주문을 보내는 중…` while sending).
 
 Polling: every 3 seconds while an order is being read or a card is open, every 30 seconds otherwise ([app_controller.dart](lib/app_controller.dart) `_activePollInterval`, `_idlePollInterval`). Nothing on screen advances on a timer of its own; every change follows stored Server data or a confirmed request.
 
@@ -26,7 +32,7 @@ Source: [main.dart](lib/main.dart), [app_controller.dart](lib/app_controller.dar
 | --- | --- | --- |
 | `SPIRA_BASE_URL` missing or invalid | Centered `서버 주소를 설정해 주세요.` | None. |
 | Restoring stored state | `앱 시작 중` | None. |
-| Server answers 401 | Toolbar key; dialog `서버 접속 토큰 입력` with field `서버 접속 토큰` / `접속 토큰`; message `서버 접속 토큰을 입력해 주세요.` | `취소`, `연결`. Saving failure: `접속 정보를 저장하지 못했어요.` |
+| Server answers 401 | Quiet text button `서버 연결에 필요한 접속 토큰 입력` below the top bar in the default build. Dialog title `서버 접속 토큰` with field `접속 토큰`. | `취소`, `연결`. Saving failure: `접속 정보를 저장하지 못했어요.` |
 | Server unreachable | Banner `서버에 연결할 수 없어요`, after a first success `서버에 연결할 수 없어요 · 마지막 확인 {HH:MM}`. The last view stays readable. | Pull to refresh. |
 | Stored state unreadable | `저장된 정보를 불러오지 못했어요.` | Retry by restarting. |
 | Refresh failed for another reason | `새로 불러오지 못했어요. 다시 시도해 주세요.` | Pull to refresh. |
@@ -43,8 +49,7 @@ Source: [setup.dart](lib/features/setup.dart). One step per screen, one primary 
 
 ```text
 +----------------------------------+
-| SPIRA                            |
-| 미리보기 · 계약 테스트 서버          |
+|              SPIRA               |
 | Step title                       |
 | One sentence                     |
 | [ primary button ]               |
@@ -67,7 +72,7 @@ Source: [preparations.dart](lib/features/preparations.dart), [order_extraction.d
 
 ```text
 +----------------------------------+
-| SPIRA                            |
+|              SPIRA               |
 | 주문                              |
 | No order: large upload box (+)   |
 |   주문 분석하기                     |
@@ -86,7 +91,7 @@ Source: [preparations.dart](lib/features/preparations.dart), [order_extraction.d
 
 | State | Data | What shows | Controls |
 | --- | --- | --- | --- |
-| No order yet (Android) | — | `쇼핑 앱에서 주문 화면을 공유하면, 그 주문에 맞춰 집을 준비해요.` / `주문 화면을 캡처하고 공유 메뉴에서 SPIRA를 선택해 주세요.` | `주문 분석하기` (gallery, 1–3 images). Preview: `예시 주문으로 공유` (`주문을 보내는 중…` while sending). |
+| No order yet (Android) | — | `쇼핑 앱에서 주문 화면을 공유하면, 그 주문에 맞춰 집을 준비해요.` / `주문 화면을 캡처하고 공유 메뉴에서 SPIRA를 선택해 주세요.` | `주문 분석하기` (gallery, 1–3 images). |
 | No order yet (other) | — | `주문 화면을 보내면 필요한 준비를 찾아드려요.` | `주문 분석하기`. |
 | No order yet, images can be picked (Android gallery, web file picker) | — | A large bordered box with a `+` circle, `주문 분석하기` and `온라인 주문 화면 캡처를 올려 주세요 (1~3장)` instead of the button and the lines above; below it **최근 이 집의 기억**: up to five cards, preparation memories first (closed orders with cards, as on Calendar; tap opens the memory sheet), then recent orders without cards (`M월 D일 · 주문`, item types when the order was read, else `품목 N개`); `아직 쌓인 기억이 없어요.` when none. | Tap the box. |
 | Sending | Upload in flight | `공유한 주문을 보내는 중이에요…` | None. |
@@ -151,7 +156,8 @@ Source: [calendar.dart](lib/features/calendar.dart), [sample_calendar.dart](lib/
 
 ```text
 +----------------------------------+
-| ‹  2026년 10월  ›        [오늘]   |
+|              SPIRA               |
+| 2026년 10월          [오늘]  ‹  ›  |
 | 예시 일정                          |
 | 일 월 화 수 목 금 토                 |
 | month grid: event bars, dots     |
@@ -161,7 +167,7 @@ Source: [calendar.dart](lib/features/calendar.dart), [sample_calendar.dart](lib/
 
 | Region | What shows | Data |
 | --- | --- | --- |
-| Header | `{YYYY}년 {M}월`; `이전 달`, `다음 달`, `오늘` | Local. |
+| Month row | `{YYYY}년 {M}월`; `이전 달`, `다음 달`, `오늘` | Local. |
 | Sample label | `예시 일정` while samples are shown | Sample calendar. |
 | Grid | Weekdays `일 … 토`; today marked; event bars with title and time; a memory dot on each date with a memory | Events from Google or the samples; memories from closed episodes (date = the card's `starts_at` the App saw, else `shared_at`). |
 | Day agenda | `M월 D일` (`오늘, ` prefix today) · `일정 N개 · 기억 N개`; heading `일정` with `{title} · 종일` or times; heading `준비 기억`; empty: `이날의 일정과 기억이 없어요.` | Same. |

@@ -32,6 +32,7 @@ def fixture_defines(proxy_port, household, _key=None, *, first_run=False):
         "SPIRA_HOUSEHOLD_ID": household,
         "SPIRA_PEER": "fixture",
         "SPIRA_FIXTURE_APP_TOKEN": APP_TOKEN,
+        "SPIRA_DEV_TOOLS": "1",
         **({"SPIRA_FIRST_RUN": "1"} if first_run else {}),
     }
 

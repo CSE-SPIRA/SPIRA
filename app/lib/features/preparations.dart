@@ -15,9 +15,10 @@ import 'memory_sheet.dart';
 import 'status_badge.dart';
 
 class Preparations extends StatelessWidget {
-  const Preparations(this.app, {super.key});
+  const Preparations(this.app, {super.key, required this.devTools});
 
   final AppController app;
+  final bool devTools;
 
   @override
   Widget build(BuildContext context) {
@@ -101,7 +102,7 @@ class Preparations extends StatelessWidget {
         ],
       ),
     );
-    if (!app.demoPreview) return main;
+    if (!devTools || !app.demoPreview) return main;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
