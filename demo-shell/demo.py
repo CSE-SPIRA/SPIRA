@@ -34,7 +34,7 @@ HOUSE_ASSET = re.compile(
 )
 EPISODE_READ = re.compile(r"v1/episodes/(ep_[A-Za-z0-9_]+)(/rationale)?")
 EPISODE_ID = re.compile(r"ep_[A-Za-z0-9_]+")
-DESIGN = runpy.run_path(str(DEMO_UI.parents[1] / "design/build.py"))
+DESIGN = runpy.run_path(str(DEMO_UI.parent / "design/build.py"))
 FONTS = {f"IBMPlexSansKR-{name}.otf": weight for weight, name in
          [(400, "Regular"), (500, "Medium"), (600, "SemiBold"), (700, "Bold")]}
 SHARED_ASSETS = {

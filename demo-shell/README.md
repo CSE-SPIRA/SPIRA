@@ -2,7 +2,7 @@
 
 **ACTIVE** · This guide describes operation and inputs for the demo shell.
 The phone mirrors [the App specification](../app/spec.md) and
-[shared vocabulary](../design/vocabulary.json).
+[shared vocabulary](design/vocabulary.json).
 
 At `/demo`, the phone stays on the left and the Server's judgment plays on the
 right. With a fixture, choose 집까지 or 계획까지 in the presenter header before sharing; a Server run always goes on to the house (after S5 the next cue is 집 보기, once the Hub has the plan).
@@ -198,7 +198,7 @@ Add `owners=1` to the query string to show the owner tags. They are hidden by de
 
 | To change | Edit | Do not need to touch |
 | --- | --- | --- |
-| Shared colours, spacing, type and motion | [`design/tokens.json`](../design/tokens.json), then run `python3 design/build.py` | Generated stylesheets |
+| Shared colours, spacing, type and motion | [`design/tokens.json`](design/tokens.json), then run `python3 demo-shell/design/build.py` | Generated stylesheets |
 | The stage readiness strip | `ui/flow.js` | |
 | Stage wording and fallback cameras for cached renderers | `ui/scenes.json` | |
 | Shared room cameras | [`house.js`](../simulator/spira_simulator/ui/house/house.js) | |

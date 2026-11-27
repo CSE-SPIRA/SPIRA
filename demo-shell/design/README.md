@@ -10,9 +10,9 @@ OpenType files and licence. The App uses that package directly. The Simulator
 serves generated WOFF2 copies and the licence from its `ui/house/fonts/` directory.
 
 From the repository root, install the font build dependencies in your Python
-environment with `python3 -m pip install -r design/requirements.txt`. Run
-`python3 design/build.py` after editing the tokens, vocabulary, or fonts. Commit
-the generated files alongside the source. Run `python3 design/build.py --check`
+environment with `python3 -m pip install -r demo-shell/design/requirements.txt`. Run
+`python3 demo-shell/design/build.py` after editing the tokens, vocabulary, or fonts. Commit
+the generated files alongside the source. Run `python3 demo-shell/design/build.py --check`
 to check them without writing. Each part's test suite also checks its own outputs.
 
 ## Writing

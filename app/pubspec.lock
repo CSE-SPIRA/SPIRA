@@ -557,7 +557,7 @@ packages:
   spira_fonts:
     dependency: "direct main"
     description:
-      path: "../design/fonts"
+      path: "../demo-shell/design/fonts"
       relative: true
     source: path
     version: "1.1.0"

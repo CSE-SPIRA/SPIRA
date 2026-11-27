@@ -42,7 +42,7 @@ flowchart LR
 | [`hub/`](../hub) | Pull plan, wait for triggers, check state, execute, read back, restore | Yejoon |
 | [`simulator/`](../simulator) | Virtual household devices (MQTT) and a 2D viewer; emits home events | Yejoon |
 | [`contracts/`](../contracts) | Everything parts must agree on: API, schemas, enums, fixtures, generated models | Shared |
-| [`docs/`](.) | This page · [`paper/`](paper) (Jeewon) | Shared |
+| [`docs/`](.) | This page · [`paper.tex`](paper.tex) · [`paper.pdf`](paper.pdf) (Jeewon) | Shared |
 | [SPIRA_KB](https://github.com/CSE-SPIRA/SPIRA_KB) | Synthetic purchase-intent cases, lists, embedding function (separate repo) | Uijin |
 
 Each part folder has `README.md` (how to run) and `spec.md` (what it does). Inside a part folder, the owner decides the layout.

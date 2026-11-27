@@ -17,7 +17,7 @@ LOOPBACK = "127.0.0.1"
 FLUTTER_REQUIRED = "앱 미리보기는 Flutter가 필요합니다 (`--app-web DIR`로 미리 빌드한 것을 쓸 수 있어요)"
 BUILD_INPUTS = (
     "app/.metadata", "app/lib", "app/web", "app/assets",
-    "app/pubspec.yaml", "app/pubspec.lock", "design/fonts",
+    "app/pubspec.yaml", "app/pubspec.lock", "demo-shell/design/fonts",
 )
 
 
