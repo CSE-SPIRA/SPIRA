@@ -1,10 +1,14 @@
+import 'dart:convert';
+
 // ignore: deprecated_member_use
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app_controller.dart';
 import '../design_tokens.g.dart';
+import '../household_types.dart';
 import '../korean_text.dart';
+import 'brand.dart';
 import 'sample_devices.dart';
 import 'status_badge.dart';
 
@@ -15,6 +19,7 @@ class SetupScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (app.step == SetupStep.welcome) return _welcome(context);
     if (app.step == SetupStep.devices) return _devices(context);
     return ListView(
       key: ValueKey(app.step),
@@ -25,6 +30,8 @@ class SetupScreen extends StatelessWidget {
         DesignTokens.space32,
       ),
       children: [
+        _progress(context),
+        const SizedBox(height: DesignTokens.space12),
         if (app.setupError case final error?
             when app.step != SetupStep.household)
           StatusMessage(error),
@@ -35,6 +42,7 @@ class SetupScreen extends StatelessWidget {
             title: '가구 유형',
             button: '우리 집 만들기',
             onSave: app.submitHousehold,
+            validateCombinations: true,
           ),
           SetupStep.connection => _connection(context),
           _ => const SizedBox.shrink(),
@@ -43,19 +51,65 @@ class SetupScreen extends StatelessWidget {
     );
   }
 
+  Widget _welcome(BuildContext context) => CustomScrollView(
+    slivers: [
+      SliverPadding(
+        padding: const EdgeInsets.all(DesignTokens.space20),
+        sliver: SliverFillRemaining(
+          hasScrollBody: false,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            spacing: DesignTokens.space24,
+            children: [
+              const Center(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: SpiraMark(large: true),
+                ),
+              ),
+              KoreanText(
+                '온라인 주문을 보고, 그날에 맞춰 집을 미리 준비해요.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              if (app.setupError case final error?) StatusMessage(error),
+              FilledButton(
+                onPressed: app.busy ? null : app.startSetup,
+                child: const KoreanText('시작하기'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ],
+  );
+
+  Widget _progress(BuildContext context) {
+    final current = app.step.index;
+    final total = SetupStep.devices.index;
+    return KoreanText(
+      '$current / $total',
+      semanticsLabel: '전체 $total단계 중 $current단계',
+      style: Theme.of(context).textTheme.bodySmall
+          ?.copyWith(color: DesignTokens.green),
+    );
+  }
+
   Widget _calendar(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
-    spacing: 12,
+    spacing: DesignTokens.space12,
     children: [
       KoreanText(
-        'Google 캘린더',
+        app.readCalendar == null ? 'Google 캘린더' : 'Google 계정으로 시작',
         style: Theme.of(context).textTheme.headlineMedium,
       ),
       if (app.readCalendar != null) ...[
         const KoreanText('앞으로 14일의 일정을 참고해 준비할게요.'),
+        if (app.calendarError case final error?) StatusMessage(error),
         FilledButton(
           onPressed: app.busy ? null : () => app.finishCalendar(connect: true),
-          child: const KoreanText('Google 캘린더 연결'),
+          child: const KoreanText('Google로 계속'),
         ),
         TextButton(
           onPressed: app.busy ? null : () => app.finishCalendar(connect: false),
@@ -120,6 +174,8 @@ class SetupScreen extends StatelessWidget {
         child: ListView(
           padding: const EdgeInsets.all(DesignTokens.space20),
           children: [
+            _progress(context),
+            const SizedBox(height: DesignTokens.space12),
             KoreanText(
               '집 기기 확인',
               style: Theme.of(context).textTheme.headlineMedium,
@@ -153,65 +209,97 @@ class HouseholdTypesForm extends StatefulWidget {
     required this.title,
     required this.button,
     required this.onSave,
+    this.validateCombinations = false,
   });
 
   final AppController app;
   final String title;
   final String button;
   final Future<void> Function(Set<String>) onSave;
+  final bool validateCombinations;
 
   @override
   State<HouseholdTypesForm> createState() => _HouseholdTypesFormState();
 }
 
 class _HouseholdTypesFormState extends State<HouseholdTypesForm> {
-  static const _groups = {
-    '인원': ['1인', '2인', '3~4인', '5인 이상'],
-    '구성': [
-      '부부·커플',
-      '영유아 자녀',
-      '초등 자녀',
-      '중학생 자녀',
-      '고등학생 자녀',
-      '부모 + 성인 자녀',
-      '3대 함께',
-      '룸메이트·셰어하우스',
-    ],
-    '생활 단계': ['대학생', '직장인', '은퇴·노년'],
-    '근무 형태': ['맞벌이', '재택근무'],
-    '반려동물': ['반려견', '반려묘', '그 밖의 반려동물'],
+  static const _axisLabels = {
+    'size': '인원',
+    'composition': '구성',
+    'life_stage': '생활 단계',
+    'work_style': '근무 형태',
+    'pets': '반려동물',
   };
-  static const _singleChoice = {'인원', '생활 단계'};
 
+  late final _catalog = _readCatalog(DefaultAssetBundle.of(context));
   late final Set<String> _types = {...widget.app.householdTypes};
   String? _error;
 
+  Future<HouseholdTypeCatalog> _readCatalog(AssetBundle bundle) async =>
+      HouseholdTypeCatalog.fromJson(
+        jsonDecode(await bundle.loadString(HouseholdTypeCatalog.asset))
+            as Map<String, dynamic>,
+      );
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      KoreanText(
+        widget.title,
+        style: Theme.of(context).textTheme.headlineMedium,
+      ),
+      FutureBuilder(
+        future: _catalog,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return const StatusMessage('가구 유형을 불러오지 못했어요.');
+          }
+          if (snapshot.data case final catalog?) return _form(context, catalog);
+          return const Center(child: CircularProgressIndicator());
+        },
+      ),
+    ],
+  );
+
+  Widget _form(BuildContext context, HouseholdTypeCatalog catalog) {
     final app = widget.app;
     final theme = Theme.of(context);
+    final blockedReason = widget.validateCombinations
+        ? catalog.blockedReason(_types)
+        : null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        KoreanText(widget.title, style: theme.textTheme.headlineMedium),
-        for (final group in _groups.entries) ...[
+        for (final axis in catalog.axes.entries) ...[
           const SizedBox(height: 14),
-          KoreanText(group.key, style: theme.textTheme.titleMedium),
+          KoreanText(
+            _axisLabels[axis.key]!,
+            style: theme.textTheme.titleMedium,
+          ),
           Wrap(
-            spacing: 8,
-            runSpacing: 4,
+            spacing: DesignTokens.space8,
+            runSpacing: DesignTokens.space4,
             children: [
-              for (final type in group.value)
+              for (final type in axis.value.types)
                 FilterChip(
                   label: KoreanText(type),
                   selected: _types.contains(type),
+                  showCheckmark: false,
+                  selectedColor: DesignTokens.greenSoft,
+                  side: _types.contains(type)
+                      ? const BorderSide(color: DesignTokens.greenLine)
+                      : null,
+                  labelStyle: _types.contains(type)
+                      ? const TextStyle(color: DesignTokens.greenDeep)
+                      : null,
                   onSelected: app.busy
                       ? null
                       : (selected) => setState(() {
                           _error = null;
                           if (selected) {
-                            if (_singleChoice.contains(group.key)) {
-                              _types.removeAll(group.value);
+                            if (axis.value.pickOne) {
+                              _types.removeAll(axis.value.types);
                             }
                             _types.add(type);
                           } else {
@@ -223,9 +311,9 @@ class _HouseholdTypesFormState extends State<HouseholdTypesForm> {
           ),
         ],
         const SizedBox(height: 10),
-        if (_error case final error?) StatusMessage(error),
+        if (blockedReason ?? _error case final error?) StatusMessage(error),
         FilledButton(
-          onPressed: app.busy || _types.isEmpty
+          onPressed: app.busy || _types.isEmpty || blockedReason != null
               ? null
               : () async {
                   await widget.onSave({..._types});

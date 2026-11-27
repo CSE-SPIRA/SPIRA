@@ -8,38 +8,44 @@ import '../korean_text.dart';
 import 'labels.dart';
 
 class SpiraMark extends StatelessWidget {
-  const SpiraMark({super.key});
+  const SpiraMark({super.key, this.large = false});
 
-  static const _wordmarkSize = DesignTokens.size22;
+  final bool large;
 
   @override
-  Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Transform.rotate(
-        angle: -34 * math.pi / 180,
-        child: const CustomPaint(
-          size: Size.square(26),
-          painter: _SpiraLeafPainter(),
+  Widget build(BuildContext context) {
+    final wordmarkSize = large ? DesignTokens.size34 : DesignTokens.size22;
+    final markScale = wordmarkSize / DesignTokens.size22;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Transform.rotate(
+          angle: -34 * math.pi / 180,
+          child: CustomPaint(
+            size: Size.square(26 * markScale),
+            painter: _SpiraLeafPainter(scale: markScale),
+          ),
         ),
-      ),
-      const SizedBox(width: 13),
-      const KoreanText(
-        'SPIRA',
-        maxLines: 1,
-        style: TextStyle(
-          color: DesignTokens.green,
-          fontSize: _wordmarkSize,
-          fontWeight: FontWeight.w700,
-          letterSpacing: _wordmarkSize * 0.16,
+        SizedBox(width: 13 * markScale),
+        KoreanText(
+          'SPIRA',
+          maxLines: 1,
+          style: TextStyle(
+            color: DesignTokens.green,
+            fontSize: wordmarkSize,
+            fontWeight: FontWeight.w700,
+            letterSpacing: wordmarkSize * 0.16,
+          ),
         ),
-      ),
-    ],
-  );
+      ],
+    );
+  }
 }
 
 class _SpiraLeafPainter extends CustomPainter {
-  const _SpiraLeafPainter();
+  const _SpiraLeafPainter({required this.scale});
+
+  final double scale;
 
   static RRect _outline(Rect box) {
     final large = Radius.elliptical(box.width * 0.74, box.height * 0.74);
@@ -56,19 +62,20 @@ class _SpiraLeafPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    const outerStroke = 1.8;
-    const innerStroke = 1.4;
+    final outerStroke = 1.8 * scale;
+    final innerStroke = 1.4 * scale;
     final paint = Paint()..color = DesignTokens.green;
     final box = Offset.zero & size;
     final outer = _outline(box);
     // The pseudo-element's inset is measured from the parent's padding edge.
-    final inner = _outline(box.deflate(outerStroke + 4));
+    final inner = _outline(box.deflate(outerStroke + 4 * scale));
     canvas.drawDRRect(outer, outer.deflate(outerStroke), paint);
     canvas.drawDRRect(inner, inner.deflate(innerStroke), paint);
   }
 
   @override
-  bool shouldRepaint(_SpiraLeafPainter oldDelegate) => false;
+  bool shouldRepaint(_SpiraLeafPainter oldDelegate) =>
+      oldDelegate.scale != scale;
 }
 
 class SpiraTopBar extends StatelessWidget implements PreferredSizeWidget {

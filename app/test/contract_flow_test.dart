@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart' show SynchronousFuture;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:spira_app/api/app_api.dart';
@@ -14,6 +15,7 @@ import 'package:spira_app/app_controller.dart';
 import 'package:spira_app/contracts.dart' as wire;
 import 'package:spira_app/design_tokens.g.dart';
 import 'package:spira_app/features/brand.dart';
+import 'package:spira_app/household_types.dart';
 import 'package:spira_app/main.dart';
 import 'package:spira_app/features/labels.dart';
 import 'package:spira_app/platform/android_bridge.dart';
@@ -51,12 +53,16 @@ class TestImage extends Fake implements File {
 class TestStore implements AppStore {
   final values = <String, String>{};
   final saved = <Object?>[];
+  bool failSetupWrite = false;
 
   @override
   Future<String?> read(String key) async => values[key];
 
   @override
   Future<void> write(String key, String value) async {
+    if (failSetupWrite && key.startsWith('spira.setup.')) {
+      throw StateError('Storage unavailable');
+    }
     values[key] = value;
     if (value.startsWith('{')) saved.add(jsonDecode(value));
   }
@@ -297,7 +303,8 @@ AppController controller(
 
 class TestAppAssets extends CachingAssetBundle {
   @override
-  Future<ByteData> load(String key) => key == 'assets/sample-home.json'
+  Future<ByteData> load(String key) =>
+      key == 'assets/sample-home.json' || key == HouseholdTypeCatalog.asset
       ? SynchronousFuture(ByteData.sublistView(File(key).readAsBytesSync()))
       : rootBundle.load(key);
 }
@@ -368,7 +375,8 @@ Future<void> resumeApp(WidgetTester tester) async {
 
 Future<void> connectCalendar(WidgetTester tester, AppController app) async {
   await openApp(tester, app);
-  await tapText(tester, 'Google 캘린더 연결');
+  await tapText(tester, '시작하기');
+  await tapText(tester, 'Google로 계속');
   await tapText(tester, '2인');
   await tapText(tester, '우리 집 만들기');
   await tapText(tester, '다음');
@@ -649,7 +657,8 @@ void main() {
               wire.Calendar.fromJson(calendar),
         ),
       );
-      await tapText(tester, 'Google 캘린더 연결');
+      await tapText(tester, '시작하기');
+      await tapText(tester, 'Google로 계속');
       await tapText(tester, '2인');
       await tapText(tester, '우리 집 만들기');
       expect(
@@ -664,6 +673,67 @@ void main() {
       await tapText(tester, '저장');
     },
   );
+
+  testWidgets('Setup Google distinguishes OAuth, calendar and save errors', (
+    tester,
+  ) async {
+    final peer = Peer();
+    final store = TestStore();
+    Object? failure;
+    final app = controller(
+      peer,
+      setup: true,
+      store: store,
+      calendar: ({required interactive}) async {
+        expect(interactive, isTrue);
+        if (failure case final error?) throw error;
+        return wire.Calendar(events: []);
+      },
+    );
+    await openApp(tester, app);
+    await tapText(tester, '시작하기');
+    expect(find.text('Google 계정으로 시작'), findsOneWidget);
+    expect(find.text('앞으로 14일의 일정을 참고해 준비할게요.'), findsOneWidget);
+    const oauthMessage = 'Google에 연결하지 못했어요. 건너뛰고 나중에 우리 집에서 연결할 수 있어요.';
+    const syncMessage = '캘린더를 동기화하지 못했어요.';
+    const saveMessage = '설정을 저장하지 못했어요. 다시 시도해 주세요.';
+    final messages = [oauthMessage, syncMessage, saveMessage];
+    for (final (error, message) in [
+      (
+        const GoogleSignInException(
+          code: GoogleSignInExceptionCode.interrupted,
+        ),
+        oauthMessage,
+      ),
+      (
+        const GoogleSignInException(code: GoogleSignInExceptionCode.canceled),
+        null,
+      ),
+      (
+        GoogleAuthorizationException(StateError('Authorization failed')),
+        oauthMessage,
+      ),
+      (StateError('Calendar read failed'), syncMessage),
+      (null, saveMessage),
+    ]) {
+      failure = error;
+      store.failSetupWrite = error == null;
+      await tapText(tester, 'Google로 계속');
+      expect(app.step, SetupStep.calendar);
+      expect(app.calendarConnected, isFalse);
+      for (final candidate in messages) {
+        expect(
+          find.text(candidate),
+          candidate == message ? findsOneWidget : findsNothing,
+        );
+      }
+    }
+    expect(peer.requests, isEmpty);
+    store.failSetupWrite = false;
+    await tapText(tester, '건너뛰기');
+    expect(app.step, SetupStep.household);
+    expect(app.calendarConnected, isFalse);
+  });
 
   testWidgets('APP-03 startup sends the full list after an event is added', (
     tester,
@@ -816,6 +886,7 @@ void main() {
       tester,
       controller(peer, setup: true, store: store, calendar: read),
     );
+    await tapText(tester, '시작하기');
     await tapText(tester, '건너뛰기');
     await tapText(tester, '2인');
     await tapText(tester, '우리 집 만들기');
@@ -1684,6 +1755,7 @@ void main() {
       );
       await openApp(tester, app);
       if (setup) {
+        await tapText(tester, '시작하기');
         await tapText(tester, '건너뛰기');
         await tapText(tester, '2인');
         await tapText(tester, '우리 집 만들기');
@@ -1870,6 +1942,55 @@ void main() {
     expect(find.text('우리 집 접속 키 입력'), findsNothing);
   });
 
+  testWidgets('Setup keeps chips in place at 170% text and blocks submission', (
+    tester,
+  ) async {
+    final peer = Peer();
+    tester.platformDispatcher.textScaleFactorTestValue = 1.7;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await openApp(
+      tester,
+      controller(peer, setup: true),
+      size: const Size(390, 844),
+    );
+    await tapText(tester, '시작하기');
+    await tapText(tester, '건너뛰기');
+
+    final size = find.widgetWithText(FilterChip, '3~4인');
+    final largerSize = find.widgetWithText(FilterChip, '5인 이상');
+    final nextGroup = find.text('구성');
+    final originalRects = [
+      for (final target in [size, largerSize, nextGroup])
+        tester.getRect(target),
+    ];
+    await tester.tap(size);
+    await tester.pumpAndSettle();
+    expect([
+      for (final target in [size, largerSize, nextGroup])
+        tester.getRect(target),
+    ], originalRects);
+    expect(tester.widget<FilterChip>(size).selected, isTrue);
+
+    await tapText(tester, '맞벌이');
+    final reason = find.text('맞벌이는 부부·커플과 함께 골라 주세요.');
+    final create = find.widgetWithText(FilledButton, '우리 집 만들기');
+    await tester.ensureVisible(create);
+    await tester.pumpAndSettle();
+    expect(reason, findsOneWidget);
+    expect(
+      tester.getBottomLeft(reason).dy,
+      lessThan(tester.getTopLeft(create).dy),
+    );
+    expect(tester.widget<FilledButton>(create).onPressed, isNull);
+    await tester.tap(create);
+    expect(peer.requests, isEmpty);
+
+    await tapText(tester, '부부·커플');
+    expect(reason, findsNothing);
+    expect(tester.widget<FilledButton>(create).onPressed, isNotNull);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('AP-AT-1 onboarding validates types and copies its Server code', (
     tester,
   ) async {
@@ -1895,6 +2016,7 @@ void main() {
 
     await openApp(tester, controller(peer, setup: true, store: store));
     expect(find.byKey(const ValueKey('home-tabs')), findsNothing);
+    await tapText(tester, '시작하기');
     expect(find.text('Google 캘린더'), findsOneWidget);
     await tapText(tester, '건너뛰기');
     await tapText(tester, '2인');
@@ -2398,6 +2520,13 @@ void main() {
       await openApp(tester, app);
       await tapTab(tester, '우리 집');
       await tapText(tester, '2인');
+      final selected = tester.widget<FilterChip>(
+        find.widgetWithText(FilterChip, '2인'),
+      );
+      expect(selected.showCheckmark, isFalse);
+      expect(selected.selectedColor, DesignTokens.greenSoft);
+      expect(selected.side!.color, DesignTokens.greenLine);
+      expect(selected.labelStyle!.color, DesignTokens.greenDeep);
       await tapText(tester, '가구 유형 저장');
       expect(peer.profiles.single, {
         'household_types': ['2인'],
@@ -2641,7 +2770,7 @@ void main() {
       expect(app.household, 'h_042');
       expect(app.step, SetupStep.ready);
       expect(find.byKey(const ValueKey('home-tabs')), findsOneWidget);
-      expect(find.text('Google 캘린더 연결'), findsNothing);
+      expect(find.text('Google로 계속'), findsNothing);
       expect(peer.requests.map((r) => r.url.path), [
         '/v1/households/h_042/cards',
         '/v1/households/h_042/episodes',
@@ -2661,9 +2790,8 @@ void main() {
       );
       await openApp(tester, setup);
       expect(setup.household, isNull);
-      expect(setup.step, SetupStep.calendar);
-      expect(find.text('Google 캘린더'), findsOneWidget);
-      expect(find.text('건너뛰기'), findsOneWidget);
+      expect(setup.step, SetupStep.welcome);
+      expect(find.text('시작하기'), findsOneWidget);
       expect(find.byKey(const ValueKey('home-tabs')), findsNothing);
       expect(peer.requests, hasLength(3));
     },
@@ -2870,10 +2998,21 @@ void main() {
       );
       await openApp(tester, app, size: const Size(390, 844), devTools: true);
       expect(app.household, isNull);
+      expect(find.byType(SpiraTopBar), findsNothing);
+      expect(tester.widget<SpiraMark>(find.byType(SpiraMark)).large, isTrue);
+      expect(find.text('온라인 주문을 보고, 그날에 맞춰 집을 미리 준비해요.'), findsOneWidget);
+      expect(find.text('1 / 4'), findsNothing);
+      expect(peer.requests, hasLength(initialRequests));
+      await tapText(tester, '시작하기');
       expect(find.text('Google 캘린더'), findsOneWidget);
+      expect(find.text('Google 연결 없이 시작할 수 있어요.'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, '건너뛰기'), findsOneWidget);
+      expect(find.text('Google로 계속'), findsNothing);
+      expect(find.text('1 / 4'), findsOneWidget);
       expectTopBar(tester);
       expect(peer.requests, hasLength(initialRequests));
       await tapText(tester, '건너뛰기');
+      expect(find.text('2 / 4'), findsOneWidget);
       expectTopBar(tester);
       await tapText(tester, '2인');
       await tapText(tester, '부부·커플');
@@ -2882,9 +3021,11 @@ void main() {
       await tapText(tester, '우리 집 만들기');
       final code = fixture('household.created.json')['hub_api_key'] as String;
       expect(find.text(code), findsOneWidget);
+      expect(find.text('3 / 4'), findsOneWidget);
       expectTopBar(tester);
       await tapText(tester, '다음');
       expect(find.text('예시 집'), findsOneWidget);
+      expect(find.text('4 / 4'), findsOneWidget);
       expectTopBar(tester);
       expect(find.text('로봇청소기'), findsOneWidget);
       expect(find.text('냉장고'), findsOneWidget);

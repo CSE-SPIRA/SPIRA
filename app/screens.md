@@ -7,20 +7,20 @@
 | Screen | How it opens | Purpose |
 | --- | --- | --- |
 | Start and connection | App launch | Configuration check, token entry, Server reachability. |
-| Setup (first run) | No household stored, or `SPIRA_FIRST_RUN=1` | Google calendar, household types, household creation, Hub connection code, device check. |
+| Setup (first run) | No household stored, or `SPIRA_FIRST_RUN=1` | Welcome, Google calendar, household types and creation, Hub connection code, device check. |
 | 메인 | Tab 1 (default) | One preparation's lifecycle: share → staged wait → card → interventions → memory. |
 | 캘린더 | Tab 2 | Month of events and memories; a day's agenda; a memory sheet. |
 | 우리 집 | Tab 3 | Devices by room with what each is doing now; household types; Google connection. |
 | Stop confirmation | 멈추기 on a card | Confirms stopping one card's preparation. |
 | Memory sheet | Main after close, or a memory on Calendar | What happened and the Server's verdict. |
 
-Main, Calendar, Our Home, and every Setup step use the same top bar, with the `SPIRA` wordmark centered at the same height on the same background. Screen titles stay in the body, including Calendar's month and navigation row. [brand.dart](lib/features/brand.dart)
+Main, Calendar, Our Home, and the four numbered Setup steps use the same top bar, with the `SPIRA` wordmark centered at the same height on the same background. Welcome uses the larger mark in the body. Screen titles stay in the body, including Calendar's month and navigation row. [brand.dart](lib/features/brand.dart)
 
 The App never calls the Hub or the Simulator.
 
 ### Developer build
 
-`SPIRA_DEV_TOOLS=1` enables the toolbar key (`서버 접속 토큰 입력`) in **우리 집** or when the Server asks for a token. Fixture runs show `미리보기 · 계약 테스트 서버` in small type beside the wordmark. In the fixture browser preview, Main shows the qualifier at its foot alongside `예시 주문으로 공유` (`주문을 보내는 중…` while sending).
+`SPIRA_DEV_TOOLS=1` enables the toolbar key (`서버 접속 토큰 입력`) in **우리 집** or when the Server asks for a token. Fixture runs show `미리보기 · 계약 테스트 서버` in small type beside the wordmark on screens with the top bar. In the fixture browser preview, Main shows the qualifier at its foot alongside `예시 주문으로 공유` (`주문을 보내는 중…` while sending).
 
 Polling: every 3 seconds while an order is being read or a card is open, every 30 seconds otherwise ([app_controller.dart](lib/app_controller.dart) `_activePollInterval`, `_idlePollInterval`). Nothing on screen advances on a timer of its own; every change follows stored Server data or a confirmed request.
 
@@ -45,26 +45,28 @@ The bottom navigation has three tabs: `메인`, `캘린더`, `우리 집`.
 
 ## Setup (first run)
 
-Source: [setup.dart](lib/features/setup.dart). One step per screen, one primary button per step.
-
-```text
-+----------------------------------+
-|              SPIRA               |
-| Step title                       |
-| One sentence                     |
-| [ primary button ]               |
-| secondary link                   |
-+----------------------------------+
-```
+One step per screen, one primary button per step. After Welcome, the body shows `1 / 4` through `4 / 4` above the step title. [setup.dart](lib/features/setup.dart)
 
 | Step | Title and text | Controls | Request |
 | --- | --- | --- | --- |
-| 1. Google | `Google 캘린더`; connected build: `앞으로 14일의 일정을 참고해 준비할게요.`; without a Google client: `Google 연결 없이 시작할 수 있어요.` | `Google 캘린더 연결` (Android with a client id), `건너뛰기` | Google sign-in on the phone only. |
-| 2. Household types | `가구 유형`; groups `인원` (`1인`, `2인`, `3~4인`, `5인 이상`), `구성` (`부부·커플`, `영유아 자녀`, `초등 자녀`, `중학생 자녀`, `고등학생 자녀`, `부모 + 성인 자녀`, `3대 함께`, `룸메이트·셰어하우스`), `생활 단계` (`대학생`, `직장인`, `은퇴·노년`), `근무 형태` (`맞벌이`, `재택근무`), `반려동물` (`반려견`, `반려묘`, `그 밖의 반려동물`). `인원` and `생활 단계` are pick-one. | `우리 집 만들기` | `POST /v1/households {household_types}`. A blocked combination: `함께 선택할 수 없는 가구 유형이에요.` Other failure: `설정을 저장하지 못했어요. 다시 시도해 주세요.` |
+| Welcome | Larger `SpiraMark` and `온라인 주문을 보고, 그날에 맞춰 집을 미리 준비해요.` | `시작하기` | None. |
+| 1. Google | `Google 계정으로 시작` and `앞으로 14일의 일정을 참고해 준비할게요.` With no client, `Google 캘린더` and `Google 연결 없이 시작할 수 있어요.` | `Google로 계속` with secondary `건너뛰기`. With no client, `건너뛰기` is the only action. | Google sign-in and calendar read on the phone. |
+| 2. Household types | `가구 유형` with groups `인원`, `구성`, `생활 단계`, `근무 형태`, and `반려동물`. Options and pick limits come from the bundled contract catalog. Selected chips use green fill, border, and text and retain their size. | `우리 집 만들기` is disabled when the selection is empty or blocked. | `POST /v1/households {household_types}` and `PUT …/profile`. A 422 shows the Server's Korean reason when available or `함께 선택할 수 없는 가구 유형이에요.` |
 | 3. Connection code | `집 허브 연결 코드`; `이 코드를 집 허브에 입력하세요`; the `hub_api_key` from the creation response, shown once | `연결 코드 복사` → `연결 코드를 복사했어요`; `다음` | None. The code is entered on the Hub by a person. |
 | 4. Devices | `집 기기 확인`; the sample device list (see 우리 집), read-only, delegation disabled | `저장` | Calendar sync after the household exists (see Calendar). |
 
 After step 4 the App opens Main.
+
+Canceling Google sign-in or authorization keeps step 1 visible with no error. Another sign-in or authorization failure shows `Google에 연결하지 못했어요. 건너뛰고 나중에 우리 집에서 연결할 수 있어요.` A calendar read failure shows `캘린더를 동기화하지 못했어요.` Server sync uses the messages under Calendar. A setup save failure shows `설정을 저장하지 못했어요. 다시 시도해 주세요.`
+
+Step 2 shows the first applicable blocked reason directly above `우리 집 만들기`, in the order below. Rare combinations are allowed without a message. [Household type contract](../contracts/kb/household_types.json)
+
+| Blocked selection | Inline message |
+| --- | --- |
+| The size cannot fit the chosen composition | `선택한 가구 구성에 맞게 인원을 늘려 주세요.` |
+| Roommates with a couple, any child category, parents with adult children, or three generations | `룸메이트·셰어하우스는 가족 구성과 함께 고를 수 없어요.` |
+| Dual income without a couple | `맞벌이는 부부·커플과 함께 골라 주세요.` |
+| Retirement with dual income or remote work | `은퇴·노년은 맞벌이 또는 재택근무와 함께 고를 수 없어요.` |
 
 ## 메인
 
@@ -186,7 +188,7 @@ Source: [our_home.dart](lib/features/our_home.dart), [sample_devices.dart](lib/f
 | Devices `기기` | `예시 집` label; rooms that have devices (entrance hidden when empty), each device with its type icon and name; failure `예시 집을 불러오지 못했어요.` | Bundled copy of `hub/installation.example.json` (kept equal by a test). |
 | Delegation `맡기기` | Toggle per device, disabled, `집 연결 후`; label `{name} 맡기기 · 집 연결 후` | No Server route yet. |
 | Now running | `지금: {line text} · {state}` for a device in an open card's line | Device → task from `GET …/rationale` `tasks[].devices` (`id`, `type`, `room` only). `끄기` sends that line's `line_off`; `요청함` while pending. |
-| Household types `가구 유형` | The chosen types | `가구 유형 저장` → `PUT …/profile`. |
+| Household types `가구 유형` | The chosen types, using the same stable green chip selection style as Setup | `가구 유형 저장` → `PUT …/profile`. |
 | Google `Google 캘린더` | `연결됨` / `연결 안 됨` | `Google 연결` / `Google 연결 해제` (Android). |
 
 ## Server routes the screens use

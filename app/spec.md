@@ -113,14 +113,15 @@ and its `devices` identifiers, types, and rooms. The row MUST display the card
 line's text and state and use the card's `line_off` reaction when available.
 Onboarding MUST show the device list read-only. `SPIRA_HOUSEHOLD_ID` MUST
 open an existing household directly, including one created by the Server's demo
-home script. `SPIRA_FIRST_RUN=1` MUST start at Google setup with no household,
+home script. `SPIRA_FIRST_RUN=1` MUST start at Welcome with no household,
 even when a household is configured or setup was previously completed. Opening
 a household MUST require only the Server connection.
 
 | ID | Requirement |
 | --- | --- |
-| ON-1 | First-run setup MUST start with optional Google sign-in. Connected events MUST sync to `PUT …/calendar` after the household exists. |
-| ON-2 | The user MUST be able to select multiple household types. A 422 `household_types_invalid` response MUST show the Server's reason inline. |
+| ON-1 | First-run Setup MUST open with the larger SPIRA mark, `온라인 주문을 보고, 그날에 맞춰 집을 미리 준비해요.` and `시작하기`. The next four steps MUST show progress from `1 / 4` (Google) through `가구 유형`, the connection code and `집 기기 확인` (`4 / 4`). |
+| ON-1a | With a Google client, step 1 MUST show `Google 계정으로 시작`, `앞으로 14일의 일정을 참고해 준비할게요.`, `Google로 계속` and `건너뛰기`. Without a client, step 1 MUST offer only `건너뛰기`. Canceling MUST leave the Google step visible with no error. Other sign-in or authorization failures MUST show `Google에 연결하지 못했어요. 건너뛰고 나중에 우리 집에서 연결할 수 있어요.` Calendar read and sync failures MUST use calendar messages. Setup save failures MUST use the setup save message. Connected events MUST sync to `PUT …/calendar` after the household exists. |
+| ON-2 | The user MUST be able to select multiple household types. Chips MUST keep their size and use green selection styling in Setup and Our Home. During Setup, a blocked combination from the household type contract MUST disable `우리 집 만들기` and show a reason above it. Rare combinations MUST remain selectable with no message. A 422 `household_types_invalid` response MUST show the Server's Korean reason inline when available, with a generic Korean fallback. (APP-12) |
 | ON-3 | Household creation MUST display the returned `hub_api_key` as a copyable connection code, with instructions for entering it on the Hub. |
 | ON-4, ON-5 | The device step MUST show the same grouped sample inventory as Our Home, with delegation disabled. |
 | ON-6 | Saving MUST complete onboarding and open Main. |
@@ -139,7 +140,8 @@ Stop. The App MUST provide no Stop All control.
 The App MUST use shared design tokens and IBM Plex Sans KR. The preparation
 card MUST lead with its title and place line timing on the left and state on
 the right. Each screen MUST distinguish one primary action when available.
-Developer builds connected to the fixture MUST use a small qualifier.
+Developer builds connected to the fixture MUST use a small qualifier on
+the numbered Setup steps and after Setup.
 User-facing copy MUST use concise, natural Korean and omit internal diagnostics.
 
 ### A6. Removed surfaces
@@ -155,7 +157,7 @@ the Hub or Simulator fails acceptance.
 
 | ID | Scenario and observable exit |
 | --- | --- |
-| AP-AT-1 | Start a fixture preview with the first-run switch. Skip Google, select two types, create the household, see and copy the connection code, review the read-only sample devices, and save to Main. The Server stores the household and types. |
+| AP-AT-1 | Start a fixture preview with the first-run switch. See the Welcome mark and sentence, tap `시작하기`, and verify progress from `1 / 4` to `4 / 4` as you skip Google, select two types, create the household, copy the connection code, and review the read-only sample devices. Save to Main. The Server stores the household and types. |
 | AP-AT-2 | Share two images from Android and pick one from the gallery. Both go through M1, M2, and M3. |
 | AP-AT-3 | Send an order requiring no preparation. The order remains at M4a with an empty preparation area. |
 | AP-AT-4 | Send an order requiring preparation. An M5 card appears with no evidence, comparisons, or examples. |
@@ -173,4 +175,6 @@ the Hub or Simulator fails acceptance.
 | AP-AT-16 | Hold each processing stage until its data is stored. Main advances through receipt, items, context, and Server intent in order, then collapses the order when the card appears. With reduced motion nothing animates. |
 | AP-AT-17 | Supply multiple items of one type and one guidance task. In the expanded order the first item of that type shows its kind, Server text, and state wording exactly once. |
 | AP-AT-18 | Open a real Server household without Google. The birthday appears 20 minutes after the Server time and lasts one hour. Reopen and verify its anchor stays put. When the birthday has ended or is under 10 minutes away, the next sample is sent only if there is no open card. With Google connected no sample is sent. |
-| AP-AT-19 | Open the household configured by `SPIRA_HOUSEHOLD_ID` using only the Server URL and App credentials. Main opens directly. With `SPIRA_FIRST_RUN=1`, setup starts instead. |
+| AP-AT-19 | Open the household configured by `SPIRA_HOUSEHOLD_ID` using only the Server URL and App credentials. Main opens directly. With `SPIRA_FIRST_RUN=1`, Setup opens at Welcome. |
+| AP-AT-20 | At phone width with 170% text, select `3~4인` and verify the other chips stay in place. Select `맞벌이` without `부부·커플` and verify the reason appears above the disabled `우리 집 만들기`. Add `부부·커플` and verify the reason clears and creation becomes available. |
+| AP-AT-21 | On the Google step, cancel sign-in and verify the step stays open without an error. Trigger an authorization failure, a calendar read failure, and a local save failure and verify their distinct messages. |

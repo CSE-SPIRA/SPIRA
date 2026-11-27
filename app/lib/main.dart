@@ -156,21 +156,24 @@ class _HomeState extends State<_Home> with WidgetsBindingObserver {
     listenable: app,
     builder: (context, _) {
       final ready = !app.starting && app.step == SetupStep.ready;
+      final welcome = app.step == SetupStep.welcome;
       final theme = Theme.of(context);
       final lastCheck = app.lastServerCheck;
       return Scaffold(
         backgroundColor: ready ? theme.colorScheme.surface : null,
-        appBar: SpiraTopBar(
-          showFixtureLabel:
-              widget.devTools &&
-              app.fixture &&
-              (!ready || !app.demoPreview || _tab != _HomeTab.main),
-          onEnterToken:
-              widget.devTools &&
-                  (app.needsToken || (ready && _tab == _HomeTab.ourHome))
-              ? _token
-              : null,
-        ),
+        appBar: welcome
+            ? null
+            : SpiraTopBar(
+                showFixtureLabel:
+                    widget.devTools &&
+                    app.fixture &&
+                    (!ready || !app.demoPreview || _tab != _HomeTab.main),
+                onEnterToken:
+                    widget.devTools &&
+                        (app.needsToken || (ready && _tab == _HomeTab.ourHome))
+                    ? _token
+                    : null,
+              ),
         body: SafeArea(
           bottom: !ready,
           child: Column(

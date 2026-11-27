@@ -9,6 +9,12 @@ typedef CalendarReader = Future<wire.Calendar> Function({
   required bool interactive,
 });
 
+class GoogleAuthorizationException implements Exception {
+  const GoogleAuthorizationException(this.cause);
+
+  final Object cause;
+}
+
 const _calendarScopes = [
   'https://www.googleapis.com/auth/calendar.events.readonly',
 ];
@@ -28,16 +34,25 @@ class GoogleCalendarReader {
   }
 
   Future<wire.Calendar> call({required bool interactive}) async {
-    await _initialize();
     final signIn = GoogleSignIn.instance;
-    // Android remembers the default account selected during setup.
-    final authClient = interactive
-        ? (await signIn.authenticate()).authorizationClient
-        : signIn.authorizationClient;
-    final authorization = interactive
-        ? await authClient.authorizeScopes(_calendarScopes)
-        : await authClient.authorizationForScopes(_calendarScopes);
-    if (authorization == null) throw StateError('Calendar unavailable');
+    final GoogleSignInAuthorizationClient authClient;
+    final GoogleSignInClientAuthorization authorization;
+    try {
+      await _initialize();
+      // Android remembers the default account selected during setup.
+      authClient = interactive
+          ? (await signIn.authenticate()).authorizationClient
+          : signIn.authorizationClient;
+      final grant = interactive
+          ? await authClient.authorizeScopes(_calendarScopes)
+          : await authClient.authorizationForScopes(_calendarScopes);
+      if (grant == null) throw StateError('Calendar authorization unavailable');
+      authorization = grant;
+    } on GoogleSignInException {
+      rethrow;
+    } catch (error) {
+      throw GoogleAuthorizationException(error);
+    }
     final now = DateTime.now().toUtc();
     final end = now.add(const Duration(days: 14));
     final events = <wire.EventElement>[];
@@ -92,6 +107,9 @@ class GoogleCalendarReader {
         page = result['nextPageToken'] as String?;
       } while (page != null);
       return wire.Calendar(events: events);
+    } on GoogleSignInException {
+      // Token invalidation follows a failed calendar read.
+      throw StateError('Calendar unavailable');
     } finally {
       client.close();
     }
