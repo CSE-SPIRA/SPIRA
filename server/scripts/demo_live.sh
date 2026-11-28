@@ -7,6 +7,8 @@
 #   server/scripts/demo_live.sh --fresh    also forget the Simulator's device states and the hub's plans
 #
 # First run: makes simulator/.venv (Simulator, hub and demo shell share it) and out/operator.token.
+# The App in the phone: app/build/web is rebuilt (app/scripts/demo-shell-web, needs flutter) when it is missing,
+# older than app/lib, or built for another address. DEMO_APP_BUILD=0 skips that.
 # Ports: SERVER_PORT (8000), SIM_PORT (8730), HUB_PORT (8088), SHELL_PORT (8733), MQTT_PORT (1883).
 
 set -euo pipefail
@@ -53,6 +55,23 @@ fi
 "$PEERS_VENV/bin/python" -c "import fastapi, httpx, multipart, yaml, uvicorn" 2>/dev/null \
   || "$PEERS_VENV/bin/pip" install -q -r demo-shell/requirements.txt            # demo shell in the same venv
 [ -f "$OUT/operator.token" ] || { umask 077; openssl rand -hex 16 > "$OUT/operator.token"; }
+
+APP_STAMP="$ROOT/app/build/web/.demo-shell"         # written after a build from here: address and household
+APP_FOR="http://127.0.0.1:$SHELL_PORT/demo/app-api $SPIRA_HOUSEHOLD_ID"
+app_stale() {
+  [ -f "$APP_STAMP" ] && [ "$(cat "$APP_STAMP")" = "$APP_FOR" ] || return 0   # missing, by hand, or for another address
+  [ -n "$(find "$ROOT/app/lib" "$ROOT/app/pubspec.yaml" -newer "$APP_STAMP" -print -quit)" ]
+}
+if [ "${DEMO_APP_BUILD:-1}" != 0 ] && app_stale; then
+  if command -v flutter >/dev/null; then
+    say "휴대폰 앱 웹 빌드를 새로 만들어요 (1~2분)"
+    DEMO_ORIGIN="http://127.0.0.1:$SHELL_PORT" DEMO_HOUSEHOLD="$SPIRA_HOUSEHOLD_ID" app/scripts/demo-shell-web \
+      || die "앱 웹 빌드에 실패했어요: app/scripts/demo-shell-web 출력을 확인해 주세요"
+    echo "$APP_FOR" > "$APP_STAMP"
+  else
+    say "flutter 가 없어 휴대폰 앱 빌드를 건너뛰어요 (휴대폰이 비거나 예전 앱일 수 있어요)"
+  fi
+fi
 OPERATOR_TOKEN="$(cat "$OUT/operator.token")"
 
 SIM_DB="$TMP/spira-$SPIRA_HOUSEHOLD_ID.db"

@@ -123,7 +123,7 @@ no hub routes), forwarded with `DEMO_APP_TOKEN`. The right panel follows any
 already there when the page opened are not followed), so an order sent from a
 real phone to the same household shows here too. **새로 시작** also clears the
 App's saved state (`flutter.spira.*` in this origin's local storage). A replay
-hides the phone.
+shows the stored order on the phone instead of the App (`ui/replay-phone.js`).
 
 Server replay (`ui/replays.js`, server/spec.md 12.5). When a live run has
 finished S5, **재현용 보관** in the log head keeps it (`POST /demo/api/keep/{id}`,
@@ -132,9 +132,22 @@ forwarded to `POST /v1/demo/episodes/{id}/keep`); a kept run survives
 home. **재현** at the top right lists kept runs (`…/replays`) with a speed
 (1×, 2×, 4×) and opens `/demo?replay_episode=ep_…&speed=2`: the log reads the
 trace with `?at=` growing by the speed each second, so stages arrive at the
-original pace, the head says `재현 · 날짜 · 2×`, the phone stays empty, and the
-run ends at the plan (no house, no 새로 시작). This is not `?recording=`, which
-plays a fixture recording.
+original pace, the head says `재현 · 날짜 · 2×`, and the run ends at the plan (no
+house, no 새로 시작). This is not `?recording=`, which plays a fixture recording.
+Each row in **재현** has **지우기**; a second press (정말 지울까요?) removes the run
+from the list (`{"keep": false}`) and deletes its photos.
+
+Replay phone (`ui/replay-phone.js`). The App does not run in a replay; the phone
+shows the run from the stored trace, each part only after the log has shown it:
+the order photos, then the items S1 read, then the card S5 made (photos and items
+fold under the card). Nothing is generated.
+
+Replay photos (`order_photos.py`). The SPIRA Server deletes screenshots once read,
+and the App keeps its copy on the phone only, so the shell holds the photos of an
+order shared through the phone in this page, in memory (latest 20 orders, one
+day). **재현용 보관** writes them to `photos/` on the demo machine
+(`DEMO_PHOTOS_DIR`, not in git); removing the run deletes them. Runs shared from
+another phone, or kept before this, show the phone without photos.
 
 The launcher starts with an empty fixture and fresh Hub and World databases.
 To start a fresh take, choose **새로 시작** in **진행자 조작** or in the notice
@@ -335,4 +348,5 @@ Rules the demo keeps:
 | `DEMO_HUB_URL` | Hub for plan receipts, received actions, triggers and verified read-backs (`/state`) |
 | `DEMO_NUMBERS_PATH` | Path to the Server's `config/numbers.yaml` when using `DEMO_MODE=1` |
 | `DEMO_RECORDINGS_DIR` | Local recordings and cache directory (default: ignored `demo-shell/recordings/`) |
+| `DEMO_PHOTOS_DIR` | Photos of runs kept for the replay, on this machine only (default: ignored `demo-shell/photos/`) |
 | `DEMO_TAGGER` | `codex` enables background text tags. Defaults to `off` for the standalone shell and tests. |

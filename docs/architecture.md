@@ -86,7 +86,7 @@ All values are English codes; Korean appears only in display text.
 | KB DB | Synthetic `cases` with embeddings, versioned (`kb-v1`, …) | KB build (Uijin); server reads only |
 | Temp images | Order screenshots until read (≤ 1 day) | Server |
 
-Calendar titles and raw screenshots are never kept. Connection URLs and keys live only in `.env` files.
+Calendar titles and raw screenshots are never kept on the server. The App shows the photos it shared from its own copy on the phone until the card arrives; a demo replay's photos stay on the demo machine only (`demo-shell/order_photos.py`). Connection URLs and keys live only in `.env` files.
 
 ## 6. Environments and switches
 

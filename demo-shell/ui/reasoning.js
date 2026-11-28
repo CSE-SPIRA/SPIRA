@@ -122,8 +122,25 @@ export function createReasoning(context, ui) {
       node.id = "replay-phone";
       screen.append(node);
     }
+    if (state.replayPhotos?.episode !== state.episodeId) {
+      const photos = { episode: state.episodeId, count: 0, selected: 1 };
+      state.replayPhotos = photos;
+      fetch(`/demo/api/photos/${encodeURIComponent(state.episodeId)}`)
+        .then((response) => (response.ok ? response.json() : { count: 0 }))
+        .then(({ count }) => {
+          photos.count = Number(count) || 0;
+          renderReplayPhone();
+        })
+        .catch(() => {});
+      node.onclick = (event) => {
+        const button = event.target?.closest?.("[data-photo]");
+        if (!button || !state.replayPhotos) return;
+        state.replayPhotos.selected = Number(button.dataset.photo);
+        renderReplayPhone();
+      };
+    }
     const shown = state.furthest?.episode === state.episodeId ? state.furthest.index : -1;
-    const markup = replayPhone(state.trace, shown);
+    const markup = replayPhone(state.trace, shown, state.replayPhotos);
     if (node.dataset.content !== markup) {
       node.dataset.content = markup;
       node.innerHTML = markup;
