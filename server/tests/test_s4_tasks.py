@@ -236,3 +236,33 @@ def test_bulk_rule(qty, name, bulk):
     item = OrderItem(type="닭가슴살", name=name, grp="음·식료품", qty=qty, attributes=[], label="care", masked=False)
     spec = next(t for t in get_config().item_tasks["tasks"] if t["name"] == "freeze")
     assert s4_tasks.rule_matches(spec["when"], item, get_config().item_tasks["bulk"]) is bulk
+
+
+def test_r58_after_start_before_end_and_restore_inside_the_schedule(mock_llm):
+    """R58: the LLM picks when to act and when to put things back between the calendar start and end."""
+    ep = ep9031()                                            # 토요일 14:00~17:00 (180 minutes)
+    out = output()
+    out["tasks"][0]["trigger"] = {"kind": "after_start", "minutes": 60}                 # clean once everyone is out
+    out["tasks"][1]["trigger"] = {"kind": "after_start", "minutes": 30}                 # lock, put back before the end
+    out["tasks"][1]["end_before_end_minutes"] = 30
+    record(mock_llm, ep, out)
+    tasks = {d.task_id: d for d in _gen(ep).drafts}
+    assert tasks["t_clean#1"].trigger == {"time": "2026-10-17T15:00:00+09:00"}
+    assert tasks["t_safe#2"].trigger == {"time": "2026-10-17T14:30:00+09:00"}
+    assert tasks["t_safe#2"].end == {"time": "2026-10-17T16:30:00+09:00", "restore": True}
+
+
+@pytest.mark.parametrize("trigger,extra,word", [
+    ({"kind": "after_start", "minutes": 200}, {}, "일정 길이"),                      # past the end
+    ({"kind": "before_end", "minutes": None}, {}, "minutes"),
+    ({"kind": "after_start", "minutes": 60}, {"end_after_start_minutes": 30}, "실행 시점보다 뒤"),
+    ({"kind": "after_start", "minutes": 10}, {"end_before_end_minutes": 0, "end_after_start_minutes": 20}, "하나만"),
+])
+def test_r58_times_outside_the_schedule_are_format_errors(trigger, extra, word):
+    ep = ep9031()
+    out = output()
+    out["tasks"][1]["trigger"] = trigger
+    out["tasks"][1].update(extra)
+    p = s4_tasks.prepare(ep, now=JUDGED)
+    errs = s4_tasks.task_errors(p.schema.model_validate(out), p.bundles)
+    assert any(i == 1 and word in msg for i, msg in errs), errs

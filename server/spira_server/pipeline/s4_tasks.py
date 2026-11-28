@@ -333,8 +333,15 @@ def build_task_message(*, bundles: list[dict], whens: dict[int, When | None], it
         w = whens.get(n - 1)
         if w:
             days = (w.start.date() - shared_at.astimezone(clock.KST).date()).days
-            time_text = prompts.fill(b["intent"]["time_known"], WEEKDAY=clock.weekday_ko(w.start),
-                                     START=w.start.strftime("%H:%M"), END=w.end.strftime("%H:%M"), DAYS=days)
+            span_days = (w.end.astimezone(clock.KST).date() - w.start.astimezone(clock.KST).date()).days
+            if span_days > 0:
+                time_text = prompts.fill(b["intent"]["time_known_days"], WEEKDAY=clock.weekday_ko(w.start),
+                                         START=w.start.strftime("%H:%M"), END_WEEKDAY=clock.weekday_ko(w.end),
+                                         END=w.end.strftime("%H:%M"), DAYS=days, NIGHTS=span_days,
+                                         MINUTES=int((w.end - w.start).total_seconds() // 60))
+            else:
+                time_text = prompts.fill(b["intent"]["time_known"], WEEKDAY=clock.weekday_ko(w.start),
+                                         START=w.start.strftime("%H:%M"), END=w.end.strftime("%H:%M"), DAYS=days)
         else:
             time_text = b["intent"]["time_unknown"]
         lines = [prompts.fill(b["intent"]["header"], N=n)]
@@ -417,12 +424,13 @@ def build_task_schema(catalog: Catalog, n_bundles: int, notice_types: list[str])
     bundle_t = Literal[tuple(range(1, max(n_bundles, 1) + 1))]  # type: ignore[valid-type]
     need = create_model("Need", id=(str, ...), bundle=(bundle_t, ...), need=(str, ...),
                         from_=(list[str], Field(alias="from", min_length=1)))
-    trigger = create_model("Trigger", kind=(Literal["before_start", "guest_arrived", "event_end"], ...),
+    trigger = create_model("Trigger", kind=(Literal[TRIGGER_KINDS], ...),  # type: ignore[valid-type]
                            minutes=(int | None, Field(None, ge=0, le=720)))
     task = create_model(
         "Task", need_id=(str, ...), slug=(str, ...), way=(Literal["run", "standby", "notice"], ...),
         target_room=(room_t, None), actions=(list[action_t], Field(min_length=1)), trigger=(trigger | None, None),
-        end_after_start_minutes=(int | None, None), line=(str, ...))
+        end_after_start_minutes=(int | None, Field(None, ge=0)), end_before_end_minutes=(int | None, Field(None, ge=0)),
+        line=(str, ...))
     fields: dict[str, Any] = {"needs": (list[need], ...), "tasks": (list[task], ...)}
     if notice_types:
         notice = create_model(
@@ -434,6 +442,34 @@ def build_task_schema(catalog: Catalog, n_bundles: int, notice_types: list[str])
 
 
 # ------------------------------------------------------------------------------------------- check (§10.7)
+
+TRIGGER_KINDS = ("before_start", "after_start", "before_end", "guest_arrived", "event_end")
+MINUTE_KINDS = ("before_start", "after_start", "before_end")
+
+
+def timing_error(t: BaseModel, window: dict | None) -> str | None:
+    """Times the LLM chose must stay inside the schedule (spec §10.4, R58): it picks when to act and when to put
+    things back between the calendar's start and end; the server only keeps it from harming the home."""
+    if t.trigger is None:
+        return None
+    if t.end_after_start_minutes is not None and t.end_before_end_minutes is not None:
+        return "end_after_start_minutes와 end_before_end_minutes는 하나만 쓴다"
+    if not window or not window.get("start") or not window.get("end"):
+        return None                                              # no time yet: held, checked again when one is found
+    span = (clock.parse(window["end"]) - clock.parse(window["start"])).total_seconds() / 60
+    m = t.trigger.minutes or 0
+    at = {"before_start": -m, "after_start": m, "before_end": span - m}.get(t.trigger.kind)
+    if t.trigger.kind in ("after_start", "before_end") and m > span:
+        return f"{t.trigger.kind} {m}분은 일정 길이({int(span)}분)를 넘는다"
+    back = (t.end_after_start_minutes if t.end_after_start_minutes is not None
+            else span - t.end_before_end_minutes if t.end_before_end_minutes is not None else None)
+    if back is not None:
+        if back > span:
+            return "되돌리는 시점이 일정 끝보다 늦다"
+        if at is not None and back <= at:
+            return "되돌리는 시점은 실행 시점보다 뒤여야 한다"
+    return None
+
 
 def task_errors(plan: BaseModel, bundles: list[dict]) -> list[tuple[int | None, str]]:
     """(task index or None, error). Rules of spec §10.7."""
@@ -448,8 +484,13 @@ def task_errors(plan: BaseModel, bundles: list[dict]) -> list[tuple[int | None, 
             errs.append((i, f"할 일 {k}: {t.way}에는 trigger를 쓰지 않는다"))
         if t.way == "run" and t.trigger is None:
             errs.append((i, f"할 일 {k}: run에는 trigger가 있어야 한다"))
-        if t.trigger is not None and t.trigger.kind == "before_start" and t.trigger.minutes is None:
-            errs.append((i, f"할 일 {k}: before_start에는 minutes가 있어야 한다"))
+        if t.trigger is not None and t.trigger.kind in MINUTE_KINDS and t.trigger.minutes is None:
+            errs.append((i, f"할 일 {k}: {t.trigger.kind}에는 minutes가 있어야 한다"))
+        if t.need_id in needs and t.way == "run":
+            bundle = bundles[needs[t.need_id].bundle - 1] if needs[t.need_id].bundle <= len(bundles) else None
+            msg = timing_error(t, (bundle or {}).get("use_window"))
+            if msg:
+                errs.append((i, f"할 일 {k}: {msg}"))
         if t.way == "standby" and len({a.key.split(".")[0] for a in t.actions}) > 1:
             errs.append((i, f"할 일 {k}: standby는 기기 하나만 쓴다"))
         if t.trigger is not None and t.trigger.kind == "guest_arrived" and t.need_id in needs:
@@ -708,6 +749,10 @@ def _trigger_end(t: BaseModel, actions: list[dict], w: When | None, catalog: Cat
     if kind == "before_start":
         minutes = n.before_start_default_min if cfg.demo else t.trigger.minutes
         trigger: dict = {"time": clock.iso(w.start - timedelta(minutes=minutes))}
+    elif kind == "after_start":
+        trigger = {"time": clock.iso(w.start + timedelta(minutes=t.trigger.minutes))}
+    elif kind == "before_end":
+        trigger = {"time": clock.iso(w.end - timedelta(minutes=t.trigger.minutes))}
     elif kind == "guest_arrived":
         trigger = {"event": "guest_arrived", "first_only": True,
                    "window": {"from": clock.iso(w.start - timedelta(minutes=n.guest_window_before_min)),
@@ -719,6 +764,8 @@ def _trigger_end(t: BaseModel, actions: list[dict], w: When | None, catalog: Cat
         return trigger, {"on": "event_end", "after": f"{n.after_event_end_min}m", "restore": True}
     if t.end_after_start_minutes is not None:
         return trigger, {"time": clock.iso(w.start + timedelta(minutes=t.end_after_start_minutes)), "restore": True}
+    if getattr(t, "end_before_end_minutes", None) is not None:
+        return trigger, {"time": clock.iso(w.end - timedelta(minutes=t.end_before_end_minutes)), "restore": True}
     return trigger, {"on": "event_end", "or_time": clock.iso(w.end + timedelta(minutes=n.end_fallback_min)),
                      "restore": not cleaner_only}
 
