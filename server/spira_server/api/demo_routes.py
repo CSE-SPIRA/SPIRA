@@ -105,7 +105,9 @@ def _result(s: Session, ep: Episode, name: str) -> dict:
                 "unusual_items": (home or {}).get("unusual_items"), "calendar": (home or {}).get("calendar"),
                 "kb": None if kb is None else {
                     "similar_count": kb.get("similar_count"), "base_total": kb.get("base_total"),
-                    "intent_counts": kb.get("intent_counts") or [], "note": kb.get("note")},
+                    "intent_counts": kb.get("intent_counts") or [], "note": kb.get("note"),
+                    "examples": [{k: e.get(k) for k in ("case_id", "intent_id", "intent_text", "items", "situation")}
+                                 for e in kb.get("examples") or []]},
                 "kb_search": ctx.get("kb_search"),
                 "error": (ep.error or {}).get("message") if (ep.error or {}).get("stage") == "s2" else None}
     if name == "s3":

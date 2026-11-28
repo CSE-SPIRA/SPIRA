@@ -308,9 +308,10 @@ components:
           description: >-
             What the stage stored, once it is done or failed (else null); stored values only (server/spec.md §12.5).
             s1 {items[{item_id, name, type, qty, attributes, masked}], error}; s2 {household_types, unusual_items,
-            calendar, kb {similar_count, base_total, intent_counts[{intent_id, name, n, share, base_share}], note},
+            calendar, kb {similar_count, base_total, intent_counts[{intent_id, name, n, share, base_share}], note,
+            examples[{case_id, intent_id, intent_text, items, situation}] = the examples S3 received},
             kb_search {searched, sim_floor, above_floor, used, sims, top[{case_id, sim, score, intent_id, intent_text,
-            items, used}]}, error}; s3 {bundles[{intent_id, intent_text, situation, basis, calendar_event_id,
+            items, used}], examples[{case_id, intent_id, sim}]}, error}; s3 {bundles[{intent_id, intent_text, situation, basis, calendar_event_id,
             calendar_tags, use_window}], none_reason, unbundled, error}; s4 = episodes.s4 {llm_called, whens,
             skipped_bundles, drafts, dropped}; s5 {cards (card.json), plan_version, dropped[{task_id, source, line, item,
             reason}] = tasks S5 left out (safety net, notices, merge; Task.drop_reason)}. Masked items carry no name/type.

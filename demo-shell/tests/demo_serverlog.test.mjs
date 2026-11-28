@@ -16,9 +16,11 @@ const trace = {
       unusual_items: { status: "list", items: [{ item: "딸기", why: "평소 1개 → 이번 2개" }] },
       kb: { similar_count: 50, base_total: 30000, note: null, intent_counts: [
         { intent_id: "kid_birthday_party", name: "아이 생일 파티", n: 38, share: 0.76, base_share: 0.02 },
-        { intent_id: "x", name: "없는 의도", n: 0, share: 0, base_share: 0.1 }] },
+        { intent_id: "x", name: "없는 의도", n: 0, share: 0, base_share: 0.1 }],
+        examples: [{ case_id: "c", intent_id: "kid_birthday_party", intent_text: "아이 생일 파티를 연다", items: ["풍선", "생일 초"], situation: {} }] },
       kb_search: { searched: 200, sim_floor: 0.7, above_floor: 126, used: 50, sims: [0.86],
-        top: [{ case_id: "c", sim: 0.86, score: 0.9, intent_id: "kid_birthday_party", intent_text: "t", items: ["풍선"], used: true }] },
+        top: [{ case_id: "c", sim: 0.86, score: 0.9, intent_id: "kid_birthday_party", intent_text: "t", items: ["풍선"], used: true }],
+        examples: [{ case_id: "c", intent_id: "kid_birthday_party", sim: 0.86 }] },
       error: null } },
     { name: "s3", state: "running", done_s: null, llm: null, result: null },
     { name: "s4", state: "pending", done_s: null, llm: null, result: null },
@@ -33,6 +35,9 @@ test("finished stages fold to one line, the shown stage expands, the next shows 
   assert.match(html, /유사도 0.7 초과 126/);
   assert.match(html, /아이 생일 파티<\/span><span class="log-mono">38건/);
   assert.doesNotMatch(html, /없는 의도/);                    // n = 0 rows are left out
+  assert.match(html, /class="log-example"[\s\S]*0.86[\s\S]*풍선 · 생일 초[\s\S]*아이 생일 파티를 연다/);   // the example S3 received
+  assert.match(html, /class="log-dist"[\s\S]*검색된 1건/);
+  assert.doesNotMatch(html, /log-case/);                     // the top-similar list is gone
   assert.match(html, /의도 추론 중 … 23s/);                  // 40 s now − 16.1 s S2 end
   assert.doesNotMatch(html, /S4 할 일 생성/);
   assert.match(html, /LIVE/);

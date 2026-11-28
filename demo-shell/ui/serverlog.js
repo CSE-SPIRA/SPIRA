@@ -103,6 +103,26 @@ function itemsBody(r) {
   return row("읽은 물건", `<div class="log-items">${lines}</div>`) + (masked ? row("가린 물건", `${masked}개 (이름은 저장하지 않음)`) : "");
 }
 
+// Similarity of every searched case, binned; bins right of the floor are the cases kept (stored kb_search only).
+function simDistribution({ sims, sim_floor, above_floor, used }) {
+  const lo = Math.min(...sims, sim_floor), hi = Math.max(...sims, sim_floor), bins = 16;
+  const width = (hi - lo) / bins || 1;
+  const counts = Array(bins).fill(0);
+  for (const s of sims) counts[Math.min(bins - 1, Math.floor((s - lo) / width))] += 1;
+  const top = Math.max(...counts, 1);
+  const bars = counts.map((c, i) => `<span class="${lo + i * width >= sim_floor ? "on" : ""}" style="height:${c ? Math.max(6, Math.round((c / top) * 100)) : 0}%"></span>`).join("");
+  const line = Math.round(((sim_floor - lo) / (hi - lo || 1)) * 100);
+  const capped = above_floor > used ? ` · 그중 점수 상위 ${used}건 사용` : "";
+  return `<div class="log-dist">${bars}<u style="left:${line}%"></u></div>
+    <span class="log-muted">검색된 ${sims.length}건 · 빨간 선 ${sim_floor} 오른쪽 ${above_floor}건${capped}</span>`;
+}
+
+function exampleCard({ items, intent_text }, sim) {
+  return `<div class="log-example"><span class="log-muted">예시</span>${sim == null ? "" : ` <b class="log-mono">${sim.toFixed(2)}</b>`}
+    ${esc((items ?? []).join(" · "))}
+    <div><span class="log-muted">의도 문장</span> ${intent_text ? esc(intent_text) : "—"}</div></div>`;
+}
+
 function contextBody(trace, r) {
   const unusual = r.unusual_items;
   const unusualText = !unusual ? "이 집 맥락 꺼짐"
@@ -118,18 +138,18 @@ function contextBody(trace, r) {
   const names = intentNames(trace);
   if (search) {
     out += row("KB 검색", `<span class="log-mono">후보 ${search.searched} → <span class="log-floor">유사도 ${search.sim_floor} 초과 ${search.above_floor}</span> → 사용 ${search.used}</span>`);
-    const cases = rows(search.top.slice(0, 4), ({ sim, intent_id, items }) =>
-      `<div class="log-case"><span class="log-mono">${sim.toFixed(2)}</span>
-      <span class="log-track"><i style="width:${Math.round(sim * 100)}%"></i><u style="left:${Math.round(search.sim_floor * 100)}%"></u></span>
-      <span><b>${esc(names[intent_id] ?? intent_id)}</b> <span class="log-muted">· ${esc(items.join(" "))}</span></span></div>`);
-    out += row("비슷한 다른 집", cases);
+    if (search.sims?.length) out += row("유사도 분포", simDistribution(search));
   }
   const counts = (r.kb?.intent_counts ?? []).filter(({ n }) => n >= 1).slice(0, 4);
   if (counts.length) {
-    out += row("의도별 이번 / 평소", rows(counts, ({ name, n, share, base_share }) =>
-      `<div class="log-share"><span>${esc(name)}</span><span class="log-mono">${n}건</span>
+    const examples = r.kb?.examples ?? [];
+    const sims = Object.fromEntries((search?.examples ?? []).map(({ case_id, sim }) => [case_id, sim]));
+    out += row("의도별 이번 / 평소 · S3가 받은 예시", rows(counts, ({ intent_id, name, n, share, base_share }) => {
+      const ex = examples.find((e) => e.intent_id === intent_id);
+      return `<div class="log-share"><span>${esc(name)}</span><span class="log-mono">${n}건</span>
       <span class="log-bar"><i style="width:${Math.round((share ?? 0) * 100)}%"></i></span><b>${pct(share)}</b>
-      <span class="log-muted">평소 ${pct(base_share)}</span></div>`));
+      <span class="log-muted">평소 ${pct(base_share)}</span></div>${ex ? exampleCard(ex, sims[ex.case_id]) : ""}`;
+    }));
   }
   if (r.kb?.note) out += row("KB 메모", esc(r.kb.note));
   return out;

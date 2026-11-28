@@ -364,6 +364,13 @@ h1{font-size:var(--size-60);line-height:1.11;letter-spacing:-.065em;font-weight:
 .log-track i{position:absolute;left:0;top:0;bottom:0;background:#2f6b52;border-radius:2px}
 .log-track u{position:absolute;top:-4px;bottom:-4px;width:2px;background:#c2412d}
 .log-floor{color:#c2412d}
+.log-dist{position:relative;display:flex;align-items:flex-end;gap:2px;height:36px;max-width:420px;margin:2px 0 4px}
+.log-dist span{flex:1;background:#d4dad5;border-radius:1px}
+.log-dist span.on{background:#2f6b52}
+.log-dist u{position:absolute;top:-4px;bottom:-2px;width:2px;background:#c2412d}
+.log-example{margin:5px 0 12px;padding:7px 11px;background:#f3f4ef;border-radius:6px;font-size:15px;line-height:1.5}
+.log-example b{color:#2f6b52;margin-right:4px}
+.log-example div{margin-top:2px}
 .log-share{display:grid;grid-template-columns:150px 46px 200px 50px auto;gap:8px;align-items:center;font-size:16px}
 .log-bar{height:11px;background:#ecebe5;border-radius:2px;position:relative}
 .log-bar i{position:absolute;left:0;top:0;bottom:0;background:#2f6b52;border-radius:2px}

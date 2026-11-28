@@ -333,7 +333,7 @@ export function createReasoning(context, ui) {
       const markup = serverLog(state.trace, TRACE_OF[scene.id] ?? null, traceNow(), {
         open: state.logOpen, replay: state.serverReplay, kept: state.kept.has(state.episodeId), keeping: state.keeping,
       });
-      if (copy.dataset.content !== markup) setMarkup(copy, markup);
+      if (copy.dataset.content !== markup) keepLogScroll(copy, () => setMarkup(copy, markup));
       copy.onclick = (event) => {
         if (event.target?.closest?.("[data-keep]")) return void ui.replays.keep(state.episodeId);
         const fold = event.target?.closest?.("[data-log-stage]");
@@ -476,4 +476,17 @@ export function createReasoning(context, ui) {
     themeFor, canPresentCard, reasonStep, reasonReady, stageDwell, setStep, renderReason, autoAdvance,
     renderStageIndicator, refreshChain, missingJudgment, canMoveReasonForward, nextReasonStep, logMode,
   };
+}
+
+// The log re-renders every tick (its clock moves), which would jump a scrolled stage back to the top.
+// Keep the scroll position while the same stage stays expanded; a newly shown stage starts at the top.
+function keepLogScroll(copy, render) {
+  if (typeof copy.querySelector !== "function") return render();     // test stubs have no DOM queries
+  const shown = (node) => node.querySelector(".log-current")?.dataset.trace ?? null;
+  const before = copy.querySelector(".log-body");
+  const top = before?.scrollTop ?? 0;
+  const stage = shown(copy);
+  render();
+  const after = copy.querySelector(".log-body");
+  if (after && stage && shown(copy) === stage) after.scrollTop = top;
 }
