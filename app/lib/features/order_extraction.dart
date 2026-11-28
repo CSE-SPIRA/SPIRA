@@ -94,7 +94,7 @@ class OrderExtraction extends StatelessWidget {
             progress: (current + 1) / (working.length + 1),
             still: still,
           ),
-          if (images.isNotEmpty) photos,
+          if (images.isNotEmpty) OrderPhotos(images: images),
           for (final (index, line) in lines.indexed)
             _Appear(
               key: ValueKey('order-progress-line-$index'),
@@ -138,6 +138,117 @@ class OrderExtraction extends StatelessWidget {
           const KoreanText('읽지 못했어요. 다시 보내 주세요')
         else if (order != null && status != wire.EpisodeStatus.RECEIVED)
           OrderItems(episode: order, showGuidance: true),
+      ],
+    );
+  }
+}
+
+/// The order screenshots this phone shared, while the Server reads them:
+/// one large photo with its position (1/3), and a row of all photos to switch
+/// between them. The photos stay on this phone only; the Server deletes its
+/// copy once read (server spec §7).
+class OrderPhotos extends StatefulWidget {
+  const OrderPhotos({super.key, required this.images});
+
+  final List<Uint8List> images;
+
+  @override
+  State<OrderPhotos> createState() => _OrderPhotosState();
+}
+
+class _OrderPhotosState extends State<OrderPhotos> {
+  int _shown = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final images = widget.images;
+    final colors = Theme.of(context).colorScheme;
+    final shown = _shown < images.length ? _shown : 0;
+    const missing = Center(child: Icon(Icons.image_not_supported_outlined));
+    return Column(
+      key: const ValueKey('order-photos'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: 8,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            height: 360,
+            color: colors.surfaceContainerHighest,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Image.memory(
+                  images[shown],
+                  fit: BoxFit.contain,
+                  cacheWidth: 1080,
+                  semanticLabel: '보낸 사진 ${shown + 1}',
+                  errorBuilder: (_, _, _) => missing,
+                ),
+                if (images.length > 1)
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: colors.inverseSurface.withValues(alpha: 0.8),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        child: Text(
+                          '${shown + 1}/${images.length}',
+                          style: TextStyle(
+                            color: colors.onInverseSurface,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        if (images.length > 1)
+          Row(
+            spacing: 8,
+            children: [
+              for (final (index, image) in images.indexed)
+                Semantics(
+                  button: true,
+                  selected: index == shown,
+                  label: '사진 ${index + 1} 보기',
+                  child: GestureDetector(
+                    onTap: () => setState(() => _shown = index),
+                    child: Container(
+                      width: 52,
+                      height: 66,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: index == shown
+                              ? colors.primary
+                              : colors.outlineVariant,
+                          width: index == shown ? 2 : 1,
+                        ),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: Image.memory(
+                        image,
+                        fit: BoxFit.cover,
+                        cacheWidth: 160,
+                        errorBuilder: (_, _, _) => missing,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
       ],
     );
   }

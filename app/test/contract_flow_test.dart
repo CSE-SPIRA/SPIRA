@@ -2115,7 +2115,8 @@ void main() {
           await tester.pumpAndSettle();
         }
         expect(find.text('받았어요'), findsOneWidget);
-        expect(find.byType(Image), findsNWidgets(count));
+        // One large photo, plus a row of all photos when there are several.
+        expect(find.byType(Image), findsNWidgets(count > 1 ? count + 1 : 1));
         expect(mainCards, findsNothing);
 
         peer.episodes['ep_9031'] = fixture('episode.json')
@@ -2194,7 +2195,8 @@ void main() {
     await tapText(tester, '다시 보내기');
     expect(sources, hasLength(2));
     expect(sources.toSet(), hasLength(1));
-    expect(find.byType(Image), findsNWidgets(3));
+    // One large photo and a row of the three.
+    expect(find.byType(Image), findsNWidgets(4));
     expect(find.text('받았어요'), findsOneWidget);
 
     await tapText(tester, '주문 분석하기');
