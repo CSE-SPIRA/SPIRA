@@ -16,10 +16,10 @@ const trace = {
   ],
 };
 
-test("before the log shows S1 the phone says the order was sent and screenshots are not kept", () => {
+test("before the log shows S1 the phone says the order was sent (no photos kept for this run)", () => {
   const html = replayPhone(trace, -1);
   assert.match(html, /주문을 보냈어요/);
-  assert.match(html, /캡처는 저장하지 않아요/);
+  assert.match(html, /사진은 보관하지 않았어요/);
   assert.doesNotMatch(html, /케익/);
 });
 
@@ -45,4 +45,16 @@ test("after S5 the phone shows the stored card with times and events", () => {
 test("a stage not finished in the trace is not shown even when the log index is ahead", () => {
   const running = { ...trace, stages: [{ ...trace.stages[0], state: "running" }] };
   assert.match(replayPhone(running, 4), /주문을 보냈어요/);
+});
+
+test("kept photos show one large with its position and a row until the card, then fold under it", () => {
+  const before = replayPhone(trace, 0, { count: 3, selected: 2 });
+  assert.match(before, /\/demo\/api\/photos\/ep_40\/2" alt="공유한 주문 화면 2"/);
+  assert.match(before, /2\/3/);
+  assert.equal((before.match(/data-photo=/g) ?? []).length, 3);
+  const after = replayPhone(trace, 4, { count: 3, selected: 2 });
+  assert.match(after, /<summary>주문 사진 3장 · 주문 품목 2개<\/summary>/);
+  assert.doesNotMatch(after, /rp-photo/);
+  const single = replayPhone(trace, -1, { count: 1, selected: 1 });
+  assert.doesNotMatch(single, /1\/1|data-photo/);
 });

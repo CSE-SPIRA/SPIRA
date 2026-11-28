@@ -91,7 +91,7 @@ server/scripts/demo_live.sh            # add --fresh for a house that starts fro
 It writes the hub installation and the Simulator profile from the demo home (`scripts/demo_peers.py`, into
 `out/peers/`), then starts MQTT (unless one is already on 1883), the server, the Simulator, the hub and the demo
 shell, each log line prefixed (`[server]`, `[hub]`, …) and kept in `out/live/`. Ctrl+C stops all of them. The first
-run makes `simulator/.venv` (Simulator, hub and demo shell) and `out/operator.token`. Ports: `SERVER_PORT` 8000,
+run makes `simulator/.venv` (Simulator, hub and demo shell) and `out/operator.token`. It also rebuilds the App in the phone (`app/scripts/demo-shell-web`, needs `flutter`) when `app/build/web` is missing, older than `app/lib`, or built for another address; `DEMO_APP_BUILD=0` skips that. Ports: `SERVER_PORT` 8000,
 `SIM_PORT` 8730, `HUB_PORT` 8088, `SHELL_PORT` 8733. The Simulator keeps device states and the hub its plans in
 `/private/tmp/spira-{household}…`; `--fresh` deletes both.
 

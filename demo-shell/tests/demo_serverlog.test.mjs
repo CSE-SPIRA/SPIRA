@@ -95,6 +95,10 @@ test("replay query, clock and menu", () => {
   assert.match(menu, /물건 9개 · 51.0s/);
   assert.match(menu, /라이브로 돌아가기/);
   assert.match(replayMenu([], 1), /보관한 실행이 없어요/);
+  assert.match(menu, /data-remove="ep_1" aria-label="목록에서 지우기">지우기/);
+  const confirm = replayMenu([{ episode_id: "ep_1", started_at: null, duration_s: null, intents: [], items: 1 }], 1,
+    { removing: "ep_1" });
+  assert.match(confirm, /data-remove="ep_1" data-confirm[^>]*>정말 지울까요\?/);
 });
 
 test("S1 attributes show key and value, not an object", () => {

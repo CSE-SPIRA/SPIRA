@@ -23,6 +23,7 @@ from pydantic import ValidationError
 from spira_contracts.plan import Action
 from spira_contracts.reaction import Reaction
 
+from order_photos import PhotoStore
 from recordings import RECORDING_ID, Batch, Label, RecordingStore, directory
 from tagger import TagCache, Tagger
 
@@ -214,6 +215,7 @@ def create_app():
     application = FastAPI(title="SPIRA demo shell", docs_url=None, redoc_url=None, openapi_url=None)
     fixture_share = asyncio.Lock()
     recordings = RecordingStore()
+    photos = PhotoStore()
     tagger = Tagger(TagCache(directory()), recordings.save_tags)
     application.mount("/demo/assets", StaticFiles(directory=DEMO_UI), name="demo-assets")
 
@@ -385,8 +387,21 @@ def create_app():
             raise HTTPException(504, "Server timed out") from error
         except httpx.HTTPError as error:
             raise HTTPException(502, "Server is unavailable") from error
+        if request.method == "POST" and path == "v1/orders" and upstream.status_code in (200, 202):
+            await hold_photos(request, upstream)
         kept = {key: value for key, value in upstream.headers.items() if key.lower() == "content-type"}
         return Response(upstream.content, status_code=upstream.status_code, headers=kept)
+
+    async def hold_photos(request: Request, upstream: httpx.Response):
+        # The order's photos stay in memory here until the run is kept for the replay (order_photos.py).
+        try:
+            episode = upstream.json().get("episode_id", "")
+            form = await request.form()
+            shared = [(item.content_type, await item.read()) for item in form.getlist("images")
+                      if hasattr(item, "read")]
+        except Exception:  # a photo the shell cannot hold never breaks the share itself
+            return
+        photos.hold(episode, shared)
 
     @application.post("/demo/api/reset", status_code=204)
     async def reset_demo(request: Request):
@@ -434,17 +449,45 @@ def create_app():
             raise HTTPException(503, "The Server replay needs DEMO_SERVER_URL without a fixture")
         if not EPISODE_ID.fullmatch(episode):
             raise HTTPException(404, "Not an episode")
+        # {"keep": false} removes the run from the replay list (and its photos from this machine).
+        try:
+            keep = (await request.json() if await request.body() else {}).get("keep", True)
+        except ValueError:
+            keep = True
+        if not isinstance(keep, bool):
+            raise HTTPException(422, "keep must be true or false")
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 upstream = await client.post(f"{cfg['server']}/v1/demo/episodes/{episode}/keep",
-                                             headers=server_headers(cfg), json={"keep": True})
+                                             headers=server_headers(cfg), json={"keep": keep})
         except httpx.HTTPError as error:
             raise HTTPException(502, "Server is unavailable") from error
         try:
             body = upstream.json()
         except ValueError as error:
             raise HTTPException(502, "Server response was not JSON") from error
+        if upstream.status_code == 200:
+            if keep:
+                photos.keep(episode)
+            else:
+                photos.drop(episode)
         return JSONResponse(body, status_code=upstream.status_code)
+
+    @application.get("/demo/api/photos/{episode}")
+    def photo_count(episode: str, request: Request):
+        # Photos of a run kept for the replay, on this machine only.
+        if request.client is None or request.client.host not in LOOPBACK:
+            raise HTTPException(403, "Use the demo page on loopback")
+        return {"count": len(photos.files(episode))}
+
+    @application.get("/demo/api/photos/{episode}/{number}")
+    def photo_file(episode: str, number: int, request: Request):
+        if request.client is None or request.client.host not in LOOPBACK:
+            raise HTTPException(403, "Use the demo page on loopback")
+        files = photos.files(episode)
+        if not 1 <= number <= len(files):
+            raise HTTPException(404, "No such photo")
+        return FileResponse(files[number - 1], headers={"Cache-Control": "no-store"})
 
     @application.get("/demo/api/server/{path:path}")
     async def server_read(path: str, request: Request):

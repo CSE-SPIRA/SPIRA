@@ -17,6 +17,7 @@ import tagger
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     monkeypatch.setenv("DEMO_RECORDINGS_DIR", str(tmp_path))
+    monkeypatch.setenv("DEMO_PHOTOS_DIR", str(tmp_path / "photos"))
     monkeypatch.setenv("DEMO_TAGGER", "off")
     monkeypatch.setenv("DEMO_SERVER_URL", "http://server.test")
     monkeypatch.setenv("DEMO_APP_TOKEN", "t")
@@ -109,6 +110,35 @@ def test_keep_for_replay_forwards_on_loopback_only(client, monkeypatch):
         assert local.post("/demo/api/keep/ep_9031").status_code == 503
     assert seen[0] == ("http://server.test/v1/demo/episodes/ep_9031/keep", {"Authorization": "Bearer t"}, {"keep": True})
     assert len(seen) == 2
+
+
+def test_order_photos_are_kept_on_this_machine_only_for_a_kept_run(client, monkeypatch, tmp_path):
+    keeps = []
+
+    async def request(self, method, url, *, params, headers, content):
+        return httpx.Response(202, json={"episode_id": "ep_77"})
+
+    async def post(self, url, *, headers, json):
+        keeps.append(json)
+        return httpx.Response(200, json={"episode_id": "ep_77", "kept": json["keep"]})
+
+    monkeypatch.setattr(httpx.AsyncClient, "request", request)
+    monkeypatch.setattr(httpx.AsyncClient, "post", post)
+    with TestClient(client.app, base_url="http://localhost", client=("127.0.0.1", 12345)) as local:
+        files = [("images", ("a.png", b"png-one", "image/png")), ("images", ("b.jpg", b"jpg-two", "image/jpeg"))]
+        shared = local.post("/demo/app-api/v1/orders", data={"household_id": "h_042"}, files=files)
+        assert shared.status_code == 202
+        assert local.get("/demo/api/photos/ep_77").json() == {"count": 0}      # held in memory, not on disk
+        assert local.post("/demo/api/keep/ep_77").status_code == 200
+        assert local.get("/demo/api/photos/ep_77").json() == {"count": 2}
+        assert local.get("/demo/api/photos/ep_77/2").content == b"jpg-two"
+        assert local.get("/demo/api/photos/ep_77/3").status_code == 404
+        assert local.post("/demo/api/keep/ep_77", json={"keep": False}).status_code == 200
+        assert local.get("/demo/api/photos/ep_77").json() == {"count": 0}
+        assert not (tmp_path / "photos" / "ep_77").exists()
+    assert keeps == [{"keep": True}, {"keep": False}]
+    with TestClient(client.app, base_url="http://localhost", client=("192.0.2.1", 12345)) as remote:
+        assert remote.get("/demo/api/photos/ep_77").status_code == 403
 
 
 def test_artwork_preview_is_a_read_only_page_on_the_presenter_loopback(client):
