@@ -1,5 +1,6 @@
 import { STAGE_NAMES } from "./flow.js";
 import { idleLog, serverLog, stageFinished, TRACE_OF } from "./serverlog.js";
+import { archStrip } from "./arch-strip.js";
 import { DEVICE_NAMES, STATE_WORDS } from "/demo/shared/vocabulary.js";
 import { buildChain } from "./chain.js";
 import { stageNotice } from "./wire.js";
@@ -11,7 +12,7 @@ import { esc, rows, setMarkup } from "./markup.js";
 import { findTag, lineWithTag } from "./tags.js";
 
 // Each stage stays at least this long before the next finished stage is shown (live: the bar keeps the real pace).
-const STAGE_MIN_MS = 4000;
+const STAGE_MIN_MS = 5000;
 
 export function createReasoning(context, ui) {
   const { OWNERS, state, $, MANUAL, motion, sleep, REPLAY, RECORDING, DWELL_MS } = context;
@@ -66,7 +67,40 @@ export function createReasoning(context, ui) {
       if (id === "plan" && missingJudgment()) break;
       prior = ready[id] = prior && ready[id];
     }
-    state.flow(stage, ready, line, traceTimes());
+    const log = logMode() && state.page === "reason" && !state.recordVisible;
+    const open = log ? state.logOpen : null;
+    const times = traceTimes();
+    // Log mode: the stepper moves with the stage on screen (as the strip and the log do). A later stage whose result
+    // already arrived is not ticked until it is shown; it says so instead.
+    // In log mode the trace alone says how far the Server is (a replay reads the stored rationale at once).
+    if (log) {
+      const ids = ["extract", "context", "intent", "tasks", "plan"];
+      // Stages already shown stay ticked when the presenter steps back to an earlier one (stepper or 이전): the
+      // furthest stage shown for this order counts, the stage viewed only takes the ring.
+      const viewed = ids.indexOf(stage);
+      if (state.furthest?.episode !== state.episodeId) state.furthest = { episode: state.episodeId, index: -1 };
+      if (TRACE_OF[scene.id] && stageFinished(state.trace, TRACE_OF[scene.id])) state.furthest.index = Math.max(state.furthest.index, viewed);
+      const at = Math.max(viewed, state.furthest.index);
+      ids.forEach((id, i) => {
+        if (!times[id]) return;
+        if (i > at) {
+          ready[id] = false;
+          if (times[id].done) times[id] = { done: false, text: "결과 도착" };
+        } else if (!times[id].done) {
+          ready[id] = false;
+        }
+      });
+      ids.slice(at + 1).forEach((id) => { if (!times[id]) ready[id] = false; });
+      // One stage is "being analysed" at a time: the first one the screen has not ticked. Later ones stay grey
+      // (the log's next line still shows what the Server runs).
+      const analysing = times[ids[at]]?.done ? at + 1 : at;
+      ids.slice(analysing + 1).forEach((id) => { delete times[id]; ready[id] = false; });
+      if (at < 4) ready.hub = false;            // the Hub's receipt counts once the plan itself is on screen
+    }
+    // One pace for every change on screen (line fill, strip, typing): 1 live, 1/2 or 1/4 in a 2× or 4× replay.
+    $("frame").style?.setProperty?.("--pace", String(1 / (state.serverReplay?.speed ?? 1)));
+    state.flow(stage, ready, line, times, open ? TRACE_STAGES[open] : null);
+    renderArch(scene);
 
     if (!state.recordFinished && state.record && ((state.recordVisible && ui.phone.recordReady()) ||
         (state.page === "reason" && scene.id === "plan" && state.chain.cardReady && state.runPath === "plan"))) {
@@ -75,12 +109,28 @@ export function createReasoning(context, ui) {
     }
   }
 
+  // Architecture strip (judgment stages in log mode only): follows the stage open in the log, as the log does.
+  function renderArch(scene) {
+    const node = $("arch");
+    if (!node) return;
+    // Server mode shows the strip from the first waiting screen; it lights a stage once the log shows one.
+    const serverView = Boolean(state.config?.server) && !state.config.fixture && !RECORDING && !REPLAY;
+    const wanted = state.logOpen ?? TRACE_OF[scene.id] ?? (scene.id === "share" && state.episodeId ? "s1" : null);
+    const focus = wanted && logMode() ? wanted : null;
+    const show = serverView && state.page === "reason" && !state.recordVisible;
+    node.hidden = !show;
+    $("progress")?.toggleAttribute("data-arch", show);
+    if (!show) return;
+    const markup = archStrip(state.trace, focus, { replay: Boolean(state.serverReplay) });
+    if (node.dataset.content !== markup) patchArch(node, markup);
+  }
+
   // Server stage times (demo trace, server mode only): done = seconds from the order, running = seconds so far.
   const TRACE_STAGES = { s1: "extract", s2: "context", s3: "intent", s4: "tasks", s5: "plan" };
   function traceTimes() {
     const trace = state.trace;
     if (!trace?.stages || trace.episode_id !== state.episodeId) return {};
-    const now = trace.elapsed_s == null ? null : trace.elapsed_s + (performance.now() - state.traceReadAt) / 1000;
+    const now = traceNow();
     let previous = 0;
     const times = {};
     for (const { name, state: stage, done_s } of trace.stages) {
@@ -333,7 +383,8 @@ export function createReasoning(context, ui) {
       const markup = serverLog(state.trace, TRACE_OF[scene.id] ?? null, traceNow(), {
         open: state.logOpen, replay: state.serverReplay, kept: state.kept.has(state.episodeId), keeping: state.keeping,
       });
-      if (copy.dataset.content !== markup) keepLogScroll(copy, () => setMarkup(copy, markup));
+      if (copy.dataset.content !== markup) updateLog(copy, markup);
+      typeLog(copy);
       copy.onclick = (event) => {
         if (event.target?.closest?.("[data-keep]")) return void ui.replays.keep(state.episodeId);
         const fold = event.target?.closest?.("[data-log-stage]");
@@ -427,9 +478,10 @@ export function createReasoning(context, ui) {
     return next;
   }
 
+  // A Server replay at 2× or 4× holds each stage 2 or 4 times shorter, so the screen keeps the replay's pace.
   function stageDwell() {
     if (RECORDING) return DWELL_MS ?? 3000;
-    return DWELL_MS ?? STAGE_MIN_MS;
+    return (DWELL_MS ?? STAGE_MIN_MS) / (state.serverReplay?.speed ?? 1);
   }
 
   async function autoAdvance({ cue = false } = {}) {
@@ -476,6 +528,104 @@ export function createReasoning(context, ui) {
     themeFor, canPresentCard, reasonStep, reasonReady, stageDwell, setStep, renderReason, autoAdvance,
     renderStageIndicator, refreshChain, missingJudgment, canMoveReasonForward, nextReasonStep, logMode,
   };
+}
+
+// The strip keeps its parts in place: on a new stage only the classes, the accent field (it slides), the links (they
+// draw) and the labels change. The first draw, and test stubs without DOM queries, write the markup.
+function patchArch(node, markup) {
+  const old = typeof node.querySelector === "function" ? node.querySelector(".arch-strip") : null;
+  if (!old || typeof document === "undefined") return setMarkup(node, markup);
+  const template = document.createElement("template");
+  template.innerHTML = markup.trim();
+  const strip = template.content.firstElementChild;
+  old.className = strip.className;
+  for (const name of ["data-arch", "aria-label"]) old.setAttribute(name, strip.getAttribute(name));
+  const nodes = strip.querySelectorAll(".arch-node");
+  old.querySelectorAll(".arch-node").forEach((part, i) => { if (nodes[i]) part.className = nodes[i].className; });
+  const field = old.querySelector(".arch-field"), nextField = strip.querySelector(".arch-field");
+  if (field && nextField) Object.assign(field.style, { left: nextField.style.left, width: nextField.style.width });
+  else if (nextField) old.prepend(nextField);
+  else field?.remove();
+  const lines = strip.querySelector(".arch-lines").innerHTML;
+  if (node.dataset.lines !== lines) {
+    old.querySelector(".arch-lines").innerHTML = lines;
+    old.querySelectorAll(".arch-label").forEach((label) => label.remove());
+    strip.querySelectorAll(".arch-label").forEach((label) => old.append(label));
+    node.dataset.lines = lines;
+  }
+  node.dataset.content = markup;
+}
+
+// A stage that opens for the first time types in, one line after another, like a terminal printing (about 60 ms a
+// line live, faster in a replay). Redraws while it types keep the lines printed so far; a reopened stage is shown whole.
+const typing = { key: null, shown: 0, units: 0, timer: null, done: new Set() };
+function logUnits(section) {
+  const units = [];
+  for (const child of section.children) {
+    if (!child.classList?.contains("log-row")) { units.push(child); continue; }
+    const value = child.lastElementChild;
+    units.push(child.firstElementChild);
+    const lines = value ? [...value.children].filter((kid) => !/^(B|I|U|S|SPAN)$/.test(kid.tagName) || kid.classList.contains("new")) : [];
+    const list = lines.length === 1 && lines[0].children.length > 1 && /log-items/.test(lines[0].className) ? [...lines[0].children] : lines;
+    units.push(...(list.length > 1 ? list : [value]));
+  }
+  return units.filter(Boolean);
+}
+function typeLog(copy) {
+  if (typeof copy.querySelector !== "function" || typeof window === "undefined") return;
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+  const section = copy.querySelector(".log-current:not(.log-opened):not(.log-idle)");
+  const key = section ? `${copy.querySelector(".log-head span")?.textContent}:${section.dataset.trace}` : null;
+  if (!key) return;
+  const units = logUnits(section);
+  if (typing.key !== key) {
+    if (typing.done.has(key)) return;
+    clearTimeout(typing.timer);
+    Object.assign(typing, { key, shown: 0 });
+  }
+  if (typing.shown >= units.length) return;
+  const pace = Number(getComputedStyle(document.getElementById("frame")).getPropertyValue("--pace")) || 1;
+  const paint = () => {
+    const now = logUnits(copy.querySelector(`.log-current[data-trace="${section.dataset.trace}"]`) ?? section);
+    now.forEach((unit, i) => {
+      unit.classList.toggle("log-unprinted", i >= typing.shown);
+      unit.classList.toggle("log-printing", i === typing.shown - 1 && typing.shown < now.length);
+    });
+    return now.length;
+  };
+  const total = paint();
+  if (typing.timer) return;
+  const tick = () => {
+    typing.shown += 1;
+    const length = paint();
+    if (typing.shown >= length) { typing.timer = null; typing.done.add(typing.key); return; }
+    typing.timer = setTimeout(tick, 60 * pace);
+  };
+  typing.timer = total ? setTimeout(tick, 60 * pace) : null;
+}
+
+// The log ticks every second (elapsed time, the running stage's seconds). When only numbers changed, update those
+// text nodes in place, so scrolling, the cursor's blink and the panel are left alone; otherwise redraw it.
+const digitless = (markup) => markup.replace(/\d/g, "#");
+function updateLog(copy, markup) {
+  if (typeof copy.querySelector === "function" && copy.dataset.content && digitless(copy.dataset.content) === digitless(markup)
+      && typeof document !== "undefined") {
+    const next = document.createElement("template");
+    next.innerHTML = markup;
+    const walk = (root) => {
+      const texts = [];
+      const iterator = document.createTreeWalker(root, 4);
+      while (iterator.nextNode()) texts.push(iterator.currentNode);
+      return texts;
+    };
+    const before = walk(copy), after = walk(next.content);
+    if (before.length === after.length) {
+      before.forEach((node, i) => { if (node.nodeValue !== after[i].nodeValue) node.nodeValue = after[i].nodeValue; });
+      copy.dataset.content = markup;
+      return;
+    }
+  }
+  keepLogScroll(copy, () => setMarkup(copy, markup));
 }
 
 // The log re-renders every tick (its clock moves), which would jump a scrolled stage back to the top.
