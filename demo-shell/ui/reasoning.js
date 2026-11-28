@@ -1,6 +1,7 @@
 import { STAGE_NAMES } from "./flow.js";
 import { idleLog, serverLog, stageFinished, TRACE_OF } from "./serverlog.js";
 import { archStrip } from "./arch-strip.js";
+import { replayPhone } from "./replay-phone.js";
 import { DEVICE_NAMES, STATE_WORDS } from "/demo/shared/vocabulary.js";
 import { buildChain } from "./chain.js";
 import { stageNotice } from "./wire.js";
@@ -101,11 +102,31 @@ export function createReasoning(context, ui) {
     $("frame").style?.setProperty?.("--pace", String(1 / (state.serverReplay?.speed ?? 1)));
     state.flow(stage, ready, line, times, open ? TRACE_STAGES[open] : null);
     renderArch(scene);
+    renderReplayPhone();
 
     if (!state.recordFinished && state.record && ((state.recordVisible && ui.phone.recordReady()) ||
         (state.page === "reason" && scene.id === "plan" && state.chain.cardReady && state.runPath === "plan"))) {
       state.recordFinished = true;
       ui.recording.log("finish", { stage: state.recordVisible ? "record" : "plan" });
+    }
+  }
+
+  // Phone during a Server replay: the stored order and card, shown as far as the log has shown them.
+  function renderReplayPhone() {
+    if (!state.serverReplay || !state.trace || state.trace.episode_id !== state.episodeId) return;
+    const screen = document.querySelector("#phone-dock .phone-screen");
+    if (!screen) return;
+    let node = $("replay-phone");
+    if (!node) {
+      node = document.createElement("div");
+      node.id = "replay-phone";
+      screen.append(node);
+    }
+    const shown = state.furthest?.episode === state.episodeId ? state.furthest.index : -1;
+    const markup = replayPhone(state.trace, shown);
+    if (node.dataset.content !== markup) {
+      node.dataset.content = markup;
+      node.innerHTML = markup;
     }
   }
 
