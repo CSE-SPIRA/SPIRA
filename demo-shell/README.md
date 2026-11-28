@@ -16,7 +16,25 @@ comparison, calendar and similar cases take turns
 as evidence. The intent beat keeps the situation, verdict and their source
 labels in view.
 
-## Run
+## Run on `develop` (with the SPIRA server)
+
+On `develop`, one terminal from the repository root starts the whole demo:
+
+```bash
+server/scripts/demo_live.sh            # add --fresh for a house that starts from the beginning
+```
+
+It starts MQTT, the Server (`DEMO_MODE=1`), the Simulator, the Hub and this
+shell, writes the Hub installation and the Simulator profile from the demo home,
+and sets the shell settings listed at the end of this guide. Open
+`http://127.0.0.1:8733/demo`. The one-time setup (demo home and keys) is in
+[the Server README](../server/README.md#demo-with-the-hub-and-the-simulator-s6s7).
+
+`scripts/demo-up`, `scripts/demo_up.py` and `scripts/demo-devices.json`, used in
+the sections below, are the fixture launcher. They are on the demo branches
+(`pr/demo-v2`, `demo/live-demo`), not on `develop`.
+
+## Run with the fixture launcher (demo branches)
 
 ```bash
 scripts/demo-up --tagger # from the repository root, needs uv and mosquitto
@@ -283,7 +301,7 @@ Rules the demo keeps:
   `GET /demo/tags?episode=…` serves cached or ready results while the stage
   continues to show the Server text. Replays load their recorded tags.
 
-## Settings (set by `demo-up`)
+## Settings (set by `demo_live.sh` or `demo-up`)
 
 | Variable | Meaning |
 | --- | --- |
