@@ -600,7 +600,7 @@ Masked items never reach S2 embedding, S3, S4, notices, rationale or the order e
 6. `intent_counts` = per `intent_id` among the kept cases (one row = one case): `n`, `share = n / kept`, and `base_share` = that intent's share of all searchable cases (same `source`, `KB_VERSION` and `KB_SAMPLE` filter as §8.4, `GROUP BY intent_id`; counted once per process and again after `base_refresh_min`, because the KB grows under one version while it is built). `none` always has a row (`n` 0 when absent). `base_total` = all searchable cases. Names from `contracts/kb/intents.json` (`none` → "의도 없음"). No label or threshold is added: S3 compares the two shares itself (R48).
 7. Representative cases (`pick_reps`): go through intents by count desc; take the best case (score, sim, case_id) of each intent until the covered share reaches `cover` (0.8), at most `max_reps` (3); `none` is always included if its share ≥ `none_min` (0.10). Keep only `case_id, items, intent_id, intent_text, situation, calendar_tags, case_household_types`. No item overlap count: exact names miss the same item under another name (R49).
 8. `snapshot` = the case ids used (for the rationale).
-9. `kb_search` (next to `for_intent` and `snapshot` in `context`, **never read by S3**, display and replay only): `{searched` = candidates returned, `sim_floor`, `above_floor` = candidates with `sim > sim_floor` (not capped by `max_use`, unlike `similar_count`), `used` = cases kept, `sims` = every candidate's similarity (desc, 4 decimals), `top` = the `search_record_top` (10) most similar `{case_id, sim, score, intent_id, intent_text, items, used}}`. Not written when `KB_MODE=off`.
+9. `kb_search` (next to `for_intent` and `snapshot` in `context`, **never read by S3**, display and replay only): `{searched` = candidates returned, `sim_floor`, `above_floor` = candidates with `sim > sim_floor` (not capped by `max_use`, unlike `similar_count`), `used` = cases kept, `sims` = every candidate's similarity (desc, 4 decimals), `top` = the `search_record_top` (10) most similar `{case_id, sim, score, intent_id, intent_text, items, used}`, `examples` = the `kb_neighbors` examples S3 received as `{case_id, intent_id, sim}` (R57)}`. Not written when `KB_MODE=off`.
 
 ### 8.4 KB search query
 
@@ -785,10 +785,10 @@ Every `when` satisfies `start > now` and `end > start`; a window that fails is s
 | --- | --- |
 | `task_id` | `t_{slug}#{n}`; `slug` from the LLM (lowercase `[a-z][a-z0-9_]*`, made unique by suffix `_2`); `n` = next number in the episode (never reused), assigned in this order: situation tasks by bundle then `needs` order, then per-item tasks in `item_tasks.yaml` order then item order. Per-item tasks use `name` from `item_tasks.yaml` as slug |
 | `source` | `situation` |
-| `way = run` | needs `when`; none → status `held` (kept, not sent). `before_start: m` (`minutes` required; `DEMO_MODE=1` → `m = before_start_default_min` demo value) → `time = when.start − m min`. `guest_arrived` → `{event, first_only: true, window: {from: when.start − guest_window_before_min, to: when.end}}`. `event_end` → `{event: event_end, first_only: true, window: {from: when.start, to: when.end + end_fallback_min}}` |
+| `way = run` | needs `when`; none → status `held` (kept, not sent). `before_start: m` (`minutes` required; `DEMO_MODE=1` → `m = before_start_default_min` demo value) → `time = when.start − m min`. `after_start: m` → `time = when.start + m min`; `before_end: m` → `time = when.end − m min` (`minutes` required, never past the schedule; R58: the calendar gives start and end, the LLM picks the moment in between). `guest_arrived` → `{event, first_only: true, window: {from: when.start − guest_window_before_min, to: when.end}}`. `event_end` → `{event: event_end, first_only: true, window: {from: when.start, to: when.end + end_fallback_min}}` |
 | `way = standby` | one device only (several → drop the task); `when` → `{time: when.start}`; no `when` → `{event: package.brought_in, released: false}` (released with the package, §12.4) |
 | `way = notice` | `{event: package.brought_in, released: false}` |
-| `end` (run, time or `guest_arrived` trigger) | `{on: event_end, or_time: when.end + end_fallback_min, restore: true}`; cleaning-type tasks (no state to undo: every action's device type is `cleaner`) use `restore: false`. With `end_after_start_minutes` from memory: `{time: when.start + m, restore: true}` |
+| `end` (run, time or `guest_arrived` trigger) | `{on: event_end, or_time: when.end + end_fallback_min, restore: true}`; cleaning-type tasks (no state to undo: every action's device type is `cleaner`) use `restore: false`. With `end_after_start_minutes` (from memory, or chosen by the LLM): `{time: when.start + m, restore: true}`; with `end_before_end_minutes`: `{time: when.end − m, restore: true}` (R58; at most one of the two, after the run time and not past `when.end`) |
 | `end` (run, `event_end` trigger) | `{on: event_end, after: "{after_event_end_min}m", restore: true}` — the triggering `event_end` itself starts the `after` countdown, so the task runs that long and then restores (no contract change) |
 | `end` (standby) | `{on: "{device type}.started", by: user, or_time: when.end (or release + standby_max_min), restore: false}` |
 | `end` (notice) | from `item_tasks.yaml` |
@@ -800,7 +800,7 @@ Every `when` satisfies `start > now` and `end > start`; a window that fails is s
 
 Order: `[의도 n]` per bundle (unclassified first line added) → `[관리법을 확인할 물건]` → `[이 집]` (household types if any, rooms) → `[이 집 기기]` → `[이 집이 지난번 같은 의도에서 남긴 반응]` (only when reactions exist).
 
-- Intent block: situation fields "모름" when empty; time `"{요일}요일 {start}~{end} ({days}일 뒤)"` or `"모름 (일정이 아직 없음)"`; items with qty and attributes.
+- Intent block: situation fields "모름" when empty; time `"{요일}요일 {start}~{end} ({days}일 뒤)"`, or for a schedule over several days `"{요일}요일 {start} ~ {끝 요일}요일 {end} ({days}일 뒤 시작, {n}박, 시작부터 끝까지 {m}분)"` (R58) or `"모름 (일정이 아직 없음)"`; items with qty and attributes.
 - Notice item line: `- {type} × {qty or 모름} [{key}: {value}, …] · {group}{ · 의도 n의 물건}` — attributes included, so the notice can see 냉동, 손질 and the like (R47).
 - Device line: `- {id} · {Korean name} · {room or 방 모름} · {cmd}({param} {lo}~{hi} / {a}/{b}/…), …`; text commands as `{cmd}(글자)`; commands without values as the name only.
 - Reaction lines: off → line text + action keys; changed → `"{일정 시작 n분 뒤 }{Korean device name}을 {property}({param value, …})로 바꿈"` from `changes` (the time part only when `after_start_minutes` is set), e.g. `"일정 시작 70분 뒤 조명을 color_temp(kelvin 2700)로 바꿈"`.
@@ -814,11 +814,11 @@ def build_task_schema(catalog, bundle_ids, notice_items):
     # text commands take str; commands without value take no value field
     Action = Annotated[Union[...], Field(discriminator="key")]
     class Need(BaseModel): id: str; bundle: Literal[tuple(bundle_ids)]; need: str; from_: list[str] = Field(alias="from", min_length=1)
-    class Trigger(BaseModel): kind: Literal["before_start", "guest_arrived", "event_end"]; minutes: int | None = Field(None, ge=0, le=720)
+    class Trigger(BaseModel): kind: Literal["before_start", "after_start", "before_end", "guest_arrived", "event_end"]; minutes: int | None = Field(None, ge=0, le=720)
     class Task(BaseModel):
         need_id: str; slug: str; way: Literal["run", "standby", "notice"]; target_room: RoomT | None
         actions: list[Action] = Field(min_length=1); trigger: Trigger | None
-        end_after_start_minutes: int | None = None; line: str
+        end_after_start_minutes: int | None = Field(None, ge=0); end_before_end_minutes: int | None = Field(None, ge=0); line: str
     class FridgeNotice(BaseModel):
         item: Literal[tuple(notice_items)]; kind: Literal["prep", "storage"] | None
         point: str | None; intent_change: str | None; text: str | None
@@ -827,7 +827,7 @@ def build_task_schema(catalog, bundle_ids, notice_items):
 
 ### 10.7 Format check (retry once with `s4_retry.txt`)
 
-`need_id` not in needs; `from` empty; `way` standby/notice with a trigger; `way` run without a trigger; `before_start` without `minutes`; `standby` with more than one device; `guest_arrived` when the bundle's guests is empty; `fridge_notices.item` outside `notice_items`; duplicate slug. More than 4 tasks per bundle is not an error (cut in step 11). After the retry, tasks still breaking a rule are dropped one by one.
+`need_id` not in needs; `from` empty; `way` standby/notice with a trigger; `way` run without a trigger; `before_start`/`after_start`/`before_end` without `minutes`; a run time or put-back time outside the schedule (`after_start`/`before_end` minutes over its length, put-back not after the run time or past `when.end`, both put-back fields) — R58; `standby` with more than one device; `guest_arrived` when the bundle's guests is empty; `fridge_notices.item` outside `notice_items`; duplicate slug. More than 4 tasks per bundle is not an error (cut in step 11). After the retry, tasks still breaking a rule are dropped one by one.
 
 ### 10.8 Prompt summary (`s4_system.txt`)
 
@@ -1045,7 +1045,7 @@ Also 422 when a value is not one of the 20 types or a "pick one" axis (size, lif
 - `started_at` = `stage_times.received`; `done_s` = seconds from it to the stage's time. `elapsed_s` = now − `started_at` (wall), or `at`.
 - Per stage, in order: after a failed stage → `skipped`; time present (and ≤ `at` in a replay) → `done`, or `failed` for the stage the episode stopped at (`read_failed` → s1, `error.stage = s2` → s2; every item masked → s1 done, later skipped); else the first unfinished stage is `running` (s1 only once `s1_start` is reached; live only while `episodes.stage ≠ done`), the rest `pending`.
 - `llm` (done s1/s3/s4 only) = sums of that episode's `llm_calls` rows of the stage: `calls`, `ms`, tokens.
-- `result` (done or failed stages only, else null) = what the stage stored, without new wording: s1 the order items (masked items without name/type) and the read error; s2 `this_home` (household types, unusual items, calendar), the `kb_neighbors` counts and the `kb_search` record (§8.3 step 9), the S2 error; s3 bundles (intent, sentence, situation, basis, calendar link, use window), `none_reason`, `unbundled`, error; s4 `episodes.s4` (§10.1 step 12) — so S4 shows before S5; s5 the non-archived cards (`card.json` shape), the latest plan version and the tasks S5 left out (`tasks.drop_reason`: safety net §11.2, fridge notices, merge), so an empty card says why. The shell's presenter log is built from these only.
+- `result` (done or failed stages only, else null) = what the stage stored, without new wording: s1 the order items (masked items without name/type) and the read error; s2 `this_home` (household types, unusual items, calendar), the `kb_neighbors` counts and examples and the `kb_search` record (§8.3 step 9), the S2 error; s3 bundles (intent, sentence, situation, basis, calendar link, use window), `none_reason`, `unbundled`, error; s4 `episodes.s4` (§10.1 step 12) — so S4 shows before S5; s5 the non-archived cards (`card.json` shape), the latest plan version and the tasks S5 left out (`tasks.drop_reason`: safety net §11.2, fridge notices, merge), so an empty card says why. The shell's presenter log is built from these only.
 - Episodes stored before stage times (no `received`): states from `episodes.stage`, every time null.
 - `finished` = no stage `pending`/`running`. A replay asks with `at` growing by the playback speed each second; the shell gates what it shows from `…/rationale` by these states.
 
@@ -1404,3 +1404,6 @@ Not yet in the Notion server spec (synchronised in one pass later). B.2 lists th
 | R54 | `end_tasks`, `close_windows`, `close_episodes` run every 2 s with `DEMO_MODE=1` (10 min otherwise), so ramped story time is followed at once | §2.3 |
 | R55 | Demo peers from the demo home: `scripts/demo_peers.py` writes the hub installation and the Simulator profile from `DEMO_HOME` (9 devices, same ids, commands and values; the extra styler and purifier get Simulator value schemas for the demo home's values); `substrate` is taken from the Simulator because the fixture's physical `light_01` is refused by a hub with no driver (`not_delegated`) | §12.6 |
 | R56 | S7 closes a window at the observed `event_end` before the hub's restore results arrive: verdict and feedback are fixed at the close (feedback `changed` also from a restore item `skipped_user_changed`), later restore results update only the line `end_state`. Memory `changed` text rule written down | §13.4, §13.5 |
+| R57 | Demo trace shows the KB examples S3 actually received, with their similarity, instead of the top similar cases: `kb_search.examples` `{case_id, intent_id, sim}` and trace s2 `kb.examples` (stored example fields). The top list repeated one basket stored under two intents and showed cases S3 never saw (11-27, 서진) | §8.3, §12.5, `contracts/openapi/demo.yaml` |
+| R58 | S4 picks when to act and when to put things back inside the schedule: new triggers `after_start` and `before_end` (minutes), new `end_before_end_minutes` next to `end_after_start_minutes`; the server checks every time stays between start and end. Only the start-side triggers existed, so a trip could only act before leaving or on coming home (dry run: "짐 꾸리기가 끝나면 주전자 전원을 끄고 인덕션을 잠가요" on `event_end` = the return). Multi-day schedules show the end day and length in minutes. Up to 4 tasks per intent in the prompt (the cut was already 4). Hub plan unchanged: triggers resolve to `time` (11-27, 서진) | §10.4, §10.5, §10.6, §10.7, `s4_system.txt`, `s4_blocks.yaml` |
+| R59 | `command_policy.yaml` run list adds `temperature` and `position`; `device_names.yaml` adds thermostat 보일러, blind 블라인드, humidifier 가습기, washer 세탁기 — for the demo home (`dev/home.yaml`, git-excluded) that gets a boiler, a TV power strip, a blind, a humidifier, a washer and `off` on the living-room light (11-27, 서진) | §4.5, §11.1, `config/` |
