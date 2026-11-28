@@ -68,7 +68,7 @@ disabled for these runs. The run logs include the selected Server URL.
 The judgment scene advances as its data arrives, one screen per stage: each
 stage shows all of its results at once (맥락 = items with the usual-order
 comparison, calendar and similar orders; 의도 = situation slots and the intent).
-Each stage stays at least 4 seconds before the next finished stage is shown, so
+Each stage stays at least 5 seconds before the next finished stage is shown, so
 stages that the Server finishes close together still play in order. The strip
 keeps the real pace: with a Server it reads `GET /v1/demo/episodes/{id}/trace`
 (contracts/openapi/demo.yaml, `DEMO_MODE=1`) and shows each stage's Server time
@@ -86,10 +86,31 @@ next stage shows its real Server state (`의도 추론 중 … 12s`). A stage is
 when the trace says the Server finished it, so S4 shows before S5.
 
 Stage names (11-27): 1 주문 추출, 2 맥락 검색, 3 의도 추론, 4 할 일 생성, 5 계획 확정, 6 집 실행, 7 기억 저장, the same in the
-step bar, the log (S1–S5) and the next cue. The log fills the right area on a console tint: finished stages are bands,
-the current or reopened stage is a white card with the left bar, and the head is a dark title bar whose dot pulses green
-live and stays blue in a replay. In log mode a finished stage in the step bar opens that stage, and "다음" walks the
-stages again after "이전".
+stepper, the log (S1–S5) and the next cue.
+
+Screen layout (11-28, presenter split). The page is one neutral grey (`#ececeb`) with three surfaces on it: the
+phone (the App keeps its own colours), the Server log as a dark high-contrast terminal, and the house as a white
+panel. Above them, without a box, sit the stepper (`ui/flow.js`) and, on the judgment stages S1–S5 in log mode,
+the architecture strip (`ui/arch-strip.js`). One accent, amber, marks the stage on screen; nothing moves.
+
+- Stepper: a finished stage is an amber disc with a check and the line up to it is amber; the stage open in the
+  log has a ring; a stage the Server still runs is an outlined disc with its seconds; later stages are grey.
+  A finished stage reopened in the log takes the amber, and the presented stage keeps a grey ring.
+- Architecture strip: App · Server · LLM · DB + Knowledge base · Hub + Home, role on top and what it is built with
+  underneath, with logos in `ui/arch/`. It follows the stage open in the log (also a reopened one): that stage's
+  parts are outlined and sit on a soft amber field, and only its links are drawn, labelled (S1 주문 캡처 · 주문 추출,
+  S2 이 집 기록 · 비슷한 사례 검색 and Knowledge base → DB, S3 주문 · 맥락 · 사례 → 의도, S4 의도 · 이 집 기기 → 할 일,
+  S5 준비 카드 · 기기 계획). A failed stage draws its links red. The strip carries no values; they stay in the log.
+  Before an order it shows the parts with nothing lit. It is hidden on the house (S6–S7), in fixture runs and in
+  recordings. In log mode the stepper ticks a stage when it is shown, not when its result arrives (a later result says
+  결과 도착), so the stepper, the strip and the log always move together. Nothing fades as a whole: on a new stage the
+  line to the next step fills left to right and then its disc lights, the strip's accent field slides and its links
+  draw, and the log types the new stage line by line; a running step spins its ring. All of it runs at one pace
+  (`--pace`), and a 2× or 4× Server replay also shortens the 5-second hold, so the screen keeps the replay's speed.
+- Log: finished stages are one line, the current or reopened stage is a panel with the amber bar, the head says
+  `SPIRA server · AWS EC2`, LIVE or the replay badge. S1 lists one item per row (type, quantity, original name,
+  tags); S2 lays its rows out in three columns in the log's order (this home · KB search · intent shares).
+  In log mode a finished stage in the stepper opens that stage, and "다음" walks the stages again after "이전".
 
 App in the phone (`ui/app-phone.js`). With a Server and no fixture, when
 `app/build/web/index.html` exists (or `DEMO_APP_WEB` points at a build), the
@@ -217,7 +238,8 @@ Add `owners=1` to the query string to show the owner tags. They are hidden by de
 | To change | Edit | Do not need to touch |
 | --- | --- | --- |
 | Shared colours, spacing, type and motion | [`design/tokens.json`](design/tokens.json), then run `python3 demo-shell/design/build.py` | Generated stylesheets |
-| The stage readiness strip | `ui/flow.js` | |
+| The stepper (stage readiness) | `ui/flow.js` | |
+| The architecture strip: parts, logos, links per stage | `ui/arch-strip.js`, `ui/arch/` | Server trace |
 | Stage wording and fallback cameras for cached renderers | `ui/scenes.json` | |
 | Shared room cameras | [`house.js`](../simulator/spira_simulator/ui/house/house.js) | |
 | House moments, props and display gating | `ui/scene-rules.js` | |
@@ -262,9 +284,9 @@ for the story clock.
 - `ready` records arrival by stage. The house uses the active Hub `receipt`
   to open and builds its timeline from card times, Hub task relations and World facts.
 
-The fixed 1920×1080 stage has two columns. The 448×856 phone stays centered
-in the left column. The right column has a fixed strip above the judgment or
-house. At 1440×900, `fit()` scales the frame to 75% and centers it. The phone
+The fixed 1920×1080 stage has two columns. The 448×850 phone stays at the top
+of the left column under its label. The right column has the stepper (and, on
+S1–S5, the architecture strip) above the judgment or house. At 1440×900, `fit()` scales the frame to 75% and centers it. The phone
 content can scroll when a card is long or several cards arrive.
 
 Run the shell tests from the repository root. The evidence-chain tests use

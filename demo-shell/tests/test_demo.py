@@ -39,7 +39,10 @@ def test_page_assets_and_config(client):
         assert f'href="/demo/shared/{name}"' in page
         assert client.get(f"/demo/shared/{name}").status_code == 200
     assert client.get("/demo/shared/vocabulary.js").status_code == 200
-    script = client.get("/demo/assets/demo.js").raise_for_status().text
+    asset = client.get("/demo/assets/demo.js").raise_for_status()
+    assert asset.headers["Cache-Control"] == "no-cache"          # an edited shell file shows on the next load
+    assert client.get("/demo").headers["Cache-Control"] == "no-cache"
+    script = asset.text
     assert 'import(base + "house.js")' in script
     assert 'className = "marker-moment"' in script
     assert 'observe("viewer", "/demo/api/sim/viewer"' in script

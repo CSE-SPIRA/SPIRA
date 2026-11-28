@@ -321,7 +321,7 @@ test("a second share warns before sending when the World still shows guests", as
   assert.equal(shell.byId("stale-house").hidden, false);
   assert.match(shellHtml, /이전 시연의 집 상태가 남아 있어요\./);
   assert.match(shellHtml, /id="reset-notice"[^>]*>새로 시작<\/button>/);
-  assert.match(shellHtml, /터미널에서는 Ctrl-C 후 <code>scripts\/demo-up<\/code>을 실행하세요\./);
+  assert.match(shellHtml, /터미널에서는 Ctrl-C 후 <code>server\/scripts\/demo_live\.sh --fresh<\/code>를 실행하세요\./);
   assert.equal((shellHtml.match(/id="stale-house"/g) ?? []).length, 1);
 });
 
@@ -429,7 +429,7 @@ test("the stage strip marks each stage done only when its own result arrives", a
   const strip = shell.byId("stage-steps").children;
   const done = () => strip.filter((node) => node.classList.contains("done")).map((node) => node.dataset.stage);
   const current = () => strip.find((node) => node.getAttribute("aria-current") === "step")?.dataset.stage;
-  assert.deepEqual(strip.map(({ textContent }) => textContent), ["1 주문 추출", "2 맥락 검색", "3 의도 추론", "4 할 일 생성", "5 계획 확정", "6 집 실행", "7 기억 저장"]);
+  assert.deepEqual(strip.map(({ textContent }) => textContent), ["주문 추출", "맥락 검색", "의도 추론", "할 일 생성", "계획 확정", "집 실행", "기억 저장"]);
   assert.equal(current(), "extract");
   assert.deepEqual(done(), []);
 
@@ -488,6 +488,7 @@ test("the phone and presenter toggle switch the same right area in place", async
   shell.byId("phone-map").onclick();
   assert.deepEqual(view(), [true, false, "hub"]);
   assert.equal(current().classList.contains("done"), true);
+  assert.equal(shell.byId("arch").hidden, true);   // the house has no architecture strip
   assert.equal(shell.byId("phone-map").getAttribute("aria-pressed"), "true");
   assert.match(shell.byId("phone-content").innerHTML, /우리 집/);
   const [judgment, house] = shell.pageButtons;
@@ -628,12 +629,12 @@ test("live judgment dwells on each ready stage and waits for a notification tap"
   assert.doesNotMatch(shell.byId("phone-content").innerHTML, /준비 카드 알림/);
   const beat = () => shell.byId("stage-beat").textContent;
   const pane = (id) => shell.byId(`judgment-${id}`);
-  await shell.runTimer(4000);
+  await shell.runTimer(5000);
   assert.equal(stage(), "extract");
   assert.match(beat(), /물건 9종 읽음/);
   assert.doesNotMatch(beat(), /평소|일정|의도/);
   assert.equal(pane("calendar").hidden, true);
-  await shell.runTimer(4000);
+  await shell.runTimer(5000);
   // One screen per stage: every context output at once, in the stage's beat line too.
   assert.equal(stage(), "context");
   assert.match(beat(), /평소와 다른 물건 7종 · 가까운 일정 후보 2건 · 비슷한 다른 집 주문 12건/);
@@ -642,7 +643,7 @@ test("live judgment dwells on each ready stage and waits for a notification tap"
   assert.doesNotMatch(pane("calendar").innerHTML, /판단에 사용/);
   assert.match(pane("similar").innerHTML, /6개 중 4개 같음/);
   assert.equal(pane("slots").hidden, true);
-  await shell.runTimer(4000);
+  await shell.runTimer(5000);
   assert.equal(stage(), "intent");
   for (const id of ["items", "similar"]) assert.equal(pane(id).hidden, true);
   assert.match(pane("calendar").innerHTML, /판단에 사용[\s\S]*케이크 토퍼/);
@@ -650,7 +651,7 @@ test("live judgment dwells on each ready stage and waits for a notification tap"
   assert.match(pane("slots").innerHTML, /가구 유형/);
   assert.match(pane("intent").innerHTML, /디즈니 공주[\s\S]*준비와 따로 본 물건[\s\S]*세탁 세제/);
   assert.doesNotMatch(shell.byId("phone-content").innerHTML, /준비 카드 알림/);
-  await shell.runTimer(4000);
+  await shell.runTimer(5000);
   assert.equal(stage(), "tasks");
   assert.match(beat(), /할 일 4개 · 냉장고 안내 2개/);
   assert.match(shell.byId("phone-content").innerHTML, /id="card-notification" data-expected>\s*준비 카드 알림/);
@@ -658,7 +659,7 @@ test("live judgment dwells on each ready stage and waits for a notification tap"
 
   shell.byId("card-notification").onclick();
   assert.equal(stage(), "tasks");
-  await shell.runTimer(4000);
+  await shell.runTimer(5000);
   assert.equal(stage(), "plan");
   for (const { text } of card.lines) assert.ok(shell.byId("stage-copy").innerHTML.includes(text));
   assert.match(shell.byId("phone-content").innerHTML, /data-reaction="line_off"/);
@@ -733,6 +734,11 @@ test("the presenter log moves on to the plan once the Server finished S5, withou
   assert.equal(shell.byId("reason-layout").dataset.stage, "context");
   assert.match(shell.byId("stage-copy").innerHTML, /S2 맥락 검색/);
   assert.equal(shell.byId("next-cue").textContent, "다음: 의도 추론");
+  // Stepping back keeps every shown stage ticked: the viewed one takes the ring, none spins.
+  const steps = shell.byId("stage-steps").children.slice(0, 5);
+  assert.deepEqual(steps.map((node) => node.classList.contains("done")), [true, true, true, true, true]);
+  assert.deepEqual(steps.map((node) => node.classList.contains("running")), [false, false, false, false, false]);
+  assert.equal(steps.find((node) => node.classList.contains("lit"))?.dataset.stage, "context");
   await shell.runFor(20000);
   assert.equal(shell.byId("reason-layout").dataset.stage, "context");      // no auto-advance after a manual pick
 });
@@ -849,11 +855,16 @@ test("the step bar shows the Server's stage times from the demo trace", async (t
   });
   await shell.runTimer(1000);
   const time = (index) => shell.byId("stage-steps").children[index].children[1].textContent;
+  // The stepper moves with the stage on screen: S1 is shown, so S2's result waits unticked until it is shown.
   assert.equal(time(0), "14.8초");
-  assert.equal(time(1), "1.3초");
-  assert.match(time(2), /^진행 중 2\d초$/);
+  assert.equal(time(1), "결과 도착");          // S2 is the one being analysed on screen (spinner)
+  assert.equal(time(2), "");                   // S3 runs at the Server but waits grey until S2 is shown
   assert.equal(time(3), "");
-  assert.ok(shell.byId("stage-steps").children[1].classList.contains("done"));
+  assert.ok(shell.byId("stage-steps").children[0].classList.contains("done"));
+  assert.ok(!shell.byId("stage-steps").children[1].classList.contains("done"));
+  // The architecture strip follows the stage open in the log (here the order was just shared: S1).
+  assert.equal(shell.byId("arch").hidden, false);
+  assert.match(shell.byId("arch").innerHTML, /data-arch="s1"/);
 });
 
 test("the live scene holds on evidence until the fixture publishes intent and tasks", async (t) => {
@@ -913,11 +924,11 @@ test("an out-of-order burst waits for extraction and then preserves every live b
   const stage = () => shell.byId("reason-layout").dataset.stage;
   assert.equal(stage(), "share");
   assert.ok(shell.byId("stage-steps").children.every((step) => !step.classList.contains("done")));
-  await shell.runTimer(4000);
+  await shell.runTimer(5000);
   assert.match(shell.byId("stage-beat").textContent, /추출을 기다려요/);
   detail.resolve(Response.json(episode));
   await settle();
-  for (const [dwell, expected] of [[120, "extract"], [4000, "context"], [4000, "intent"], [4000, "tasks"]]) {
+  for (const [dwell, expected] of [[120, "extract"], [5000, "context"], [5000, "intent"], [5000, "tasks"]]) {
     await shell.runTimer(dwell);
     assert.equal(stage(), expected);
   }
@@ -977,10 +988,10 @@ test("the h_051 held recording reaches its card with no rationale available", as
     if (path.endsWith(id)) return Response.json(episode);
     return new Response(null, { status: 404 });
   });
-  await shell.runTimer(4000);
+  await shell.runTimer(5000);
   assert.match(shell.byId("judgment-items-heading").textContent, /저장된 판단 근거가 없어요/);
   assert.equal(shell.byId("stage-beat").textContent, "");
-  await shell.runTimer(4000);
+  await shell.runTimer(5000);
   assert.equal(shell.byId("reason-layout").dataset.stage, "plan");
   assert.match(shell.byId("stage-copy").innerHTML, /손님 오기 전 거실 청소/);
   assert.match(shell.byId("stage-copy").innerHTML, /시간을 기다리는 중/);
@@ -1364,7 +1375,7 @@ test("the next cue shares once, opens the card and enters the observed house", a
   await settle();
   assert.equal(shares, 1);
   assert.equal(cue.disabled, true);
-  for (const dwell of [4000, 4000, 4000, 4000, 4000]) await shell.runTimer(dwell);
+  for (const dwell of [5000, 5000, 5000, 5000, 5000]) await shell.runTimer(dwell);
   assert.equal(cue.textContent, "다음: 준비 카드");
   await cue.onclick();
   await shell.runTimer(800);
@@ -1392,7 +1403,7 @@ test("read-only rehearsal crosses the observed house moments without posting act
     return new Response(null, { status: 404 });
   });
   const progression = [
-    [4000, "extract"], [4000, "context"], [4000, "intent"], [4000, "tasks"], [4000, "plan"],
+    [5000, "extract"], [5000, "context"], [5000, "intent"], [5000, "tasks"], [5000, "plan"],
   ];
   for (const [dwell, scene] of progression) {
     await shell.runTimer(dwell);

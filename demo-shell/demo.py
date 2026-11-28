@@ -650,6 +650,9 @@ def create_app():
         response = await call_next(request)
         if request.url.path.startswith(("/demo/api/", "/demo/app-api/")) or request.url.path == "/demo/tags":
             response.headers["Cache-Control"] = "no-store"
+        elif request.url.path.startswith("/demo/assets/") or request.url.path == "/demo":
+            # The shell's own files: the browser asks again each load (304 when unchanged), so an edit shows at once.
+            response.headers["Cache-Control"] = "no-cache"
         return response
 
     return application

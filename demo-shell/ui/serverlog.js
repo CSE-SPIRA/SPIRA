@@ -90,8 +90,13 @@ function summary(trace, name) {
   return `카드 ${(r.cards ?? []).length} · 계획 v${r.plan_version ?? "-"} · 뺀 할 일 ${(r.dropped ?? []).length}`;
 }
 
+// Row keys as attributes, so the stylesheet can lay out S2 in columns without changing what the log says.
+const ROW_KEYS = { "읽은 물건": "items", "가린 물건": "masked", "평소와 다른 물건": "unusual", "가까운 일정": "calendar",
+  "가구 유형": "household", "KB 검색": "kb-search", "유사도 분포": "kb-dist", "의도별 이번 / 평소 · S3가 받은 예시": "kb-intents",
+  "KB 메모": "kb-note" };
 function row(key, value) {
-  return `<div class="log-row"><span class="log-key">${esc(key)}</span><div>${value}</div></div>`;
+  const data = ROW_KEYS[key] ? ` data-key="${ROW_KEYS[key]}"` : "";
+  return `<div class="log-row"${data}><span class="log-key">${esc(key)}</span><div>${value}</div></div>`;
 }
 
 function itemsBody(r) {

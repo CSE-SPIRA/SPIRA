@@ -12,7 +12,7 @@
 <body>
 <div id="frame">
   <header class="mast">
-    <div class="brand"><span class="brand-mark" aria-hidden="true"></span>SPIRA</div>
+    <div class="brand"><img class="wordmark" src="/demo/assets/arch/spira-wordmark.png" alt="SPIRA"><span class="brand-sub">demo</span></div>
     <nav class="mast-center segment" aria-label="시연 보기">
       <button type="button" data-page="reason" aria-pressed="true">판단</button>
       <button type="button" data-page="house" aria-pressed="false">집</button>
@@ -39,6 +39,7 @@
   </header>
   <main class="stage">
     <aside id="phone-dock" aria-label="휴대전화">
+      <p class="machine"><b>사용자 휴대폰</b><span>SPIRA 앱</span></p>
       <div class="phone-orbit">
         <span class="owner-tag" id="phone-owner">앱 · 공유</span>
         <section class="phone" aria-label="SPIRA 앱">
@@ -54,8 +55,9 @@
       </div>
     </aside>
     <div id="right-area">
-      <header class="stage-indicator">
+      <header class="stage-indicator" id="progress">
         <ol id="stage-steps" aria-label="시연 단계"></ol>
+        <div id="arch" hidden></div>
         <p id="stage-beat" aria-live="polite"></p>
       </header>
       <section id="reason" aria-label="주문에서 판단까지">
@@ -89,7 +91,7 @@
       <div id="stale-house" hidden>
         <span role="status">이전 시연의 집 상태가 남아 있어요.</span>
         <button class="button simple helper" type="button" id="reset-notice" hidden>새로 시작</button>
-        <small>터미널에서는 Ctrl-C 후 <code>scripts/demo-up</code>을 실행하세요.</small>
+        <small>터미널에서는 Ctrl-C 후 <code>server/scripts/demo_live.sh --fresh</code>를 실행하세요.</small>
       </div>
       <p id="reset-status" role="status"></p>
       <p id="notice" role="status"></p>
