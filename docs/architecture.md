@@ -1,5 +1,7 @@
 # SPIRA Architecture
 
+![SPIRA architecture](spira-architecture.png)
+
 How the parts fit together. Details live in each part's `spec.md` and in [`contracts/`](../contracts); this page only connects them.
 
 ## 1. Overview
