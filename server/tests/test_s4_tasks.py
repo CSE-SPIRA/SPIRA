@@ -38,17 +38,53 @@ def test_t17_ep9031_drafts_equal_plan_v1(mock_llm):
     assert "- cooktop_01 · 인덕션 · 주방 · child_lock" in message      # heat is in never: left out
 
 
-def test_t42_demo_before_start_and_windows(mock_llm, env):
+def test_t42_demo_keeps_the_llm_minutes_and_demo_windows(mock_llm, env):
     env(DEMO_MODE="1")
     ep = ep9031()
     record(mock_llm, ep, output())
     tasks = {d.task_id: d for d in _gen(ep).drafts}
-    assert tasks["t_clean#1"].trigger == {"time": "2026-10-17T13:57:00+09:00"}       # 3 min, though S4 wrote 90
-    assert tasks["t_safe#2"].trigger == {"time": "2026-10-17T13:57:00+09:00"}
+    assert tasks["t_clean#1"].trigger == {"time": "2026-10-17T12:30:00+09:00"}       # S4's 90 min (R62)
+    assert tasks["t_safe#2"].trigger == {"time": "2026-10-17T13:30:00+09:00"}
     assert tasks["t_mood#3"].trigger["window"]["from"] == "2026-10-17T13:59:00+09:00"
     assert tasks["t_clean#1"].end["or_time"] == "2026-10-17T17:10:00+09:00"
     assert tasks["t_fridge#5"].end == {"on": "fridge.door_opened", "after": "2m", "or_after": "12h",
                                        "restore": False}
+
+
+@pytest.mark.parametrize("trigger, want_trigger, want_end", [
+    ({"kind": "before_start", "minutes": 120}, {"time": "2026-10-17T12:00:00+09:00"},
+     {"or_time": "2026-10-17T17:00:00+09:00"}),
+    ({"kind": "event_end"}, {"event": "event_end", "first_only": True,                 # e.g. dishes after the party
+                             "window": {"from": "2026-10-17T14:00:00+09:00", "to": "2026-10-17T20:00:00+09:00"}},
+     {"or_after": "24h"}),
+])
+def test_standby_takes_the_moment_the_llm_chose(mock_llm, trigger, want_trigger, want_end):
+    """R62: a standby task may choose its moment like a run task; unset, it is ready at the schedule start."""
+    ep = ep9031()
+    out = output()
+    out["tasks"][3]["trigger"] = trigger
+    record(mock_llm, ep, out)
+    oven = {d.task_id: d for d in _gen(ep).drafts}["t_oven#4"]
+    assert oven.trigger == want_trigger
+    assert oven.end == {"on": "oven.started", "by": "user", "restore": False, **want_end}
+
+
+def test_over_the_cap_the_llm_rechooses_then_safety_first(mock_llm):
+    """R63: five tasks for one intent -> a retry asks for four; still five -> the safety task stays, then the order
+    the LLM wrote; the rest is dropped `max_lines`."""
+    ep = ep9031()
+    out = output()
+    clean, safe, mood, oven = out["tasks"]
+    warm = {"need_id": "n3", "slug": "warm", "way": "run", "target_room": "거실",
+            "actions": [{"key": "light_01.color_temp", "value": {"kelvin": 3000}}],
+            "trigger": {"kind": "before_start", "minutes": 10}, "end_after_start_minutes": None,
+            "line": "손님 오기 전 거실 조명 따뜻하게"}
+    out["tasks"] = [clean, mood, oven, warm, safe]                        # safety written last
+    record(mock_llm, ep, out, retry_errors=["의도 1의 할 일이 5개다. 4개까지만 쓴다. 덜 중요한 것을 뺀다"],
+           retry_output=out)
+    r = _gen(ep)
+    assert [d.meta["slug"] for d in r.drafts if d.source == "situation"] == ["clean", "safe", "mood", "oven"]
+    assert {"slug": "warm", "reason": "max_lines"} in r.dropped
 
 
 def _memory_row(verdict="match", feedback=None, created=None):
@@ -133,8 +169,8 @@ def test_t21_value_out_of_range_after_retry_drops_that_task(mock_llm):
 def test_format_rules_after_retry(mock_llm):
     ep = ep9031()
     out = output()
-    out["tasks"][3]["trigger"] = {"kind": "before_start", "minutes": 10}      # standby with a trigger
-    errors = ["할 일 4: standby에는 trigger를 쓰지 않는다"]
+    out["tasks"][3]["end_after_start_minutes"] = 30                           # standby with a put-back time
+    errors = ["할 일 4: standby에는 되돌리는 시점을 쓰지 않는다 (사람이 시작하면 끝난다)"]
     record(mock_llm, ep, out, retry_errors=errors, retry_output=out)
     r = _gen(ep)
     assert "t_oven" not in " ".join(d.task_id for d in r.drafts)

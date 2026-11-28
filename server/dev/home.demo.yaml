@@ -1,0 +1,49 @@
+# Demo home for the live demo (server/scripts/demo_live.sh, demo_home.py). Copy to dev/home.yaml and edit.
+# Same format as home.example.yaml (the dry-run home). The household id comes from --household (h_demo).
+household_id: h_demo
+
+
+# kb/household_types.json values; blocked combinations stop the run with the reason.
+household_types: [3~4인, 부부·커플, 영유아 자녀, 맞벌이]
+
+devices_revision: 5
+# 14 devices in the 3D house's rooms (현관·거실·주방). Commands follow the LG ThinQ Connect device profiles; the TV
+# follows webOS (AI wallpaper), the light and plug are Matter devices on ThinQ ON, the speaker is the ThinQ ON hub's, the rice cooker is a partner
+# IoT device. Standby devices never start: a person does (LG: remote start must be allowed on the appliance).
+extra_devices:
+  - {"id": "cleaner_01", "type": "cleaner", "room": "거실", "substrate": "virtual", "commands": [{"cmd": "clean", "value_schema": {"room": {"enum": ["거실", "주방"], "default": "거실"}, "mode": {"enum": ["일반", "집중"], "default": "일반"}}}], "events": ["started", "completed"], "never": [], "noisy": true}
+  - {"id": "light_01", "type": "light", "room": "거실", "substrate": "virtual", "commands": [{"cmd": "color", "value_schema": {"hue": {"range": [0, 360], "default": 40}, "saturation": {"range": [0, 100], "default": 30}, "brightness": {"range": [0, 100], "default": 70}}}, {"cmd": "color_temp", "value_schema": {"kelvin": {"range": [2700, 6500], "default": 3000}}}, {"cmd": "brightness", "value_schema": {"percent": {"range": [0, 100], "default": 70}}}, {"cmd": "off"}], "events": ["changed"], "never": [], "noisy": false}
+  - {"id": "display_01", "type": "display", "room": "거실", "substrate": "virtual", "commands": [{"cmd": "play_mood", "value_schema": {"scene": {"enum": ["kids_party", "party", "calm", "cinema"], "default": "calm"}}}, {"cmd": "ai_wallpaper", "value_schema": "text"}, {"cmd": "off"}], "events": ["started", "stopped", "changed"], "never": ["purchase"], "noisy": true}
+  - {"id": "styler_01", "type": "styler", "room": "거실", "substrate": "virtual", "commands": [{"cmd": "set_course_standby", "value_schema": {"course": {"enum": ["표준", "울케어", "셔츠", "패딩"], "default": "표준"}, "finish_in_hours": {"range": [0, 12], "default": 0}}}], "events": ["started"], "never": ["start"], "noisy": true}
+  - {"id": "purifier_01", "type": "purifier", "room": "거실", "substrate": "virtual", "commands": [{"cmd": "mode", "value_schema": {"mode": {"enum": ["auto", "sleep", "deodorize"], "default": "auto"}}}, {"cmd": "wind_strength", "value_schema": {"level": {"enum": ["auto", "low", "mid", "high"], "default": "auto"}}}, {"cmd": "off"}], "events": ["changed", "odor_normal"], "never": [], "noisy": false}
+  - {"id": "aircon_01", "type": "air_conditioner", "room": "거실", "substrate": "virtual", "commands": [{"cmd": "mode", "value_schema": {"mode": {"enum": ["off", "cool", "heat", "auto", "air_clean"], "default": "auto"}}}, {"cmd": "temperature", "value_schema": {"celsius": {"range": [18, 30], "default": 24}}}, {"cmd": "wind_strength", "value_schema": {"level": {"enum": ["auto", "low", "mid", "high"], "default": "auto"}}}, {"cmd": "power_save"}], "events": ["changed"], "never": [], "noisy": false}
+  - {"id": "speaker_01", "type": "speaker", "room": "거실", "label": "ThinQ ON 스피커", "substrate": "virtual", "commands": [{"cmd": "play_music", "value_schema": "text"}, {"cmd": "volume", "value_schema": {"percent": {"range": [0, 100], "default": 40}}}, {"cmd": "off"}], "events": ["changed"], "never": ["purchase"], "noisy": true}
+  - {"id": "cooktop_01", "type": "cooktop", "room": "주방", "substrate": "virtual", "commands": [{"cmd": "child_lock"}], "events": ["changed"], "never": ["heat"], "noisy": false}
+  - {"id": "oven_01", "type": "oven", "room": "주방", "substrate": "virtual", "commands": [{"cmd": "set_cook_standby", "value_schema": {"temp_c": {"range": [40, 250], "default": 180}, "minutes": {"range": [1, 180], "default": 20}, "cook_mode": {"enum": ["convection", "air_fry", "grill", "bake"], "default": "convection"}}}], "events": ["started", "stopped"], "never": ["start"], "noisy": false}
+  - {"id": "fridge_01", "type": "fridge", "room": "주방", "substrate": "virtual", "commands": [{"cmd": "show_notice", "value_schema": "text"}, {"cmd": "super_freeze"}], "events": ["door_opened"], "never": [], "noisy": false}
+  - {"id": "plug_kettle", "type": "smart_plug", "room": "주방", "label": "전기포트", "substrate": "virtual", "commands": [{"cmd": "off"}], "events": ["changed"], "never": [], "noisy": false}
+  - {"id": "washer_01", "type": "washer", "room": "주방", "substrate": "virtual", "commands": [{"cmd": "set_course_standby", "value_schema": {"course": {"enum": ["표준", "이불", "울"], "default": "표준"}, "finish_in_hours": {"range": [0, 12], "default": 0}}}], "events": ["started"], "never": ["start"], "noisy": true}
+  - {"id": "dishwasher_01", "type": "dishwasher", "room": "주방", "substrate": "virtual", "commands": [{"cmd": "set_course_standby", "value_schema": {"course": {"enum": ["표준", "강력", "절약"], "default": "표준"}, "start_in_hours": {"range": [0, 12], "default": 0}}}], "events": ["started"], "never": ["start"], "noisy": true}
+  - {"id": "rice_cooker_01", "type": "rice_cooker", "room": "주방", "substrate": "virtual", "commands": [{"cmd": "set_cook_standby", "value_schema": {"menu": {"enum": ["백미", "잡곡", "현미"], "default": "백미"}, "finish_in_hours": {"range": [0, 12], "default": 0}}}], "events": ["started"], "never": ["start"], "noisy": false}
+
+calendar:
+  - {id: c1, title: "지아 생일파티 🎂", start: "+2d 14:00", end: "+2d 17:00"}
+  - {id: c2, title: "부모님 저녁 식사", start: "+8d 19:00", end: "+8d 21:00"}
+  - {id: c3, title: "주간 팀 회의", start: "+1d 10:00", end: "+1d 11:00"}
+  - {id: c4, title: "치과 예약", start: "+3d 09:30", end: "+3d 10:30"}
+  - {id: c5, title: "요가", start: "+4d 19:00", end: "+4d 20:00"}
+
+# Optional. 10 or more past orders turn on "unusual items" (spec §8.2); fewer -> "주문 기록이 10개 미만".
+past_orders:
+  - {days_ago: 5, items: [{type: 우유, group: 음·식료품, qty: 1, label: care}, {type: 세탁 세제, qty: 1}, {type: 로션, qty: 1}, {type: 딸기, group: 농축수산물, qty: 1, label: care}]}
+  - {days_ago: 11, items: [{type: 우유, qty: 1, label: care}, {type: 세탁 세제, qty: 1}, {type: 로션, qty: 1}, {type: 딸기, qty: 1, label: care}]}
+  - {days_ago: 17, items: [{type: 우유, qty: 1, label: care}, {type: 세탁 세제, qty: 1}, {type: 로션, qty: 1}, {type: 딸기, qty: 1, label: care}]}
+  - {days_ago: 23, items: [{type: 우유, qty: 1, label: care}, {type: 계란, qty: 1, label: care}]}
+  - {days_ago: 29, items: [{type: 우유, qty: 1, label: care}, {type: 컵케이크 믹스, qty: 1, label: care}, {type: 휘핑크림, qty: 1, label: care}]}
+  - {days_ago: 35, items: [{type: 우유, qty: 1, label: care}, {type: 계란, qty: 1, label: care}]}
+  - {days_ago: 41, items: [{type: 우유, qty: 1, label: care}, {type: 휴지, qty: 1}]}
+  - {days_ago: 47, items: [{type: 우유, qty: 1, label: care}, {type: 계란, qty: 1, label: care}]}
+  - {days_ago: 53, items: [{type: 우유, qty: 1, label: care}, {type: 주방 세제, qty: 1}]}
+  - {days_ago: 59, items: [{type: 우유, qty: 1, label: care}, {type: 계란, qty: 1, label: care}]}
+  - {days_ago: 65, items: [{type: 우유, qty: 1, label: care}, {type: 휴지, qty: 1}]}
+  - {days_ago: 71, items: [{type: 우유, qty: 1, label: care}, {type: 계란, qty: 1, label: care}]}
