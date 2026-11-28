@@ -8,6 +8,7 @@ bundle index, meta. Numbers `n` of `t_{slug}#{n}` start at `episodes.next_task_n
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 import re
 from dataclasses import dataclass, field
@@ -480,17 +481,19 @@ def task_errors(plan: BaseModel, bundles: list[dict]) -> list[tuple[int | None, 
         k = i + 1
         if t.need_id not in needs:
             errs.append((i, f"할 일 {k}의 need_id \"{t.need_id}\": needs에 없다"))
-        if t.way in ("standby", "notice") and t.trigger is not None:
-            errs.append((i, f"할 일 {k}: {t.way}에는 trigger를 쓰지 않는다"))
+        if t.way == "notice" and t.trigger is not None:
+            errs.append((i, f"할 일 {k}: notice에는 trigger를 쓰지 않는다"))
         if t.way == "run" and t.trigger is None:
             errs.append((i, f"할 일 {k}: run에는 trigger가 있어야 한다"))
         if t.trigger is not None and t.trigger.kind in MINUTE_KINDS and t.trigger.minutes is None:
             errs.append((i, f"할 일 {k}: {t.trigger.kind}에는 minutes가 있어야 한다"))
-        if t.need_id in needs and t.way == "run":
+        if t.need_id in needs and t.way in ("run", "standby"):
             bundle = bundles[needs[t.need_id].bundle - 1] if needs[t.need_id].bundle <= len(bundles) else None
             msg = timing_error(t, (bundle or {}).get("use_window"))
             if msg:
                 errs.append((i, f"할 일 {k}: {msg}"))
+        if t.way == "standby" and (t.end_after_start_minutes is not None or t.end_before_end_minutes is not None):
+            errs.append((i, f"할 일 {k}: standby에는 되돌리는 시점을 쓰지 않는다 (사람이 시작하면 끝난다)"))
         if t.way == "standby" and len({a.key.split(".")[0] for a in t.actions}) > 1:
             errs.append((i, f"할 일 {k}: standby는 기기 하나만 쓴다"))
         if t.trigger is not None and t.trigger.kind == "guest_arrived" and t.need_id in needs:
@@ -500,6 +503,14 @@ def task_errors(plan: BaseModel, bundles: list[dict]) -> list[tuple[int | None, 
         if t.slug in seen_slugs:
             errs.append((i, f"할 일 {k}의 slug \"{t.slug}\": 다른 할 일과 겹친다"))
         seen_slugs.add(t.slug)
+    cap = get_config().numbers.max_lines                         # spec §10.7, R63: the LLM chooses which to keep
+    per_bundle: dict[int, int] = {}
+    for t in plan.tasks:
+        if t.need_id in needs:
+            per_bundle[needs[t.need_id].bundle] = per_bundle.get(needs[t.need_id].bundle, 0) + 1
+    for b, count in sorted(per_bundle.items()):
+        if count > cap:
+            errs.append((None, f"의도 {b}의 할 일이 {count}개다. {cap}개까지만 쓴다. 덜 중요한 것을 뺀다"))
     return errs
 
 
@@ -678,16 +689,23 @@ def _situation_drafts(plan: BaseModel, bad: set[int], active: list[int], bundles
             continue
         w = whens.get(k)
         trigger, end = _trigger_end(t, actions, w, catalog, n, cfg)
-        drafts.append((k, need_order[t.need_id], Draft(
+        drafts.append((k, i, Draft(
             task_id=_slug(t.slug), source="situation", way=t.way, actions=actions, trigger=trigger, end=end,
             need=needs[t.need_id].need, line=t.line, target_room=t.target_room, bundle=active[k],
             end_after_start_minutes=t.end_after_start_minutes, meta={"slug": _slug(t.slug)})))
-    drafts.sort(key=lambda x: (x[0], x[1]))
+    patterns = cfg.command_policy.get("protective", [])
+    safety = {id(d): _protective(d.actions, catalog, patterns) for _, _, d in drafts}
+    kept_ids: set[int] = set()
+    by_bundle: dict[int, list[Draft]] = {}
+    for k, _, d in sorted(drafts, key=lambda x: (x[0], not safety[id(x[2])], x[1])):
+        by_bundle.setdefault(k, [])
+        if len(by_bundle[k]) < n.max_lines:                      # safety first, then the order the LLM wrote
+            by_bundle[k].append(d)
+            kept_ids.add(id(d))
+    drafts.sort(key=lambda x: (x[0], need_order[plan.tasks[x[1]].need_id], x[1]))
     out: list[Draft] = []
-    per_bundle: dict[int, int] = {}
     for k, _, d in drafts:
-        per_bundle[k] = per_bundle.get(k, 0) + 1
-        if per_bundle[k] > n.max_lines:
+        if id(d) not in kept_ids:
             result.dropped.append({"slug": d.task_id, "reason": "max_lines"})
             result.dropped_detail[d.task_id] = {"line": d.line, "way": d.way, "need": d.need,
                                                 "actions": [f"{a['device']}.{a['cmd']}" for a in d.actions]}
@@ -735,24 +753,49 @@ def _trigger_end(t: BaseModel, actions: list[dict], w: When | None, catalog: Cat
         return {"event": "package.brought_in", "released": False}, item_end(fridge["end"], cfg)
     if t.way == "standby":
         dev = catalog.get(actions[0]["device"])
-        end: dict = {"on": f"{dev.type}.started", "by": "user"}
-        if w:
-            end["or_time"] = clock.iso(w.end)
-            return {"time": clock.iso(w.start)}, {**end, "restore": False}
-        end["or_after"] = clock.duration(n.standby_max_min)
-        return {"event": "package.brought_in", "released": False}, {**end, "restore": False}
+        end: dict = {"on": f"{dev.type}.started", "by": "user", "restore": False}
+        if w is None:
+            end["or_after"] = clock.duration(n.standby_max_min)
+            return {"event": "package.brought_in", "released": False}, end
+        if t.trigger is None:                                     # not chosen: ready at the schedule start
+            return {"time": clock.iso(w.start)}, {**end, "or_time": clock.iso(w.end)}
+        trigger = _run_trigger(t.trigger, w, n)
+        if t.trigger.kind == "event_end":                         # set up after the schedule: waits on its own
+            return trigger, {**end, "or_after": clock.duration(n.standby_max_min)}
+        return trigger, {**end, "or_time": clock.iso(w.end)}
     # run
     cleaner_only = all(catalog.get(a["device"]).type == "cleaner" for a in actions)
     if w is None:
         return None, {"on": "event_end", "restore": not cleaner_only}       # held: filled when a time is found
-    kind = t.trigger.kind
+    trigger = _run_trigger(t.trigger, w, n)
+    if t.trigger.kind == "event_end":
+        return trigger, {"on": "event_end", "after": f"{n.after_event_end_min}m", "restore": True}
+    if t.end_after_start_minutes is not None:
+        return trigger, {"time": clock.iso(w.start + timedelta(minutes=t.end_after_start_minutes)), "restore": True}
+    if getattr(t, "end_before_end_minutes", None) is not None:
+        return trigger, {"time": clock.iso(w.end - timedelta(minutes=t.end_before_end_minutes)), "restore": True}
+    return trigger, {"on": "event_end", "or_time": clock.iso(w.end + timedelta(minutes=n.end_fallback_min)),
+                     "restore": not cleaner_only}
+
+
+def _protective(actions: list[dict], catalog: Catalog, patterns: list[str]) -> bool:
+    """Safety actions (`command_policy.yaml` protective, e.g. child lock, plug off) are kept first at the cap."""
+    for a in actions:
+        dev = catalog.get(a["device"])
+        if any(fnmatch.fnmatchcase(f"{dev.type if dev else '?'}.{a['cmd']}", p) for p in patterns):
+            return True
+    return False
+
+
+def _run_trigger(trig: BaseModel, w: When, n) -> dict:
+    """The moment the LLM chose (§10.4), on the schedule's start and end."""
+    kind = trig.kind
     if kind == "before_start":
-        minutes = n.before_start_default_min if cfg.demo else t.trigger.minutes
-        trigger: dict = {"time": clock.iso(w.start - timedelta(minutes=minutes))}
+        trigger: dict = {"time": clock.iso(w.start - timedelta(minutes=trig.minutes))}
     elif kind == "after_start":
-        trigger = {"time": clock.iso(w.start + timedelta(minutes=t.trigger.minutes))}
+        trigger = {"time": clock.iso(w.start + timedelta(minutes=trig.minutes))}
     elif kind == "before_end":
-        trigger = {"time": clock.iso(w.end - timedelta(minutes=t.trigger.minutes))}
+        trigger = {"time": clock.iso(w.end - timedelta(minutes=trig.minutes))}
     elif kind == "guest_arrived":
         trigger = {"event": "guest_arrived", "first_only": True,
                    "window": {"from": clock.iso(w.start - timedelta(minutes=n.guest_window_before_min)),
@@ -761,13 +804,7 @@ def _trigger_end(t: BaseModel, actions: list[dict], w: When | None, catalog: Cat
         trigger = {"event": "event_end", "first_only": True,
                    "window": {"from": clock.iso(w.start),
                               "to": clock.iso(w.end + timedelta(minutes=n.end_fallback_min))}}
-        return trigger, {"on": "event_end", "after": f"{n.after_event_end_min}m", "restore": True}
-    if t.end_after_start_minutes is not None:
-        return trigger, {"time": clock.iso(w.start + timedelta(minutes=t.end_after_start_minutes)), "restore": True}
-    if getattr(t, "end_before_end_minutes", None) is not None:
-        return trigger, {"time": clock.iso(w.end - timedelta(minutes=t.end_before_end_minutes)), "restore": True}
-    return trigger, {"on": "event_end", "or_time": clock.iso(w.end + timedelta(minutes=n.end_fallback_min)),
-                     "restore": not cleaner_only}
+    return trigger
 
 
 def public_words(bundles: list[dict], lists: KbLists) -> set[str]:

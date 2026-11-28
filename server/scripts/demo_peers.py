@@ -33,6 +33,8 @@ SIM_BASE = ROOT / "simulator" / "spira_simulator" / "profiles" / "ep_9031.json"
 ROOMS = {"현관": "entrance", "거실": "living_room", "주방": "kitchen", "침실": "bedroom",
          "드레스룸": "dressing_room", "다용도실": "utility_room"}
 OFF = {"fixed": {"power": False}}
+# (device type, cmd) -> mapping onto a property the Simulator's house already draws
+SIM_MAPPINGS = {("air_conditioner", "temperature"): {"properties": {"celsius": "target_temp"}}}
 
 
 def _field_schema(rule: dict) -> tuple[dict, object]:
@@ -53,6 +55,32 @@ def _binding(cmd: dict) -> object:
     if schema == "text":
         return cmd["cmd"]
     return {"properties": {name: name for name in schema}}
+
+
+def _fits(mapping: object, schema: object) -> bool:
+    """The hub's own check (hub/spira_hub/config.py check_mapping): does this mapping cover the value schema?"""
+    if isinstance(mapping, str):
+        return bool(mapping) and schema is not None
+    if not isinstance(mapping, dict) or len(mapping) != 1:
+        return False
+    if "fixed" in mapping:
+        return schema is None
+    props = mapping.get("properties")
+    return isinstance(props, dict) and isinstance(schema, dict) and props.keys() == schema.keys()
+
+
+def _widen(prop: dict, value_schema: dict) -> None:
+    """A Simulator property that takes the command's whole value object (string mapping) also takes the fields the
+    demo home adds: the object branch sharing a field with the command gets every field, all required."""
+    fields = {name: _field_schema(rule)[0] for name, rule in value_schema.items()}
+    schema = prop["schema"]
+    kind = schema.get("type")
+    branches = [schema] if kind == "object" or (isinstance(kind, list) and "object" in kind) else [
+        b for b in schema.get("anyOf", []) + schema.get("oneOf", []) if b.get("type") == "object"]
+    for branch in branches:
+        if set(branch.get("properties", {})) & set(fields):
+            branch["properties"] = {**branch.get("properties", {}), **fields}
+            branch["required"] = sorted(set(branch.get("required", [])) | set(fields))
 
 
 def _properties(device: dict, bindings: dict) -> dict:
@@ -85,7 +113,13 @@ def installation(devices: dict) -> dict:
     for d in body["devices"]:
         d["substrate"] = "virtual"
         known = base["bindings"].get(d["id"], {})
-        commands = {c["cmd"]: known.get("commands", {}).get(c["cmd"]) or _binding(c) for c in d["commands"]}
+        commands = {}
+        for c in d["commands"]:
+            mapping = known.get("commands", {}).get(c["cmd"])
+            commands[c["cmd"]] = mapping if _fits(mapping, c.get("value_schema")) else _binding(c)
+        for c in d["commands"]:
+            if (d["type"], c["cmd"]) in SIM_MAPPINGS and c["cmd"] not in known.get("commands", {}):
+                commands[c["cmd"]] = SIM_MAPPINGS[(d["type"], c["cmd"])]
         if d["type"] == "styler":                              # the Simulator's styler takes {"course": …}
             commands["set_course_standby"] = "course_standby"
         bindings[d["id"]] = {"target": known.get("target", f"mqtt:{d['id']}"), "commands": commands}
@@ -116,11 +150,10 @@ def profile(devices: dict, household_id: str, bindings: dict) -> dict:
                 old["schema"]["enum"] = prop["schema"]["enum"]
                 if old["initial"] not in prop["schema"]["enum"]:
                     old["initial"] = prop["initial"]
-        if d["type"] == "styler" and "course_standby" in dev["properties"]:
-            courses = [c for c in d["commands"] if c["cmd"] == "set_course_standby"]
-            if courses:
-                rule = dev["properties"]["course_standby"]["schema"]["properties"]["course"]
-                rule["enum"] = list(courses[0]["value_schema"]["course"]["enum"])
+        for c in d["commands"]:
+            mapping = bindings[d["id"]]["commands"][c["cmd"]]
+            if isinstance(mapping, str) and isinstance(c.get("value_schema"), dict) and mapping in dev["properties"]:
+                _widen(dev["properties"][mapping], c["value_schema"])
         dev["commands"] = [c["cmd"] for c in d["commands"]]
     return out
 
