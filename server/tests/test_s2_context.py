@@ -113,6 +113,8 @@ def test_kb_neighbours_counts_and_examples(kb):
     assert [r["sim"] for r in rec["top"]] == rec["sims"][: len(rec["top"])]
     assert {r["case_id"] for r in rec["top"] if r["used"]} <= set(ctx["snapshot"])
     assert set(rec["top"][0]) == {"case_id", "sim", "score", "intent_id", "intent_text", "items", "used"}
+    assert [e["case_id"] for e in rec["examples"]] == [e["case_id"] for e in ctx["for_intent"]["kb_neighbors"]["examples"]]
+    assert all(e["sim"] in rec["sims"] for e in rec["examples"])          # the shell shows each S3 example's similarity
     from spira_server.pipeline.s3_intent import build_intent_message
     items = [{"item_id": "it_1", "type": "딸기", "qty": 2, "attributes": []}]
     assert build_intent_message(ctx, items) == build_intent_message({"for_intent": ctx["for_intent"]}, items)

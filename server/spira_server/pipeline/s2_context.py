@@ -141,11 +141,12 @@ def kb_neighbors(types: list[str], calendar: list[dict], household_types: list[s
     home = settings.home_context == "on"
     block, snapshot = summarize_neighbors(cases, types, calendar, household_types, home=home, n=n, lists=lists,
                                           sim_floor=n.sim_floor, max_use=n.max_use, base=base_rates(settings, n))
-    return block, snapshot, search_record(cases, snapshot, calendar, household_types, home=home, n=n)
+    reps = [e["case_id"] for e in block.get("examples") or []]
+    return block, snapshot, search_record(cases, snapshot, calendar, household_types, home=home, n=n, examples=reps)
 
 
 def search_record(cases: list[KbCase], used: list[str], calendar: list[dict], household_types: list[str], *,
-                  home: bool, n) -> dict:
+                  home: bool, n, examples: list[str] | None = None) -> dict:
     """What the KB search returned, kept for display and replay only (§8.3 step 9). S3 never reads it."""
     cal_tags = {t for e in calendar for t in e["tags"]}
     house = set(household_types)
@@ -158,7 +159,9 @@ def search_record(cases: list[KbCase], used: list[str], calendar: list[dict], ho
                     "intent_id": c.intent_id, "intent_text": c.intent_text, "items": sorted(c.items),
                     "used": c.case_id in kept})
     return {"searched": len(cases), "sim_floor": n.sim_floor, "above_floor": sum(1 for c in cases if c.sim > n.sim_floor),
-            "used": len(kept), "sims": [round(c.sim, 4) for c in by_sim], "top": top}
+            "used": len(kept), "sims": [round(c.sim, 4) for c in by_sim], "top": top,
+            "examples": [{"case_id": c.case_id, "intent_id": c.intent_id, "sim": round(c.sim, 4)}
+                         for cid in examples or [] for c in cases if c.case_id == cid]}
 
 
 _BASE: dict[tuple[int, float], tuple[float, dict[str, int]]] = {}
